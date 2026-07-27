@@ -1,0 +1,21 @@
+{
+  "name": "forgedesk",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run start:dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev:agent": "npm run dev --workspace=apps/agent",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "docker:dev": "docker compose -f docker/docker-compose.dev.yml up -d"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
