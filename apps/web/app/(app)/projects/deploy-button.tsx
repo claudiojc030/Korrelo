@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { apiFetch } from "../../lib/api-client";
+import { Rocket, Loader2 } from "lucide-react";
+import { apiFetch } from "../../../lib/api-client";
 
 export function DeployButton({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -27,15 +28,16 @@ export function DeployButton({ projectId }: { projectId: string }) {
   }
 
   return (
-    <div className="mt-2">
+    <div className="flex flex-col gap-1">
       <button
         onClick={handleDeploy}
         disabled={loading}
-        className="rounded-md border border-neutral-700 px-3 py-1 text-xs hover:bg-neutral-800 disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:opacity-85 disabled:opacity-50"
       >
+        {loading ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} strokeWidth={1.75} />}
         {loading ? "Fazendo deploy..." : "Deploy"}
       </button>
-      {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+      {error && <p className="text-[12px] text-destructive">{error}</p>}
     </div>
   );
 }

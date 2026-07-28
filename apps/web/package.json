@@ -12,6 +12,7 @@
     "@forgedesk/shared-types": "0.1.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
+    "lucide-react": "^0.446.0",
     "next": "^14.2.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

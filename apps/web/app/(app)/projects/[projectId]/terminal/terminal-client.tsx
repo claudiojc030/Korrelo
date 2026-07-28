@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
-import { getTokenClient } from "../../../../lib/auth-cookie-client";
+import { getTokenClient } from "../../../../../lib/auth-cookie-client";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -28,7 +28,13 @@ export function TerminalClient({ projectId }: { projectId: string }) {
       term = new Terminal({
         convertEol: true,
         fontSize: 13,
-        theme: { background: "#0a0a0a", foreground: "#e5e5e5" },
+        fontFamily: "var(--font-mono), ui-monospace, monospace",
+        theme: {
+          background: "#0b1120",
+          foreground: "#f8fafc",
+          cursor: "#22c55e",
+          selectionBackground: "#22c55e40",
+        },
       });
       fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
@@ -55,5 +61,9 @@ export function TerminalClient({ projectId }: { projectId: string }) {
     };
   }, [projectId]);
 
-  return <div ref={containerRef} className="mx-auto h-[80vh] w-full max-w-4xl p-4" />;
+  return (
+    <div className="h-full overflow-hidden rounded-xl border border-border-subtle bg-[#0b1120] p-3">
+      <div ref={containerRef} className="h-full w-full" />
+    </div>
+  );
 }
