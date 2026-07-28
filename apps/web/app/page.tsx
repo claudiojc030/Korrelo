@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { GithubConnectButton } from "./github-connect-button";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -44,6 +45,10 @@ export default async function Home() {
       ) : (
         <GithubConnectButton />
       )}
+
+      <Link href="/projects" className="text-sm text-neutral-400 underline hover:text-neutral-200">
+        Ver projetos
+      </Link>
     </main>
   );
 }
