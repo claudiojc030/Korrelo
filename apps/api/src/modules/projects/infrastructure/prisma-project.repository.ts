@@ -27,6 +27,8 @@ export class PrismaProjectRepository implements ProjectRepository {
         repoUrl: project.repoUrl,
         detectedStack: project.detectedStack,
         status: project.status,
+        assignedPort: project.assignedPort,
+        containerName: project.containerName,
         createdAt: project.createdAt,
       },
       update: {
@@ -34,6 +36,8 @@ export class PrismaProjectRepository implements ProjectRepository {
         repoUrl: project.repoUrl,
         detectedStack: project.detectedStack,
         status: project.status,
+        assignedPort: project.assignedPort,
+        containerName: project.containerName,
       },
     });
     return this.toDomain(row);
@@ -45,6 +49,8 @@ export class PrismaProjectRepository implements ProjectRepository {
     repoUrl: string;
     detectedStack: string | null;
     status: string;
+    assignedPort: number | null;
+    containerName: string | null;
     createdAt: Date;
   }): Project {
     return new Project(
@@ -53,6 +59,8 @@ export class PrismaProjectRepository implements ProjectRepository {
       row.repoUrl,
       row.detectedStack,
       row.status as ProjectStatus,
+      row.assignedPort,
+      row.containerName,
       row.createdAt,
     );
   }

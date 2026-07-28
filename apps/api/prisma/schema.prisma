@@ -13,6 +13,8 @@ model Project {
   repoUrl        String
   detectedStack  String?
   status         String   @default("detected")
+  assignedPort   Int?
+  containerName  String?
   createdAt      DateTime @default(now())
 }
 

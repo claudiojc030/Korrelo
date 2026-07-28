@@ -1,5 +1,4 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import * as path from "node:path";
 import type { Project } from "../domain/project.entity";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { REPOSITORY_CLONER, type RepositoryCloner } from "../domain/repository-cloner";
@@ -9,8 +8,7 @@ import {
   GITHUB_INSTALLATION_REPOSITORY,
   type GithubInstallationRepository,
 } from "../../github/domain/github-installation.repository";
-
-const WORKSPACE_DIR = process.env.FORGEDESK_WORKSPACE_DIR ?? path.join(process.cwd(), "workspace");
+import { getProjectWorkspacePath } from "../infrastructure/workspace-paths";
 
 @Injectable()
 export class ImportProjectUseCase {
@@ -29,7 +27,7 @@ export class ImportProjectUseCase {
       throw new NotFoundException(`Projeto ${projectId} não encontrado`);
     }
 
-    const destPath = path.join(WORKSPACE_DIR, project.id);
+    const destPath = getProjectWorkspacePath(project.id);
     const accessToken = await this.resolveGithubAccessToken();
     await this.cloner.cloneOrUpdate(project.repoUrl, destPath, accessToken);
 

@@ -1,5 +1,6 @@
 import type { DetectedStack, Project } from "@forgedesk/shared-types";
 import { ImportFromGithub } from "./import-from-github";
+import { DeployButton } from "./deploy-button";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -45,6 +46,18 @@ function ProjectCard({ project }: { project: Project }) {
           {stack.packageManager ? ` · ${stack.packageManager}` : ""}
           {stack.recommendedPort ? ` · porta ${stack.recommendedPort}` : ""}
         </p>
+      )}
+      {project.status === "running" && project.assignedPort ? (
+        <a
+          href={`http://localhost:${project.assignedPort}`}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-2 inline-block text-sm text-green-400 underline"
+        >
+          Rodando em localhost:{project.assignedPort}
+        </a>
+      ) : (
+        stack && <DeployButton projectId={project.id} />
       )}
     </li>
   );

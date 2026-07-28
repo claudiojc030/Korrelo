@@ -8,20 +8,33 @@ interface FrameworkRule {
   framework: string;
   dependency: string;
   defaultPort: number;
-  startCommand: string;
-  buildCommand: string | null;
+  startScript: string;
+  buildScript: string | null;
 }
 
 const NODE_FRAMEWORK_RULES: FrameworkRule[] = [
-  { framework: "Next.js", dependency: "next", defaultPort: 3000, startCommand: "npm run start", buildCommand: "npm run build" },
-  { framework: "NestJS", dependency: "@nestjs/core", defaultPort: 3000, startCommand: "npm run start:prod", buildCommand: "npm run build" },
-  { framework: "Angular", dependency: "@angular/core", defaultPort: 4200, startCommand: "npm run start", buildCommand: "npm run build" },
-  { framework: "Nuxt", dependency: "nuxt", defaultPort: 3000, startCommand: "npm run start", buildCommand: "npm run build" },
-  { framework: "Vue", dependency: "vue", defaultPort: 5173, startCommand: "npm run preview", buildCommand: "npm run build" },
-  { framework: "Fastify", dependency: "fastify", defaultPort: 3000, startCommand: "npm run start", buildCommand: null },
-  { framework: "Express", dependency: "express", defaultPort: 3000, startCommand: "npm run start", buildCommand: null },
-  { framework: "React", dependency: "react", defaultPort: 3000, startCommand: "npm run start", buildCommand: "npm run build" },
+  { framework: "Next.js", dependency: "next", defaultPort: 3000, startScript: "start", buildScript: "build" },
+  { framework: "NestJS", dependency: "@nestjs/core", defaultPort: 3000, startScript: "start:prod", buildScript: "build" },
+  { framework: "Angular", dependency: "@angular/core", defaultPort: 4200, startScript: "start", buildScript: "build" },
+  { framework: "Nuxt", dependency: "nuxt", defaultPort: 3000, startScript: "start", buildScript: "build" },
+  { framework: "Vue", dependency: "vue", defaultPort: 5173, startScript: "preview", buildScript: "build" },
+  { framework: "Fastify", dependency: "fastify", defaultPort: 3000, startScript: "start", buildScript: null },
+  { framework: "Express", dependency: "express", defaultPort: 3000, startScript: "start", buildScript: null },
+  { framework: "React", dependency: "react", defaultPort: 3000, startScript: "start", buildScript: "build" },
 ];
+
+function scriptCommand(packageManager: string, script: string): string {
+  switch (packageManager) {
+    case "yarn":
+      return `yarn ${script}`;
+    case "pnpm":
+      return `pnpm ${script}`;
+    case "bun":
+      return `bun run ${script}`;
+    default:
+      return `npm run ${script}`;
+  }
+}
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
@@ -94,7 +107,7 @@ export class FileBasedStackDetector implements StackDetector {
         framework: null,
         packageManager,
         recommendedPort: 3000,
-        startCommand: "npm run start",
+        startCommand: scriptCommand(packageManager, "start"),
         buildCommand: null,
       };
     }
@@ -104,8 +117,8 @@ export class FileBasedStackDetector implements StackDetector {
       framework: rule.framework,
       packageManager,
       recommendedPort: rule.defaultPort,
-      startCommand: rule.startCommand,
-      buildCommand: rule.buildCommand,
+      startCommand: scriptCommand(packageManager, rule.startScript),
+      buildCommand: rule.buildScript ? scriptCommand(packageManager, rule.buildScript) : null,
     };
   }
 
