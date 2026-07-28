@@ -4,6 +4,7 @@ import { CONTAINER_MEMORY_LIMIT_MB, type ContainerSummary, type Project, type Sy
 import { MetricTile } from "./metric-tile";
 import { GithubConnectButton } from "../../github-connect-button";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
+import { AutoRefresh } from "../../../components/auto-refresh";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -78,11 +79,16 @@ export default async function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-10">
+      <AutoRefresh intervalMs={4000} />
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
-          <p className="mt-0.5 text-[13.5px] text-muted-foreground">
-            Estado do servidor em tempo real.
+          <p className="mt-0.5 flex items-center gap-1.5 text-[13.5px] text-muted-foreground">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
+            </span>
+            Atualiza a cada 4s
           </p>
         </div>
         {metrics && (
