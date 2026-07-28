@@ -20,4 +20,15 @@ export class Project {
       new Date(),
     );
   }
+
+  withDetectedStack(detectedStackJson: string): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      detectedStackJson,
+      "configuring",
+      this.createdAt,
+    );
+  }
 }

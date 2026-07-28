@@ -13,6 +13,11 @@ export class PrismaProjectRepository implements ProjectRepository {
     return rows.map(this.toDomain);
   }
 
+  async findById(id: string): Promise<Project | null> {
+    const row = await this.prisma.project.findUnique({ where: { id } });
+    return row ? this.toDomain(row) : null;
+  }
+
   async save(project: Project): Promise<Project> {
     const row = await this.prisma.project.upsert({
       where: { id: project.id },
