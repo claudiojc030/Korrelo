@@ -1,5 +1,7 @@
 import type { ProjectStatus } from "@forgedesk/shared-types";
 
+export type DomainSslStatus = "none" | "pending" | "active" | "failed";
+
 export class Project {
   constructor(
     public readonly id: string,
@@ -11,6 +13,8 @@ export class Project {
     public readonly containerName: string | null,
     public readonly terminalEnabled: boolean,
     public readonly databaseEnabled: boolean,
+    public readonly customDomain: string | null,
+    public readonly domainSslStatus: DomainSslStatus,
     public readonly createdAt: Date,
   ) {}
 
@@ -25,6 +29,8 @@ export class Project {
       null,
       true,
       true,
+      null,
+      "none",
       new Date(),
     );
   }
@@ -40,6 +46,8 @@ export class Project {
       this.containerName,
       this.terminalEnabled,
       this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
       this.createdAt,
     );
   }
@@ -55,6 +63,8 @@ export class Project {
       containerName,
       this.terminalEnabled,
       this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
       this.createdAt,
     );
   }
@@ -70,6 +80,8 @@ export class Project {
       this.containerName,
       this.terminalEnabled,
       this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
       this.createdAt,
     );
   }
@@ -85,6 +97,25 @@ export class Project {
       this.containerName,
       terminalEnabled,
       databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      this.createdAt,
+    );
+  }
+
+  withDomain(customDomain: string | null, domainSslStatus: DomainSslStatus): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      customDomain,
+      domainSslStatus,
       this.createdAt,
     );
   }

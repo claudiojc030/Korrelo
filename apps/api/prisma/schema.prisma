@@ -17,6 +17,8 @@ model Project {
   containerName    String?
   terminalEnabled  Boolean  @default(true)
   databaseEnabled  Boolean  @default(true)
+  customDomain     String?  @unique
+  domainSslStatus  String   @default("none")
   createdAt        DateTime @default(now())
   envVars          EnvVar[]
   managedDatabase  ManagedDatabase?

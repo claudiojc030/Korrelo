@@ -56,6 +56,48 @@ else
   echo "PM2 já instalado."
 fi
 
+# --- nginx + certbot (sempre, mesmo sem domínio pro ForgeDesk em si) --------
+# Isso é o motor de reverse-proxy + TLS que os PROJETOS implantados pelo
+# ForgeDesk vão usar quando você anexar um domínio a cada um deles (aba
+# Resumo → Domínio personalizado). O ForgeDesk continua acessível pelo IP
+# puro nas portas 3000/3001 independente disso.
+log "Instalando nginx + certbot"
+sudo apt-get install -y nginx certbot python3-certbot-nginx
+
+log "Preparando diretório de sites por projeto"
+FORGEDESK_SITES_DIR=/etc/nginx/forgedesk-sites
+sudo mkdir -p "$FORGEDESK_SITES_DIR"
+sudo chown "$USER":"$USER" "$FORGEDESK_SITES_DIR"
+if ! grep -q "forgedesk-sites" /etc/nginx/nginx.conf; then
+  sudo sed -i "/include \/etc\/nginx\/conf.d\/\*.conf;/a\\	include ${FORGEDESK_SITES_DIR}/*.conf;" /etc/nginx/nginx.conf
+  sudo nginx -t
+  sudo systemctl reload nginx
+  echo "nginx.conf atualizado pra incluir ${FORGEDESK_SITES_DIR}/*.conf"
+else
+  echo "nginx.conf já inclui forgedesk-sites — pulando."
+fi
+
+log "Configurando sudo restrito (só reload do nginx + certbot)"
+# O Core roda como usuário sem privilégio de propósito. Essas duas linhas são
+# a ÚNICA elevação que ele ganha — nada além de recarregar o nginx e rodar o
+# certbot (usado quando um domínio é anexado a um projeto pela API). O
+# certbot precisa de argumentos livres (*) porque cada emissão passa domínio/
+# e-mail diferentes; ainda assim ele só sabe emitir/renovar certificado, não
+# dá acesso geral de root.
+SYSTEMCTL_BIN=$(command -v systemctl)
+CERTBOT_BIN=$(command -v certbot)
+SUDOERS_TMP=$(mktemp)
+echo "$USER ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} reload nginx, ${CERTBOT_BIN} *" > "$SUDOERS_TMP"
+if sudo visudo -c -f "$SUDOERS_TMP" > /dev/null 2>&1; then
+  sudo install -m 440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/forgedesk
+  echo "Regra criada em /etc/sudoers.d/forgedesk."
+else
+  echo "Regra de sudoers gerada é inválida — abortando sem tocar em /etc/sudoers.d." >&2
+  rm -f "$SUDOERS_TMP"
+  exit 1
+fi
+rm -f "$SUDOERS_TMP"
+
 log "Instalando dependências do monorepo"
 npm install
 
@@ -63,25 +105,20 @@ log "Buildando pacotes compartilhados e a API"
 npm run build --workspace=packages/shared-types
 npm run build --workspace=apps/api
 
-# --- Domínio e HTTPS -------------------------------------------------------
-# Let's Encrypt exige um domínio real resolvendo pro IP desta VPS *antes* de
-# rodar o certbot — não funciona com IP puro. Perguntamos aqui porque a
-# resposta decide o NEXT_PUBLIC_API_URL (embutido no build da Web a seguir),
-# as URLs do .env da API, e as regras do firewall lá na frente.
+# --- Domínio do ForgeDesk em si (opcional) ---------------------------------
+# Isso é só pra você acessar o painel do ForgeDesk por um domínio em vez do
+# IP puro — totalmente opcional, o resto do script funciona sem isso.
 DOMAIN=""
 LETSENCRYPT_EMAIL=""
 PUBLIC_IP=$(curl -s ifconfig.me || echo "SEU_IP")
 
-log "Configuração de domínio/HTTPS"
-read -rp "Domínio que já aponta pro IP desta VPS ($PUBLIC_IP)? (deixe em branco pra pular HTTPS por agora): " DOMAIN
+log "Domínio do próprio ForgeDesk (opcional)"
+read -rp "Domínio pra acessar o painel do ForgeDesk? (deixe em branco pra usar só http://${PUBLIC_IP}:3000): " DOMAIN
 if [ -n "$DOMAIN" ]; then
   read -rp "E-mail pra avisos de renovação do Let's Encrypt: " LETSENCRYPT_EMAIL
   BASE_WEB_URL="https://${DOMAIN}"
   BASE_API_URL="https://${DOMAIN}/api"
 else
-  warn "Sem domínio: a API e a Web ficam expostas em HTTP puro, direto nas portas 3000/3001."
-  warn "Isso serve pra testar, mas não é seguro pra uso real — rode este script de novo depois"
-  warn "com um domínio assim que tiver um, pra ligar nginx + TLS de verdade."
   BASE_WEB_URL="http://${PUBLIC_IP}:3000"
   BASE_API_URL="http://${PUBLIC_IP}:3001"
 fi
@@ -118,14 +155,9 @@ log "Rodando migrations do banco (produção, não-interativo)"
 
 log "Configurando firewall (ufw)"
 sudo ufw allow OpenSSH
-if [ -n "$DOMAIN" ]; then
-  # Com nginx na frente, as portas 3000/3001 não precisam (e não devem) ficar
-  # expostas — só 80/443 são alcançáveis de fora.
-  sudo ufw allow "Nginx Full"
-else
-  sudo ufw allow 3000/tcp   # Web
-  sudo ufw allow 3001/tcp   # API
-fi
+sudo ufw allow "Nginx Full"  # 80/443 — pros domínios dos projetos e/ou do ForgeDesk
+sudo ufw allow 3000/tcp      # Web do ForgeDesk direto pelo IP
+sudo ufw allow 3001/tcp      # API do ForgeDesk direto pelo IP
 sudo ufw --force enable
 
 log "Subindo o Core via PM2"
@@ -134,9 +166,7 @@ pm2 save
 pm2 startup systemd -u "$USER" --hp "$HOME" | tail -1 | sudo bash || true
 
 if [ -n "$DOMAIN" ]; then
-  log "Instalando nginx + certbot"
-  sudo apt-get install -y nginx certbot python3-certbot-nginx
-
+  log "Configurando site + TLS do ForgeDesk (${DOMAIN})"
   NGINX_SITE=/etc/nginx/sites-available/forgedesk
   sudo tee "$NGINX_SITE" > /dev/null <<NGINXCONF
 server {
@@ -174,7 +204,7 @@ NGINXCONF
   sudo nginx -t
   sudo systemctl reload nginx
 
-  log "Emitindo certificado TLS (Let's Encrypt)"
+  log "Emitindo certificado TLS do ForgeDesk (Let's Encrypt)"
   # --nginx edita o server block acima pra 443 + redirect automaticamente.
   # certbot já instala o timer de renovação automática (systemd), não precisa de cron.
   sudo certbot --nginx -d "$DOMAIN" -m "$LETSENCRYPT_EMAIL" --agree-tos --redirect -n
@@ -183,4 +213,7 @@ NGINXCONF
 else
   log "Pronto! Acesse http://${PUBLIC_IP}:3000 pra criar a conta de admin."
 fi
-echo "Lembre-se de atualizar as URLs do GitHub App (Homepage/Callback) pra apontar pra ${BASE_WEB_URL}."
+echo "Pra domínio de PROJETOS implantados: use a aba Resumo → Domínio personalizado, dentro do próprio ForgeDesk."
+if [ -n "$DOMAIN" ]; then
+  echo "Lembre-se de atualizar as URLs do GitHub App (Homepage/Callback) pra apontar pra ${BASE_WEB_URL}."
+fi

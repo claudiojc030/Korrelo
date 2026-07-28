@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { ProjectStatus } from "@forgedesk/shared-types";
 import { PrismaService } from "../../../infrastructure/prisma/prisma.service";
-import { Project } from "../domain/project.entity";
+import { Project, type DomainSslStatus } from "../domain/project.entity";
 import type { ProjectRepository } from "../domain/project.repository";
 
 @Injectable()
@@ -18,6 +18,11 @@ export class PrismaProjectRepository implements ProjectRepository {
     return row ? this.toDomain(row) : null;
   }
 
+  async findByCustomDomain(customDomain: string): Promise<Project | null> {
+    const row = await this.prisma.project.findUnique({ where: { customDomain } });
+    return row ? this.toDomain(row) : null;
+  }
+
   async save(project: Project): Promise<Project> {
     const row = await this.prisma.project.upsert({
       where: { id: project.id },
@@ -31,6 +36,8 @@ export class PrismaProjectRepository implements ProjectRepository {
         containerName: project.containerName,
         terminalEnabled: project.terminalEnabled,
         databaseEnabled: project.databaseEnabled,
+        customDomain: project.customDomain,
+        domainSslStatus: project.domainSslStatus,
         createdAt: project.createdAt,
       },
       update: {
@@ -42,6 +49,8 @@ export class PrismaProjectRepository implements ProjectRepository {
         containerName: project.containerName,
         terminalEnabled: project.terminalEnabled,
         databaseEnabled: project.databaseEnabled,
+        customDomain: project.customDomain,
+        domainSslStatus: project.domainSslStatus,
       },
     });
     return this.toDomain(row);
@@ -61,6 +70,8 @@ export class PrismaProjectRepository implements ProjectRepository {
     containerName: string | null;
     terminalEnabled: boolean;
     databaseEnabled: boolean;
+    customDomain: string | null;
+    domainSslStatus: string;
     createdAt: Date;
   }): Project {
     return new Project(
@@ -73,6 +84,8 @@ export class PrismaProjectRepository implements ProjectRepository {
       row.containerName,
       row.terminalEnabled,
       row.databaseEnabled,
+      row.customDomain,
+      row.domainSslStatus as DomainSslStatus,
       row.createdAt,
     );
   }

@@ -1,6 +1,7 @@
 import { ExternalLink, GitBranch, Cpu, MemoryStick, HardDrive } from "lucide-react";
 import { CONTAINER_MEMORY_LIMIT_MB, type DetectedStack, type Project, type SystemMetrics } from "@forgedesk/shared-types";
 import { authHeaderServer } from "../../../../lib/auth-cookie-server";
+import { DomainCard } from "./domain-card";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -122,6 +123,13 @@ export default async function ProjectSummaryPage({ params }: { params: { project
             value={new Date(project.createdAt).toLocaleString("pt-BR")}
           />
         </div>
+
+        <DomainCard
+          projectId={project.id}
+          isDeployed={project.assignedPort != null}
+          customDomain={project.customDomain}
+          domainSslStatus={project.domainSslStatus}
+        />
       </div>
 
       <h2 className="mb-2.5 mt-6 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">

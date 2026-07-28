@@ -16,6 +16,11 @@ export class PrismaUserRepository implements UserRepository {
     return row ? new User(row.id, row.email, row.passwordHash, row.createdAt) : null;
   }
 
+  async findFirst(): Promise<User | null> {
+    const row = await this.prisma.user.findFirst({ orderBy: { createdAt: "asc" } });
+    return row ? new User(row.id, row.email, row.passwordHash, row.createdAt) : null;
+  }
+
   async save(user: User): Promise<User> {
     const row = await this.prisma.user.create({
       data: {

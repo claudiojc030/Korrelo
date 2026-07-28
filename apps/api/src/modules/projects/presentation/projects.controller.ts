@@ -14,11 +14,14 @@ import { DeprovisionDatabaseUseCase } from "../application/deprovision-database.
 import { GetManagedDatabaseUseCase } from "../application/get-managed-database.use-case";
 import { UpdateProjectSettingsUseCase } from "../application/update-project-settings.use-case";
 import { GetProjectLogsUseCase, type LogTarget } from "../application/get-project-logs.use-case";
+import { AttachDomainUseCase } from "../application/attach-domain.use-case";
+import { DetachDomainUseCase } from "../application/detach-domain.use-case";
 import { CreateProjectDto } from "./create-project.dto";
 import { DetectStackDto } from "./detect-stack.dto";
 import { SetEnvVarsDto } from "./set-env-vars.dto";
 import { ProvisionDatabaseDto } from "./provision-database.dto";
 import { UpdateProjectSettingsDto } from "./update-project-settings.dto";
+import { AttachDomainDto } from "./attach-domain.dto";
 
 @Controller("projects")
 export class ProjectsController {
@@ -38,6 +41,8 @@ export class ProjectsController {
     private readonly getManagedDatabase: GetManagedDatabaseUseCase,
     private readonly updateProjectSettings: UpdateProjectSettingsUseCase,
     private readonly getProjectLogs: GetProjectLogsUseCase,
+    private readonly attachDomain: AttachDomainUseCase,
+    private readonly detachDomain: DetachDomainUseCase,
   ) {}
 
   @Get()
@@ -80,6 +85,16 @@ export class ProjectsController {
     const logTarget: LogTarget = target === "database" ? "database" : "app";
     const tailLines = Math.min(Math.max(Number.parseInt(tail ?? "200", 10) || 200, 20), 2000);
     return this.getProjectLogs.execute(id, logTarget, tailLines);
+  }
+
+  @Post(":id/domain")
+  attachDomainEndpoint(@Param("id") id: string, @Body() dto: AttachDomainDto) {
+    return this.attachDomain.execute(id, dto.domain);
+  }
+
+  @Delete(":id/domain")
+  detachDomainEndpoint(@Param("id") id: string) {
+    return this.detachDomain.execute(id);
   }
 
   @Get(":id/database")

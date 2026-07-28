@@ -25,6 +25,6 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: TOKEN_SERVICE, useClass: JsonWebTokenService },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
-  exports: [TOKEN_SERVICE],
+  exports: [TOKEN_SERVICE, USER_REPOSITORY],
 })
 export class AuthModule {}

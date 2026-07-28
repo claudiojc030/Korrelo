@@ -14,6 +14,7 @@ function buildUseCase(overrides?: {
   const repository: UserRepository = {
     count: jest.fn(),
     findByEmail: jest.fn().mockResolvedValue(user),
+    findFirst: jest.fn(),
     save: jest.fn(),
   };
   const passwordHasher: PasswordHasher = {

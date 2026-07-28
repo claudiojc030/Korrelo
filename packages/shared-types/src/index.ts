@@ -1,4 +1,5 @@
 export type ProjectStatus = "detected" | "configuring" | "running" | "stopped" | "failed";
+export type DomainSslStatus = "none" | "pending" | "active" | "failed";
 
 export interface Project {
   id: string;
@@ -10,6 +11,8 @@ export interface Project {
   containerName: string | null;
   terminalEnabled: boolean;
   databaseEnabled: boolean;
+  customDomain: string | null;
+  domainSslStatus: DomainSslStatus;
   createdAt: string;
 }
 
