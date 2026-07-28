@@ -3,6 +3,7 @@ import { ExternalLink, SquareTerminal, FolderGit2 } from "lucide-react";
 import type { DetectedStack, Project } from "@forgedesk/shared-types";
 import { ImportFromGithub } from "./import-from-github";
 import { DeployButton } from "./deploy-button";
+import { DeleteProjectButton } from "./delete-project-button";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
@@ -22,28 +23,33 @@ function parseStack(project: Project): DetectedStack | null {
   }
 }
 
-const STATUS_STYLE: Record<Project["status"], { label: string; dot: string; text: string }> = {
-  detected: { label: "Detectado", dot: "bg-muted-foreground", text: "text-muted-foreground" },
-  configuring: { label: "Configurando", dot: "bg-warning", text: "text-warning" },
-  running: { label: "Rodando", dot: "bg-accent", text: "text-accent" },
-  stopped: { label: "Parado", dot: "bg-muted-foreground", text: "text-muted-foreground" },
-  failed: { label: "Falhou", dot: "bg-destructive", text: "text-destructive" },
+const STATUS_LABEL: Record<Project["status"], string> = {
+  detected: "Detectado",
+  configuring: "Configurando",
+  running: "Rodando",
+  stopped: "Parado",
+  failed: "Falhou",
 };
 
-function ProjectCard({ project }: { project: Project }) {
+function ProjectCard({ project, accent }: { project: Project; accent: "good" | "bad" | "none" }) {
   const stack = parseStack(project);
-  const status = STATUS_STYLE[project.status];
+  const borderClass =
+    accent === "good" ? "border-l-2 border-l-accent" : accent === "bad" ? "border-l-2 border-l-destructive" : "";
 
   return (
-    <li className="flex flex-col rounded-xl border border-border-subtle bg-surface p-4">
+    <li
+      className={`flex flex-col rounded-xl border border-border-subtle bg-surface p-4 ${borderClass}`}
+    >
       <div className="flex items-start justify-between gap-3">
         <p className="truncate font-medium text-foreground">{project.name}</p>
-        <span className={`flex flex-none items-center gap-1.5 text-[12px] font-medium ${status.text}`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
-          {status.label}
-        </span>
+        <DeleteProjectButton projectId={project.id} projectName={project.name} />
       </div>
-      <p className="mt-1 truncate text-[12px] text-muted-foreground">{project.repoUrl}</p>
+      <p className="-mt-1 truncate text-[12px] text-muted-foreground">{project.repoUrl}</p>
+      {project.status !== "running" && (
+        <p className="mt-1 text-[11px] uppercase tracking-wide text-muted-foreground/70">
+          {STATUS_LABEL[project.status]}
+        </p>
+      )}
 
       {stack && (
         <p className="mt-2.5 text-[13px] text-muted-foreground">
@@ -75,19 +81,58 @@ function ProjectCard({ project }: { project: Project }) {
             </Link>
           </>
         ) : (
-          stack && <DeployButton projectId={project.id} />
+          <>
+            {project.status === "failed" && (
+              <span className="text-[12.5px] text-destructive">O deploy falhou.</span>
+            )}
+            {stack && <DeployButton projectId={project.id} />}
+          </>
         )}
       </div>
     </li>
   );
 }
 
+function Section({
+  title,
+  count,
+  accent,
+  projects,
+}: {
+  title: string;
+  count: number;
+  accent: "good" | "bad" | "none";
+  projects: Project[];
+}) {
+  if (projects.length === 0) return null;
+
+  return (
+    <div className="mb-8">
+      <div className="mb-2.5 flex items-center gap-2">
+        <h2 className="text-[13px] font-medium text-muted-foreground">{title}</h2>
+        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+          {count}
+        </span>
+      </div>
+      <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        {projects.map((project) => (
+          <ProjectCard key={project.id} project={project} accent={accent} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export default async function ProjectsPage() {
   const projects = await getProjects();
 
+  const running = projects.filter((p) => p.status === "running");
+  const failed = projects.filter((p) => p.status === "failed");
+  const pending = projects.filter((p) => p.status !== "running" && p.status !== "failed");
+
   return (
     <div className="mx-auto max-w-5xl px-8 py-10">
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Projetos</h1>
           <p className="mt-0.5 text-[13.5px] text-muted-foreground">
@@ -97,19 +142,33 @@ export default async function ProjectsPage() {
         <ImportFromGithub />
       </div>
 
+      {projects.length > 0 && (
+        <p className="mb-8 mt-4 text-[13px] text-muted-foreground">
+          <span className="font-medium text-foreground">{projects.length}</span> projeto
+          {projects.length === 1 ? "" : "s"} ·{" "}
+          <span className="font-medium text-accent">{running.length} rodando</span>
+          {failed.length > 0 && (
+            <>
+              {" "}
+              · <span className="font-medium text-destructive">{failed.length} falhou</span>
+            </>
+          )}
+        </p>
+      )}
+
       {projects.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-16 text-center">
+        <div className="mt-4 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-16 text-center">
           <FolderGit2 size={22} strokeWidth={1.5} className="text-muted-foreground" />
           <p className="text-[13.5px] text-muted-foreground">
             Nenhum projeto ainda — importe um repositório do GitHub pra começar.
           </p>
         </div>
       ) : (
-        <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          {projects.map((project) => (
-            <ProjectCard key={project.id} project={project} />
-          ))}
-        </ul>
+        <>
+          <Section title="Rodando" count={running.length} accent="good" projects={running} />
+          <Section title="Aguardando deploy" count={pending.length} accent="none" projects={pending} />
+          <Section title="Falharam" count={failed.length} accent="bad" projects={failed} />
+        </>
       )}
     </div>
   );

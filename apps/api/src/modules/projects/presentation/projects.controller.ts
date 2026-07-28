@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Post } from "@nestjs/common";
 import { ListProjectsUseCase } from "../application/list-projects.use-case";
 import { CreateProjectUseCase } from "../application/create-project.use-case";
 import { DetectProjectStackUseCase } from "../application/detect-project-stack.use-case";
 import { ImportProjectUseCase } from "../application/import-project.use-case";
 import { DeployProjectUseCase } from "../application/deploy-project.use-case";
+import { DeleteProjectUseCase } from "../application/delete-project.use-case";
 import { CreateProjectDto } from "./create-project.dto";
 import { DetectStackDto } from "./detect-stack.dto";
 
@@ -15,6 +16,7 @@ export class ProjectsController {
     private readonly detectProjectStack: DetectProjectStackUseCase,
     private readonly importProject: ImportProjectUseCase,
     private readonly deployProject: DeployProjectUseCase,
+    private readonly deleteProject: DeleteProjectUseCase,
   ) {}
 
   @Get()
@@ -40,5 +42,11 @@ export class ProjectsController {
   @Post(":id/deploy")
   deploy(@Param("id") id: string) {
     return this.deployProject.execute(id);
+  }
+
+  @Delete(":id")
+  @HttpCode(204)
+  async remove(@Param("id") id: string) {
+    await this.deleteProject.execute(id);
   }
 }

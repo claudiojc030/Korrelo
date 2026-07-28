@@ -6,6 +6,7 @@ import { CreateProjectUseCase } from "./application/create-project.use-case";
 import { DetectProjectStackUseCase } from "./application/detect-project-stack.use-case";
 import { ImportProjectUseCase } from "./application/import-project.use-case";
 import { DeployProjectUseCase } from "./application/deploy-project.use-case";
+import { DeleteProjectUseCase } from "./application/delete-project.use-case";
 import { PrismaProjectRepository } from "./infrastructure/prisma-project.repository";
 import { FileBasedStackDetector } from "./infrastructure/file-based-stack-detector";
 import { SimpleGitRepositoryCloner } from "./infrastructure/simple-git-repository-cloner";
@@ -34,6 +35,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     DetectProjectStackUseCase,
     ImportProjectUseCase,
     DeployProjectUseCase,
+    DeleteProjectUseCase,
     NodeDockerfileGenerator,
     DockerComposeFileBuilder,
     PortAllocator,

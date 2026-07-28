@@ -43,6 +43,10 @@ export class PrismaProjectRepository implements ProjectRepository {
     return this.toDomain(row);
   }
 
+  async delete(id: string): Promise<void> {
+    await this.prisma.project.delete({ where: { id } });
+  }
+
   private toDomain(row: {
     id: string;
     name: string;

@@ -23,4 +23,9 @@ export class InMemoryProjectRepository implements ProjectRepository {
     }
     return project;
   }
+
+  async delete(id: string): Promise<void> {
+    const index = this.projects.findIndex((p) => p.id === id);
+    if (index >= 0) this.projects.splice(index, 1);
+  }
 }
