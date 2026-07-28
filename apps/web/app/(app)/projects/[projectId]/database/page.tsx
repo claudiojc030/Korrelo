@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Database, DatabaseZap, Eye, EyeOff, Loader2, TriangleAlert } from "lucide-react";
+import { Database, DatabaseZap, Eye, EyeOff, Loader2, Play, TriangleAlert } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
 
 type DatabaseType = "postgres" | "redis" | "mongodb" | "custom";
@@ -307,6 +307,10 @@ export default function DatabasePage({ params }: { params: { projectId: string }
         )}
       </p>
 
+      {!isCustom && (
+        <DatabaseBrowser projectId={params.projectId} type={db.type as "postgres" | "redis" | "mongodb"} />
+      )}
+
       <div className="mt-5">
         <button
           onClick={() => setConfirmRemove(true)}
@@ -360,6 +364,190 @@ export default function DatabasePage({ params }: { params: { projectId: string }
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+interface QueryResult {
+  columns: string[];
+  rows: string[][];
+  rowCount: number;
+  notice: string | null;
+}
+
+const QUERY_PLACEHOLDER: Record<"postgres" | "redis" | "mongodb", string> = {
+  postgres: "SELECT * FROM minha_tabela LIMIT 100;",
+  mongodb: "db.minhaColecao.find().limit(20).toArray()",
+  redis: "KEYS *",
+};
+
+function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgres" | "redis" | "mongodb" }) {
+  const [tables, setTables] = useState<string[] | null>(null);
+  const [tablesError, setTablesError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<QueryResult | null>(null);
+  const [queryError, setQueryError] = useState<string | null>(null);
+
+  function loadTables() {
+    setTablesError(null);
+    apiFetch(`/projects/${projectId}/database/tables`)
+      .then(async (res) => {
+        if (!res.ok) {
+          const body = (await res.json().catch(() => ({}))) as { message?: string };
+          throw new Error(body.message ?? "Falha ao listar tabelas.");
+        }
+        return res.json();
+      })
+      .then((data: { tables: string[] }) => setTables(data.tables))
+      .catch((err) => setTablesError(err instanceof Error ? err.message : "Erro desconhecido"));
+  }
+
+  useEffect(() => {
+    loadTables();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  async function handleRunQuery() {
+    if (!query.trim()) return;
+    setRunning(true);
+    setQueryError(null);
+    setResult(null);
+    try {
+      const res = await apiFetch(`/projects/${projectId}/database/query`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error((body as { message?: string }).message ?? "Falha ao executar a query.");
+      }
+      setResult(body as QueryResult);
+    } catch (err) {
+      setQueryError(err instanceof Error ? err.message : "Erro desconhecido");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      handleRunQuery();
+    }
+  }
+
+  const entityLabel = type === "mongodb" ? "Coleções" : type === "redis" ? "Chaves (amostra)" : "Tabelas";
+
+  return (
+    <div className="mt-6">
+      <div className="mb-2 flex items-center gap-2">
+        <Database size={15} strokeWidth={1.75} className="text-foreground" />
+        <h2 className="text-[13.5px] font-semibold text-foreground">Navegador de dados</h2>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-[220px_1fr]">
+        <div className="rounded-xl border border-border-subtle bg-surface p-3">
+          <p className="mb-2 px-1 text-[11.5px] font-medium uppercase tracking-wide text-muted-foreground">
+            {entityLabel}
+          </p>
+          {tablesError ? (
+            <p className="px-1 text-[12px] text-destructive">{tablesError}</p>
+          ) : tables === null ? (
+            <p className="px-1 text-[12px] text-muted-foreground">Carregando...</p>
+          ) : tables.length === 0 ? (
+            <p className="px-1 text-[12px] text-muted-foreground">Nenhuma encontrada ainda.</p>
+          ) : (
+            <ul className="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
+              {tables.map((name) => (
+                <li key={name}>
+                  <button
+                    onClick={() => {
+                      if (type === "postgres") setQuery(`SELECT * FROM "${name}" LIMIT 100;`);
+                      else if (type === "mongodb") setQuery(`db.${name}.find().limit(20).toArray()`);
+                      else setQuery(`GET ${name}`);
+                    }}
+                    className="w-full truncate rounded-md px-2 py-1.5 text-left font-mono text-[12.5px] text-foreground hover:bg-muted"
+                    title={name}
+                  >
+                    {name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <textarea
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={QUERY_PLACEHOLDER[type]}
+            rows={3}
+            spellCheck={false}
+            className="w-full resize-none rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-accent"
+          />
+          <div className="flex items-center justify-between">
+            <p className="text-[11.5px] text-muted-foreground">Ctrl/Cmd + Enter pra executar</p>
+            <button
+              onClick={handleRunQuery}
+              disabled={running || !query.trim()}
+              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3.5 py-1.5 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+            >
+              {running ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+              Executar
+            </button>
+          </div>
+
+          {queryError && <p className="text-[13px] text-destructive">{queryError}</p>}
+
+          {result && (
+            <div className="rounded-xl border border-border-subtle bg-surface">
+              {result.notice && (
+                <p className="border-b border-border-subtle px-3 py-2 text-[12.5px] text-muted-foreground">
+                  {result.notice}
+                </p>
+              )}
+              {result.columns.length > 0 ? (
+                <div className="max-h-96 overflow-auto">
+                  <table className="w-full border-collapse text-left text-[12.5px]">
+                    <thead>
+                      <tr>
+                        {result.columns.map((col) => (
+                          <th
+                            key={col}
+                            className="sticky top-0 border-b border-border-subtle bg-surface px-3 py-2 font-medium text-muted-foreground"
+                          >
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.rows.map((row, i) => (
+                        <tr key={i} className="border-b border-border-subtle last:border-0">
+                          {row.map((cell, j) => (
+                            <td key={j} className="whitespace-pre-wrap px-3 py-1.5 font-mono text-foreground">
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                !result.notice && <p className="px-3 py-2 text-[12.5px] text-muted-foreground">Sem resultado.</p>
+              )}
+              <p className="border-t border-border-subtle px-3 py-1.5 text-[11.5px] text-muted-foreground">
+                {result.rowCount} linha(s)
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

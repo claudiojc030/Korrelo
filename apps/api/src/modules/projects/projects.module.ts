@@ -24,6 +24,8 @@ import { GetProjectLogsUseCase } from "./application/get-project-logs.use-case";
 import { AttachDomainUseCase } from "./application/attach-domain.use-case";
 import { DetachDomainUseCase } from "./application/detach-domain.use-case";
 import { ListDeployRecordsUseCase } from "./application/list-deploy-records.use-case";
+import { ListDatabaseTablesUseCase } from "./application/list-database-tables.use-case";
+import { RunDatabaseQueryUseCase } from "./application/run-database-query.use-case";
 import { ListCronJobsUseCase } from "./application/list-cron-jobs.use-case";
 import { CreateCronJobUseCase } from "./application/create-cron-job.use-case";
 import { UpdateCronJobUseCase } from "./application/update-cron-job.use-case";
@@ -57,6 +59,7 @@ import { NginxCertbotDomainProvisioner } from "./infrastructure/nginx-certbot-do
 import { ProjectDiskUsageService } from "./infrastructure/project-disk-usage.service";
 import { PrismaCronJobRepository } from "./infrastructure/prisma-cron-job.repository";
 import { DockerExecCronRunner } from "./infrastructure/docker-exec-cron-runner";
+import { DockerExecDatabaseQueryRunner } from "./infrastructure/docker-exec-database-query-runner";
 import { CronSchedulerService } from "./infrastructure/cron-scheduler.service";
 import { EnvVarCipher } from "../../infrastructure/crypto/env-var-cipher";
 import { PROJECT_REPOSITORY } from "./domain/project.repository";
@@ -72,6 +75,7 @@ import { DOMAIN_PROVISIONER } from "./domain/domain-provisioner";
 import { DEPLOY_RECORD_REPOSITORY } from "./domain/deploy-record.repository";
 import { CRON_JOB_REPOSITORY } from "./domain/cron-job.repository";
 import { CRON_JOB_RUNNER } from "./domain/cron-job-runner";
+import { DATABASE_QUERY_RUNNER } from "./domain/database-query-runner";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
 @Module({
@@ -107,6 +111,8 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     AttachDomainUseCase,
     DetachDomainUseCase,
     ListDeployRecordsUseCase,
+    ListDatabaseTablesUseCase,
+    RunDatabaseQueryUseCase,
     NodeDockerfileGenerator,
     PhpDockerfileGenerator,
     PythonDockerfileGenerator,
@@ -132,6 +138,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: DEPLOY_RECORD_REPOSITORY, useClass: PrismaDeployRecordRepository },
     { provide: CRON_JOB_REPOSITORY, useClass: PrismaCronJobRepository },
     { provide: CRON_JOB_RUNNER, useClass: DockerExecCronRunner },
+    { provide: DATABASE_QUERY_RUNNER, useClass: DockerExecDatabaseQueryRunner },
   ],
   exports: [PROJECT_REPOSITORY],
 })

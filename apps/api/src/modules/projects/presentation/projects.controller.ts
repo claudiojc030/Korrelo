@@ -17,10 +17,13 @@ import { GetProjectLogsUseCase, type LogTarget } from "../application/get-projec
 import { AttachDomainUseCase } from "../application/attach-domain.use-case";
 import { DetachDomainUseCase } from "../application/detach-domain.use-case";
 import { ListDeployRecordsUseCase } from "../application/list-deploy-records.use-case";
+import { ListDatabaseTablesUseCase } from "../application/list-database-tables.use-case";
+import { RunDatabaseQueryUseCase } from "../application/run-database-query.use-case";
 import { CreateProjectDto } from "./create-project.dto";
 import { DetectStackDto } from "./detect-stack.dto";
 import { SetEnvVarsDto } from "./set-env-vars.dto";
 import { ProvisionDatabaseDto } from "./provision-database.dto";
+import { RunDatabaseQueryDto } from "./run-database-query.dto";
 import { UpdateProjectSettingsDto } from "./update-project-settings.dto";
 import { AttachDomainDto } from "./attach-domain.dto";
 
@@ -45,6 +48,8 @@ export class ProjectsController {
     private readonly attachDomain: AttachDomainUseCase,
     private readonly detachDomain: DetachDomainUseCase,
     private readonly listDeployRecords: ListDeployRecordsUseCase,
+    private readonly listDatabaseTables: ListDatabaseTablesUseCase,
+    private readonly runDatabaseQuery: RunDatabaseQueryUseCase,
   ) {}
 
   @Get()
@@ -117,6 +122,16 @@ export class ProjectsController {
   @HttpCode(204)
   async removeDatabase(@Param("id") id: string) {
     await this.deprovisionDatabase.execute(id);
+  }
+
+  @Get(":id/database/tables")
+  getDatabaseTables(@Param("id") id: string) {
+    return this.listDatabaseTables.execute(id).then((tables) => ({ tables }));
+  }
+
+  @Post(":id/database/query")
+  runDatabaseQueryEndpoint(@Param("id") id: string, @Body() dto: RunDatabaseQueryDto) {
+    return this.runDatabaseQuery.execute(id, dto.query);
   }
 
   @Post(":id/detect-stack")
