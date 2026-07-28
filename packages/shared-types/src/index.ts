@@ -60,3 +60,22 @@ export const CONTAINER_MEMORY_LIMIT_MB: Record<ResourceTier, number> = {
   medium: 1024,
   large: 2048,
 };
+
+export interface ContainerSummary {
+  name: string;
+  status: string;
+  memUsageMb: number | null;
+}
+
+export interface SystemMetrics {
+  cpuPercent: number;
+  totalMemMb: number;
+  freeMemMb: number;
+  usedMemPercent: number;
+  diskTotalGb: number | null;
+  diskFreeGb: number | null;
+  usedDiskPercent: number | null;
+  uptimeSeconds: number;
+  tier: ResourceTier;
+  containers: ContainerSummary[];
+}

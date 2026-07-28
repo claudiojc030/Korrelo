@@ -46,9 +46,14 @@ export default async function Home() {
         <GithubConnectButton />
       )}
 
-      <Link href="/projects" className="text-sm text-neutral-400 underline hover:text-neutral-200">
-        Ver projetos
-      </Link>
+      <div className="flex gap-4">
+        <Link href="/projects" className="text-sm text-neutral-400 underline hover:text-neutral-200">
+          Ver projetos
+        </Link>
+        <Link href="/dashboard" className="text-sm text-neutral-400 underline hover:text-neutral-200">
+          Dashboard
+        </Link>
+      </div>
     </main>
   );
 }
