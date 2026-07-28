@@ -3,7 +3,7 @@ import { Cpu, MemoryStick, HardDrive, Clock, Box, Server, ExternalLink, SquareTe
 import { CONTAINER_MEMORY_LIMIT_MB, type ContainerSummary, type Project, type SystemMetrics } from "@forgedesk/shared-types";
 import { MetricTile } from "./metric-tile";
 import { MetricsHistoryChart } from "./metrics-history-chart";
-import { GithubConnectButton } from "../../github-connect-button";
+import { OnboardingChecklist } from "./onboarding-checklist";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
 import { AutoRefresh } from "../../../components/auto-refresh";
 
@@ -45,6 +45,19 @@ async function getGithubStatus() {
   }
 }
 
+async function getTwoFactorStatus(): Promise<{ enabled: boolean } | null> {
+  try {
+    const res = await fetch(`${API_URL}/auth/2fa/status`, {
+      cache: "no-store",
+      headers: authHeaderServer(),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
@@ -63,10 +76,11 @@ const TIER_LABEL: Record<SystemMetrics["tier"], string> = {
 };
 
 export default async function DashboardPage() {
-  const [metrics, projects, githubStatus] = await Promise.all([
+  const [metrics, projects, githubStatus, twoFactorStatus] = await Promise.all([
     getSystemMetrics(),
     getProjects(),
     getGithubStatus(),
+    getTwoFactorStatus(),
   ]);
 
   const runningProjects = projects.filter((p) => p.status === "running" && p.containerName);
@@ -99,17 +113,11 @@ export default async function DashboardPage() {
         )}
       </div>
 
-      {!githubStatus?.connected && (
-        <div className="mb-6 flex items-center justify-between rounded-xl border border-border-subtle bg-surface p-4">
-          <div>
-            <p className="text-[13.5px] font-medium text-foreground">Conecte sua conta do GitHub</p>
-            <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-              Necessário pra importar e implantar seus repositórios.
-            </p>
-          </div>
-          <GithubConnectButton />
-        </div>
-      )}
+      <OnboardingChecklist
+        githubConnected={githubStatus?.connected ?? false}
+        hasProjects={projects.length > 0}
+        twoFactorEnabled={twoFactorStatus?.enabled ?? false}
+      />
 
       {!metrics ? (
         <p className="text-[13.5px] text-destructive">

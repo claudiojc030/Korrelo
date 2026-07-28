@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, FolderGit2, ShieldHalf, ShieldCheck, LogOut } from "lucide-react";
+import { LayoutDashboard, FolderGit2, ShieldHalf, ShieldCheck, LogOut, Search } from "lucide-react";
 import { apiFetch } from "../lib/api-client";
 import { ThemeToggle } from "./theme-toggle";
+import { CommandPalette, COMMAND_PALETTE_OPEN_EVENT } from "./command-palette";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -29,6 +30,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [email, setEmail] = useState<string | null>(null);
+  const [isMac, setIsMac] = useState(false);
 
   useEffect(() => {
     apiFetch("/auth/me")
@@ -36,6 +38,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       .then((data: { email: string | null } | null) => setEmail(data?.email ?? null))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setIsMac(/Mac|iPod|iPhone|iPad/.test(navigator.platform));
+  }, []);
+
+  function openCommandPalette() {
+    window.dispatchEvent(new Event(COMMAND_PALETTE_OPEN_EVENT));
+  }
 
   async function handleLogout() {
     await apiFetch("/auth/logout", { method: "POST" });
@@ -49,6 +59,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex h-dvh overflow-hidden">
       <aside className="flex w-72 flex-none flex-col gap-9 border-r border-border-subtle bg-surface px-5 py-7">
         <Logo />
+
+        <button
+          onClick={openCommandPalette}
+          className="flex items-center justify-between gap-2 rounded-lg border border-border-subtle px-3.5 py-2 text-[13px] text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+        >
+          <span className="flex items-center gap-2">
+            <Search size={15} strokeWidth={1.75} className="flex-none" />
+            Buscar
+          </span>
+          <kbd className="rounded border border-border-subtle px-1.5 py-0.5 font-mono text-[11px]">
+            {isMac ? "⌘K" : "Ctrl K"}
+          </kbd>
+        </button>
 
         <nav className="flex flex-col gap-1.5">
           {NAV_ITEMS.map((item) => {
@@ -92,6 +115,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <main className={`min-h-0 min-w-0 flex-1 ${isFullHeightPage ? "flex flex-col" : "overflow-y-auto"}`}>
         {children}
       </main>
+
+      <CommandPalette />
     </div>
   );
 }
