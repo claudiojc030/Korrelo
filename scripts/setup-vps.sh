@@ -206,6 +206,25 @@ else
   warn "Adicione sua chave pública lá e rode este script de novo (ou só essa etapa manualmente)."
 fi
 
+log "Desativando serviços de SO desnecessários pra uma VPS rodando só o ForgeDesk"
+# Nada aqui é desinstalado (reversível, sem risco de quebrar dependência de
+# pacote) — só parado e desabilitado. snapd fica de fora de propósito: mexer
+# nele tem risco de efeito colateral desproporcional ao pouco de RAM que
+# libera numa VPS pequena.
+UNNECESSARY_SERVICES=(avahi-daemon cups cups-browsed ModemManager bluetooth)
+DISABLED_SERVICES=()
+for svc in "${UNNECESSARY_SERVICES[@]}"; do
+  if systemctl list-unit-files "${svc}.service" 2>/dev/null | grep -q "${svc}.service"; then
+    sudo systemctl disable --now "${svc}" > /dev/null 2>&1 || true
+    DISABLED_SERVICES+=("$svc")
+  fi
+done
+if [ "${#DISABLED_SERVICES[@]}" -gt 0 ]; then
+  echo "Desativados: ${DISABLED_SERVICES[*]}"
+else
+  echo "Nenhum desses serviços estava presente nesta imagem — nada pra desativar."
+fi
+
 log "Subindo o Core via PM2"
 pm2 start ecosystem.config.js
 pm2 save
