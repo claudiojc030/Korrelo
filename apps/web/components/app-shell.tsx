@@ -46,7 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isFullHeightPage = pathname?.includes("/terminal") || pathname?.includes("/files");
 
   return (
-    <div className="flex min-h-dvh">
+    <div className="flex h-dvh overflow-hidden">
       <aside className="flex w-72 flex-none flex-col gap-9 border-r border-border-subtle bg-surface px-5 py-7">
         <Logo />
 
@@ -89,7 +89,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <main className={`min-w-0 flex-1 ${isFullHeightPage ? "flex flex-col" : "overflow-y-auto"}`}>
+      <main className={`min-h-0 min-w-0 flex-1 ${isFullHeightPage ? "flex flex-col" : "overflow-y-auto"}`}>
         {children}
       </main>
     </div>
