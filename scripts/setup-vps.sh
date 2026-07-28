@@ -5,6 +5,7 @@
 set -euo pipefail
 
 log() { echo -e "\n\033[1;32m==> $1\033[0m"; }
+warn() { echo -e "\033[1;33m[aviso] $1\033[0m"; }
 
 if [ "$(id -u)" -eq 0 ]; then
   echo "Não rode como root — rode como um usuário normal com sudo (evita rodar o Core como root)." >&2
@@ -58,44 +59,73 @@ fi
 log "Instalando dependências do monorepo"
 npm install
 
-log "Buildando os pacotes"
+log "Buildando pacotes compartilhados e a API"
 npm run build --workspace=packages/shared-types
 npm run build --workspace=apps/api
-npm run build --workspace=apps/web
 
-log "Verificando .env da API"
+# --- Domínio e HTTPS -------------------------------------------------------
+# Let's Encrypt exige um domínio real resolvendo pro IP desta VPS *antes* de
+# rodar o certbot — não funciona com IP puro. Perguntamos aqui porque a
+# resposta decide o NEXT_PUBLIC_API_URL (embutido no build da Web a seguir),
+# as URLs do .env da API, e as regras do firewall lá na frente.
+DOMAIN=""
+LETSENCRYPT_EMAIL=""
+PUBLIC_IP=$(curl -s ifconfig.me || echo "SEU_IP")
+
+log "Configuração de domínio/HTTPS"
+read -rp "Domínio que já aponta pro IP desta VPS ($PUBLIC_IP)? (deixe em branco pra pular HTTPS por agora): " DOMAIN
+if [ -n "$DOMAIN" ]; then
+  read -rp "E-mail pra avisos de renovação do Let's Encrypt: " LETSENCRYPT_EMAIL
+  BASE_WEB_URL="https://${DOMAIN}"
+  BASE_API_URL="https://${DOMAIN}/api"
+else
+  warn "Sem domínio: a API e a Web ficam expostas em HTTP puro, direto nas portas 3000/3001."
+  warn "Isso serve pra testar, mas não é seguro pra uso real — rode este script de novo depois"
+  warn "com um domínio assim que tiver um, pra ligar nginx + TLS de verdade."
+  BASE_WEB_URL="http://${PUBLIC_IP}:3000"
+  BASE_API_URL="http://${PUBLIC_IP}:3001"
+fi
+
+log "Configurando .env da API"
 if [ ! -f apps/api/.env ]; then
   cp apps/api/.env.example apps/api/.env
   JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")
   sed -i "s#^JWT_SECRET=.*#JWT_SECRET=${JWT_SECRET}#" apps/api/.env
-  echo "apps/api/.env criado com JWT_SECRET gerado automaticamente."
-  echo "IMPORTANTE: edite apps/api/.env agora e preencha GITHUB_APP_* e FORGEDESK_WEB_URL"
-  echo "(FORGEDESK_WEB_URL deve ser http://SEU_IP:3000) antes de continuar."
+  sed -i "s#^FORGEDESK_WEB_URL=.*#FORGEDESK_WEB_URL=${BASE_WEB_URL}#" apps/api/.env
+  sed -i "s#^CORS_ORIGINS=.*#CORS_ORIGINS=${BASE_WEB_URL}#" apps/api/.env
+  echo "apps/api/.env criado — JWT_SECRET, FORGEDESK_WEB_URL e CORS_ORIGINS preenchidos automaticamente."
+  echo "IMPORTANTE: falta preencher GITHUB_APP_SLUG, GITHUB_APP_ID e GITHUB_APP_PRIVATE_KEY em apps/api/.env"
+  echo "(veja as instruções de cadastro do GitHub App no README) antes de continuar."
   read -rp "Pressione ENTER depois de editar apps/api/.env para continuar..."
 else
   echo "apps/api/.env já existe — não mexi nele."
 fi
 
-log "Verificando .env da Web"
+log "Configurando .env da Web"
 if [ ! -f apps/web/.env ]; then
   cp apps/web/.env.example apps/web/.env
-  echo "apps/web/.env criado a partir do exemplo."
-  echo "IMPORTANTE: edite apps/web/.env e defina NEXT_PUBLIC_API_URL=http://SEU_IP:3001"
-  echo "antes de continuar — esse valor fica gravado no build e não pode ser trocado depois só reiniciando."
-  read -rp "Pressione ENTER depois de editar apps/web/.env para continuar..."
-  log "Rebuildando a Web com a URL correta"
-  npm run build --workspace=apps/web
+  sed -i "s#^NEXT_PUBLIC_API_URL=.*#NEXT_PUBLIC_API_URL=${BASE_API_URL}#" apps/web/.env
+  echo "apps/web/.env criado com NEXT_PUBLIC_API_URL=${BASE_API_URL}."
 else
   echo "apps/web/.env já existe — não mexi nele."
 fi
+
+log "Buildando a Web"
+npm run build --workspace=apps/web
 
 log "Rodando migrations do banco (produção, não-interativo)"
 (cd apps/api && npx prisma migrate deploy)
 
 log "Configurando firewall (ufw)"
 sudo ufw allow OpenSSH
-sudo ufw allow 3000/tcp   # Web
-sudo ufw allow 3001/tcp   # API
+if [ -n "$DOMAIN" ]; then
+  # Com nginx na frente, as portas 3000/3001 não precisam (e não devem) ficar
+  # expostas — só 80/443 são alcançáveis de fora.
+  sudo ufw allow "Nginx Full"
+else
+  sudo ufw allow 3000/tcp   # Web
+  sudo ufw allow 3001/tcp   # API
+fi
 sudo ufw --force enable
 
 log "Subindo o Core via PM2"
@@ -103,5 +133,54 @@ pm2 start ecosystem.config.js
 pm2 save
 pm2 startup systemd -u "$USER" --hp "$HOME" | tail -1 | sudo bash || true
 
-log "Pronto! Acesse http://$(curl -s ifconfig.me):3000 pra criar a conta de admin."
-echo "Lembre-se de atualizar as URLs do GitHub App (Homepage/Callback) pra apontar pro IP/domínio desta VPS."
+if [ -n "$DOMAIN" ]; then
+  log "Instalando nginx + certbot"
+  sudo apt-get install -y nginx certbot python3-certbot-nginx
+
+  NGINX_SITE=/etc/nginx/sites-available/forgedesk
+  sudo tee "$NGINX_SITE" > /dev/null <<NGINXCONF
+server {
+  listen 80;
+  server_name ${DOMAIN};
+
+  location /socket.io/ {
+    proxy_pass http://127.0.0.1:3001/socket.io/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade \$http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+  }
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:3001/;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host \$host;
+    proxy_set_header X-Real-IP \$remote_addr;
+    proxy_set_header X-Forwarded-Proto \$scheme;
+  }
+}
+NGINXCONF
+
+  sudo ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/forgedesk
+  [ -f /etc/nginx/sites-enabled/default ] && sudo rm /etc/nginx/sites-enabled/default
+  sudo nginx -t
+  sudo systemctl reload nginx
+
+  log "Emitindo certificado TLS (Let's Encrypt)"
+  # --nginx edita o server block acima pra 443 + redirect automaticamente.
+  # certbot já instala o timer de renovação automática (systemd), não precisa de cron.
+  sudo certbot --nginx -d "$DOMAIN" -m "$LETSENCRYPT_EMAIL" --agree-tos --redirect -n
+
+  log "Pronto! Acesse https://${DOMAIN} pra criar a conta de admin."
+else
+  log "Pronto! Acesse http://${PUBLIC_IP}:3000 pra criar a conta de admin."
+fi
+echo "Lembre-se de atualizar as URLs do GitHub App (Homepage/Callback) pra apontar pra ${BASE_WEB_URL}."
