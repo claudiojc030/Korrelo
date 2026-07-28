@@ -3,13 +3,23 @@ export class RefreshToken {
     public readonly id: string,
     public readonly userId: string,
     public readonly tokenHash: string,
+    public readonly userAgent: string | null,
+    public readonly ipAddress: string | null,
     public readonly expiresAt: Date,
     public readonly revokedAt: Date | null,
+    public readonly lastUsedAt: Date,
     public readonly createdAt: Date,
   ) {}
 
-  static create(userId: string, tokenHash: string, expiresAt: Date): RefreshToken {
-    return new RefreshToken(crypto.randomUUID(), userId, tokenHash, expiresAt, null, new Date());
+  static create(
+    userId: string,
+    tokenHash: string,
+    expiresAt: Date,
+    userAgent: string | null = null,
+    ipAddress: string | null = null,
+  ): RefreshToken {
+    const now = new Date();
+    return new RefreshToken(crypto.randomUUID(), userId, tokenHash, userAgent, ipAddress, expiresAt, null, now, now);
   }
 
   isValid(): boolean {
@@ -17,6 +27,16 @@ export class RefreshToken {
   }
 
   revoke(): RefreshToken {
-    return new RefreshToken(this.id, this.userId, this.tokenHash, this.expiresAt, new Date(), this.createdAt);
+    return new RefreshToken(
+      this.id,
+      this.userId,
+      this.tokenHash,
+      this.userAgent,
+      this.ipAddress,
+      this.expiresAt,
+      new Date(),
+      this.lastUsedAt,
+      this.createdAt,
+    );
   }
 }

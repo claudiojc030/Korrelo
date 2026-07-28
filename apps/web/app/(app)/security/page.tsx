@@ -1,10 +1,57 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { KeyRound, Loader2, ShieldCheck, ShieldOff, TriangleAlert } from "lucide-react";
+import { KeyRound, Laptop, Loader2, LogOut, ShieldCheck, ShieldOff, Smartphone, TriangleAlert } from "lucide-react";
 import { apiFetch } from "../../../lib/api-client";
 
 type Step = "loading" | "disabled" | "setting-up" | "showing-backup-codes" | "enabled";
+
+interface ActiveSession {
+  id: string;
+  userAgent: string | null;
+  ipAddress: string | null;
+  createdAt: string;
+  lastUsedAt: string;
+  expiresAt: string;
+  isCurrent: boolean;
+}
+
+function describeUserAgent(userAgent: string | null): { label: string; isMobile: boolean } {
+  if (!userAgent) return { label: "Dispositivo desconhecido", isMobile: false };
+  const isMobile = /Mobi|Android|iPhone|iPad/.test(userAgent);
+  const browser = /Edg\//.test(userAgent)
+    ? "Edge"
+    : /Chrome\//.test(userAgent)
+      ? "Chrome"
+      : /Firefox\//.test(userAgent)
+        ? "Firefox"
+        : /Safari\//.test(userAgent)
+          ? "Safari"
+          : "Navegador";
+  const os = /iPhone|iPad/.test(userAgent)
+    ? "iOS"
+    : /Windows/.test(userAgent)
+      ? "Windows"
+      : /Mac OS/.test(userAgent)
+        ? "macOS"
+        : /Android/.test(userAgent)
+          ? "Android"
+          : /Linux/.test(userAgent)
+            ? "Linux"
+            : "";
+  return { label: os ? `${browser} · ${os}` : browser, isMobile };
+}
+
+function formatRelativeTime(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const diffMin = Math.round(diffMs / 60_000);
+  if (diffMin < 1) return "agora mesmo";
+  if (diffMin < 60) return `há ${diffMin} min`;
+  const diffHours = Math.round(diffMin / 60);
+  if (diffHours < 24) return `há ${diffHours}h`;
+  const diffDays = Math.round(diffHours / 24);
+  return `há ${diffDays}d`;
+}
 
 export default function SecurityPage() {
   const [step, setStep] = useState<Step>("loading");
@@ -18,6 +65,10 @@ export default function SecurityPage() {
 
   const [disablePassword, setDisablePassword] = useState("");
 
+  const [sessions, setSessions] = useState<ActiveSession[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+
   function loadStatus() {
     apiFetch("/auth/2fa/status")
       .then((res) => (res.ok ? res.json() : { enabled: false }))
@@ -25,9 +76,29 @@ export default function SecurityPage() {
       .catch(() => setStep("disabled"));
   }
 
+  function loadSessions() {
+    setSessionsLoading(true);
+    apiFetch("/auth/sessions")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data: ActiveSession[]) => setSessions(data))
+      .catch(() => setSessions([]))
+      .finally(() => setSessionsLoading(false));
+  }
+
   useEffect(() => {
     loadStatus();
+    loadSessions();
   }, []);
+
+  async function handleRevokeSession(id: string) {
+    setRevokingId(id);
+    try {
+      await apiFetch(`/auth/sessions/${id}`, { method: "DELETE" });
+      setSessions((prev) => prev.filter((session) => session.id !== id));
+    } finally {
+      setRevokingId(null);
+    }
+  }
 
   async function handleStartSetup() {
     setSubmitting(true);
@@ -235,6 +306,65 @@ export default function SecurityPage() {
           </button>
         </form>
       )}
+
+      <div className="mt-8 mb-1 flex items-center gap-2">
+        <Laptop size={16} strokeWidth={1.75} className="text-foreground" />
+        <h2 className="text-[15px] font-semibold text-foreground">Sessões ativas</h2>
+      </div>
+      <p className="mb-4 text-[12.5px] text-muted-foreground">
+        Todos os dispositivos com uma sessão válida nesta conta. Encerrar uma sessão derruba o acesso
+        imediatamente, mesmo sem trocar a senha.
+      </p>
+
+      <div className="rounded-xl border border-border-subtle bg-surface">
+        {sessionsLoading ? (
+          <p className="p-5 text-[13px] text-muted-foreground">Carregando...</p>
+        ) : sessions.length === 0 ? (
+          <p className="p-5 text-[13px] text-muted-foreground">Nenhuma sessão ativa encontrada.</p>
+        ) : (
+          <ul className="divide-y divide-border-subtle">
+            {sessions.map((session) => {
+              const { label, isMobile } = describeUserAgent(session.userAgent);
+              return (
+                <li key={session.id} className="flex items-center gap-3 p-4">
+                  {isMobile ? (
+                    <Smartphone size={18} strokeWidth={1.75} className="flex-none text-muted-foreground" />
+                  ) : (
+                    <Laptop size={18} strokeWidth={1.75} className="flex-none text-muted-foreground" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[13.5px] font-medium text-foreground">{label}</span>
+                      {session.isCurrent && (
+                        <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-medium text-accent">
+                          Esta sessão
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                      {session.ipAddress ?? "IP desconhecido"} · último uso {formatRelativeTime(session.lastUsedAt)}
+                    </p>
+                  </div>
+                  {!session.isCurrent && (
+                    <button
+                      onClick={() => handleRevokeSession(session.id)}
+                      disabled={revokingId === session.id}
+                      className="inline-flex flex-none items-center gap-1.5 rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-destructive transition-opacity hover:opacity-80 disabled:opacity-50"
+                    >
+                      {revokingId === session.id ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <LogOut size={13} />
+                      )}
+                      Encerrar
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

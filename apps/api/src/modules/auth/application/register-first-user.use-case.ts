@@ -7,6 +7,8 @@ import { TokenPairIssuer } from "./token-pair-issuer";
 export interface RegisterFirstUserInput {
   email: string;
   password: string;
+  userAgent?: string | null;
+  ipAddress?: string | null;
 }
 
 export interface AuthResult {
@@ -35,7 +37,12 @@ export class RegisterFirstUserUseCase {
     const user = User.create(input.email, passwordHash);
     await this.repository.save(user);
 
-    const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(user.id, user.email);
+    const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(
+      user.id,
+      user.email,
+      input.userAgent ?? null,
+      input.ipAddress ?? null,
+    );
     return { accessToken, refreshToken, email: user.email };
   }
 }

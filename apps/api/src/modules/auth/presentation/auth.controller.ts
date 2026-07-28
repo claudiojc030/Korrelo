@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 import { RegisterFirstUserUseCase } from "../application/register-first-user.use-case";
@@ -10,6 +10,8 @@ import { DisableTwoFactorUseCase } from "../application/disable-two-factor.use-c
 import { GetTwoFactorStatusUseCase } from "../application/get-two-factor-status.use-case";
 import { RefreshAccessTokenUseCase } from "../application/refresh-access-token.use-case";
 import { LogoutUseCase } from "../application/logout.use-case";
+import { ListActiveSessionsUseCase } from "../application/list-active-sessions.use-case";
+import { RevokeSessionUseCase } from "../application/revoke-session.use-case";
 import { AuthCredentialsDto } from "./auth-credentials.dto";
 import { EnableTwoFactorDto } from "./enable-two-factor.dto";
 import { DisableTwoFactorDto } from "./disable-two-factor.dto";
@@ -35,6 +37,8 @@ export class AuthController {
     private readonly getTwoFactorStatus: GetTwoFactorStatusUseCase,
     private readonly refreshAccessToken: RefreshAccessTokenUseCase,
     private readonly logoutUseCase: LogoutUseCase,
+    private readonly listActiveSessions: ListActiveSessionsUseCase,
+    private readonly revokeSession: RevokeSessionUseCase,
   ) {}
 
   @Public()
@@ -51,7 +55,11 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.registerFirstUser.execute(dto);
+    const result = await this.registerFirstUser.execute({
+      ...dto,
+      userAgent: req.get("user-agent") ?? null,
+      ipAddress: req.ip ?? null,
+    });
     res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
     res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
     return { accessToken: result.accessToken, email: result.email };
@@ -65,7 +73,11 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.login.execute(dto);
+    const result = await this.login.execute({
+      ...dto,
+      userAgent: req.get("user-agent") ?? null,
+      ipAddress: req.ip ?? null,
+    });
     if (result.accessToken && result.refreshToken) {
       res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
       res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
@@ -83,7 +95,7 @@ export class AuthController {
       throw new UnauthorizedException("Sessão expirada. Faça login novamente.");
     }
 
-    const result = await this.refreshAccessToken.execute(rawToken);
+    const result = await this.refreshAccessToken.execute(rawToken, req.get("user-agent") ?? null, req.ip ?? null);
     res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
     res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
     return { ok: true };
@@ -103,6 +115,20 @@ export class AuthController {
   me(@Req() req: Request) {
     const user = (req as Request & { user?: { sub: string; email: string } }).user;
     return { email: user?.email ?? null };
+  }
+
+  @Get("sessions")
+  async sessionsEndpoint(@Req() req: Request) {
+    const user = (req as Request & { user?: { sub: string } }).user;
+    const currentRawToken = req.cookies?.[REFRESH_TOKEN_COOKIE];
+    return this.listActiveSessions.execute(user!.sub, currentRawToken);
+  }
+
+  @Delete("sessions/:id")
+  async revokeSessionEndpoint(@Req() req: Request, @Param("id") id: string) {
+    const user = (req as Request & { user?: { sub: string } }).user;
+    await this.revokeSession.execute(user!.sub, id);
+    return { ok: true };
   }
 
   @Get("2fa/status")

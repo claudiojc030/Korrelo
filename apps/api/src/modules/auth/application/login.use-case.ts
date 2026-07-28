@@ -9,6 +9,8 @@ export interface LoginInput {
   email: string;
   password: string;
   twoFactorCode?: string;
+  userAgent?: string | null;
+  ipAddress?: string | null;
 }
 
 export interface LoginResult {
@@ -54,7 +56,12 @@ export class LoginUseCase {
       }
     }
 
-    const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(user.id, user.email);
+    const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(
+      user.id,
+      user.email,
+      input.userAgent ?? null,
+      input.ipAddress ?? null,
+    );
     return { requiresTwoFactor: false, accessToken, refreshToken, email: user.email };
   }
 

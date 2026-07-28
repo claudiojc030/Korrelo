@@ -12,7 +12,11 @@ export class RefreshAccessTokenUseCase {
     private readonly tokenPairIssuer: TokenPairIssuer,
   ) {}
 
-  async execute(rawToken: string): Promise<TokenPair & { email: string }> {
+  async execute(
+    rawToken: string,
+    userAgent: string | null = null,
+    ipAddress: string | null = null,
+  ): Promise<TokenPair & { email: string }> {
     const stored = await this.refreshTokenRepository.findByTokenHash(hashRefreshToken(rawToken));
     if (!stored || !stored.isValid()) {
       throw new UnauthorizedException("Sessão expirada. Faça login novamente.");
@@ -28,7 +32,12 @@ export class RefreshAccessTokenUseCase {
     // dono legítimo) é detectado e rejeitado na próxima tentativa.
     await this.refreshTokenRepository.save(stored.revoke());
 
-    const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(user.id, user.email);
+    const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(
+      user.id,
+      user.email,
+      userAgent ?? stored.userAgent,
+      ipAddress ?? stored.ipAddress,
+    );
     return { accessToken, refreshToken, email: user.email };
   }
 }

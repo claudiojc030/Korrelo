@@ -11,6 +11,8 @@ import { DisableTwoFactorUseCase } from "./application/disable-two-factor.use-ca
 import { GetTwoFactorStatusUseCase } from "./application/get-two-factor-status.use-case";
 import { RefreshAccessTokenUseCase } from "./application/refresh-access-token.use-case";
 import { LogoutUseCase } from "./application/logout.use-case";
+import { ListActiveSessionsUseCase } from "./application/list-active-sessions.use-case";
+import { RevokeSessionUseCase } from "./application/revoke-session.use-case";
 import { TokenPairIssuer } from "./application/token-pair-issuer";
 import { PrismaUserRepository } from "./infrastructure/prisma-user.repository";
 import { PrismaRefreshTokenRepository } from "./infrastructure/prisma-refresh-token.repository";
@@ -37,6 +39,8 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     GetTwoFactorStatusUseCase,
     RefreshAccessTokenUseCase,
     LogoutUseCase,
+    ListActiveSessionsUseCase,
+    RevokeSessionUseCase,
     TokenPairIssuer,
     { provide: USER_REPOSITORY, useClass: PrismaUserRepository },
     { provide: PASSWORD_HASHER, useClass: BcryptPasswordHasher },

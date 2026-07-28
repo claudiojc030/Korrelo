@@ -57,7 +57,7 @@ describe("LoginUseCase", () => {
       refreshToken: "raw-refresh-token",
       email: "admin@forgedesk.local",
     });
-    expect(tokenPairIssuer.issue).toHaveBeenCalledWith(expect.any(String), "admin@forgedesk.local");
+    expect(tokenPairIssuer.issue).toHaveBeenCalledWith(expect.any(String), "admin@forgedesk.local", null, null);
   });
 
   it("rejeita quando o usuário não existe", async () => {

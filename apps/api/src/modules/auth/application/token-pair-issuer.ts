@@ -20,12 +20,19 @@ export class TokenPairIssuer {
     @Inject(REFRESH_TOKEN_REPOSITORY) private readonly refreshTokenRepository: RefreshTokenRepository,
   ) {}
 
-  async issue(userId: string, email: string): Promise<TokenPair> {
+  async issue(
+    userId: string,
+    email: string,
+    userAgent: string | null = null,
+    ipAddress: string | null = null,
+  ): Promise<TokenPair> {
     const accessToken = this.tokenService.sign({ sub: userId, email });
 
     const refreshToken = generateRefreshToken();
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
-    await this.refreshTokenRepository.save(RefreshToken.create(userId, hashRefreshToken(refreshToken), expiresAt));
+    await this.refreshTokenRepository.save(
+      RefreshToken.create(userId, hashRefreshToken(refreshToken), expiresAt, userAgent, ipAddress),
+    );
 
     return { accessToken, refreshToken };
   }

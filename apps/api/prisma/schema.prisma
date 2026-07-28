@@ -97,11 +97,14 @@ model User {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tokenHash String    @unique
-  expiresAt DateTime
-  revokedAt DateTime?
-  createdAt DateTime  @default(now())
+  id         String    @id @default(uuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique
+  userAgent  String?
+  ipAddress  String?
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime  @default(now())
+  createdAt  DateTime  @default(now())
 }
