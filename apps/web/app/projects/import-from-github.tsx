@@ -3,8 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { GithubRepositorySummary } from "@forgedesk/shared-types";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+import { apiFetch } from "../../lib/api-client";
 
 export function ImportFromGithub() {
   const router = useRouter();
@@ -17,7 +16,7 @@ export function ImportFromGithub() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/github/repositories`);
+      const res = await apiFetch("/github/repositories");
       if (!res.ok) throw new Error("Não foi possível buscar os repositórios.");
       setRepos(await res.json());
     } catch (err) {
@@ -32,7 +31,7 @@ export function ImportFromGithub() {
     setError(null);
     try {
       const name = repo.fullName.split("/")[1] ?? repo.fullName;
-      const createRes = await fetch(`${API_URL}/projects`, {
+      const createRes = await apiFetch("/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, repoUrl: repo.cloneUrl }),
@@ -40,7 +39,7 @@ export function ImportFromGithub() {
       if (!createRes.ok) throw new Error("Falha ao criar o projeto.");
       const project = (await createRes.json()) as { id: string };
 
-      const importRes = await fetch(`${API_URL}/projects/${project.id}/import`, { method: "POST" });
+      const importRes = await apiFetch(`/projects/${project.id}/import`, { method: "POST" });
       if (!importRes.ok) throw new Error("Falha ao importar/detectar a stack.");
 
       router.refresh();

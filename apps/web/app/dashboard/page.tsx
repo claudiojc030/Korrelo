@@ -1,11 +1,15 @@
 import type { SystemMetrics } from "@forgedesk/shared-types";
 import { MetricTile } from "./metric-tile";
+import { authHeaderServer } from "../../lib/auth-cookie-server";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 async function getSystemMetrics(): Promise<SystemMetrics | null> {
   try {
-    const res = await fetch(`${API_URL}/monitoring/system`, { cache: "no-store" });
+    const res = await fetch(`${API_URL}/monitoring/system`, {
+      cache: "no-store",
+      headers: authHeaderServer(),
+    });
     if (!res.ok) return null;
     return res.json();
   } catch {

@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+import { apiFetch } from "../../lib/api-client";
 
 export function DeployButton({ projectId }: { projectId: string }) {
   const router = useRouter();
@@ -14,7 +13,7 @@ export function DeployButton({ projectId }: { projectId: string }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/projects/${projectId}/deploy`, { method: "POST" });
+      const res = await apiFetch(`/projects/${projectId}/deploy`, { method: "POST" });
       if (!res.ok) {
         const body = (await res.json()) as { message?: string };
         throw new Error(body.message ?? "Falha ao fazer deploy.");

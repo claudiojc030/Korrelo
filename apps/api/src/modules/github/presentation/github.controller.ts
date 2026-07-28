@@ -3,6 +3,7 @@ import type { Response } from "express";
 import { CompleteGithubInstallationUseCase } from "../application/complete-github-installation.use-case";
 import { ListGithubRepositoriesUseCase } from "../application/list-github-repositories.use-case";
 import { GetGithubStatusUseCase } from "../application/get-github-status.use-case";
+import { Public } from "../../auth/presentation/public.decorator";
 
 @Controller("github")
 export class GithubController {
@@ -28,6 +29,7 @@ export class GithubController {
     return this.listRepositories.execute();
   }
 
+  @Public()
   @Get("callback")
   async callback(@Query("installation_id") installationId: string, @Res() res: Response) {
     await this.completeInstallation.execute(Number(installationId));

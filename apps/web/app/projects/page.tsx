@@ -2,11 +2,12 @@ import Link from "next/link";
 import type { DetectedStack, Project } from "@forgedesk/shared-types";
 import { ImportFromGithub } from "./import-from-github";
 import { DeployButton } from "./deploy-button";
+import { authHeaderServer } from "../../lib/auth-cookie-server";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 async function getProjects(): Promise<Project[]> {
-  const res = await fetch(`${API_URL}/projects`, { cache: "no-store" });
+  const res = await fetch(`${API_URL}/projects`, { cache: "no-store", headers: authHeaderServer() });
   if (!res.ok) return [];
   return res.json();
 }

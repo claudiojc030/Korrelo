@@ -4,8 +4,9 @@ import { ProjectsModule } from "./modules/projects/projects.module";
 import { GithubModule } from "./modules/github/github.module";
 import { MonitoringModule } from "./modules/monitoring/monitoring.module";
 import { TerminalModule } from "./modules/terminal/terminal.module";
+import { AuthModule } from "./modules/auth/auth.module";
 
 @Module({
-  imports: [HealthModule, ProjectsModule, GithubModule, MonitoringModule, TerminalModule],
+  imports: [AuthModule, HealthModule, ProjectsModule, GithubModule, MonitoringModule, TerminalModule],
 })
 export class AppModule {}

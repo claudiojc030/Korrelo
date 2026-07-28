@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { GithubConnectButton } from "./github-connect-button";
+import { LogoutButton } from "./logout-button";
+import { authHeaderServer } from "../lib/auth-cookie-server";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -15,7 +17,10 @@ async function getApiHealth() {
 
 async function getGithubStatus() {
   try {
-    const res = await fetch(`${API_URL}/github/status`, { cache: "no-store" });
+    const res = await fetch(`${API_URL}/github/status`, {
+      cache: "no-store",
+      headers: authHeaderServer(),
+    });
     if (!res.ok) return null;
     return res.json() as Promise<{ connected: boolean; accountLogin: string | null }>;
   } catch {
@@ -53,6 +58,7 @@ export default async function Home() {
         <Link href="/dashboard" className="text-sm text-neutral-400 underline hover:text-neutral-200">
           Dashboard
         </Link>
+        <LogoutButton />
       </div>
     </main>
   );

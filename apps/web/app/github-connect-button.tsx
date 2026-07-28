@@ -1,10 +1,10 @@
 "use client";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+import { apiFetch } from "../lib/api-client";
 
 export function GithubConnectButton() {
   async function handleClick() {
-    const res = await fetch(`${API_URL}/github/install-url`);
+    const res = await apiFetch("/github/install-url");
     const { url } = (await res.json()) as { url: string };
     window.location.href = url;
   }
