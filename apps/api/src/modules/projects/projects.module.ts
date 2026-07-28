@@ -15,11 +15,13 @@ import { DockerComposeOrchestrator } from "./infrastructure/docker-compose-orche
 import { DockerComposeFileBuilder } from "./infrastructure/docker-compose-file-builder";
 import { PortAllocator } from "./infrastructure/port-allocator";
 import { ResourceBudgetCalculator } from "./infrastructure/resource-budget-calculator";
+import { HttpHealthChecker } from "./infrastructure/http-health-checker";
 import { PROJECT_REPOSITORY } from "./domain/project.repository";
 import { STACK_DETECTOR } from "./domain/stack-detector";
 import { REPOSITORY_CLONER } from "./domain/repository-cloner";
 import { DOCKERFILE_GENERATOR } from "./domain/dockerfile-generator";
 import { CONTAINER_ORCHESTRATOR } from "./domain/container-orchestrator";
+import { HEALTH_CHECKER } from "./domain/health-checker";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
 @Module({
@@ -41,6 +43,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: REPOSITORY_CLONER, useClass: SimpleGitRepositoryCloner },
     { provide: DOCKERFILE_GENERATOR, useClass: DockerfileGeneratorRegistry },
     { provide: CONTAINER_ORCHESTRATOR, useClass: DockerComposeOrchestrator },
+    { provide: HEALTH_CHECKER, useClass: HttpHealthChecker },
   ],
 })
 export class ProjectsModule {}

@@ -9,6 +9,12 @@ export interface DeployConfig {
   memoryLimitMb: number;
 }
 
+export interface TeardownConfig {
+  projectPath: string;
+  containerName: string;
+}
+
 export interface ContainerOrchestrator {
   deploy(config: DeployConfig): Promise<void>;
+  teardown(config: TeardownConfig): Promise<void>;
 }

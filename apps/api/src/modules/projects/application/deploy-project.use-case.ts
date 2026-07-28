@@ -1,4 +1,11 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import type { DetectedStack } from "@forgedesk/shared-types";
@@ -9,11 +16,15 @@ import {
   CONTAINER_ORCHESTRATOR,
   COMPOSE_FILENAME,
   type ContainerOrchestrator,
+  type TeardownConfig,
 } from "../domain/container-orchestrator";
+import { HEALTH_CHECKER, type HealthChecker } from "../domain/health-checker";
 import { PortAllocator } from "../infrastructure/port-allocator";
 import { ResourceBudgetCalculator } from "../infrastructure/resource-budget-calculator";
 import { DockerComposeFileBuilder } from "../infrastructure/docker-compose-file-builder";
 import { getProjectWorkspacePath } from "../infrastructure/workspace-paths";
+
+const HEALTH_CHECK_TIMEOUT_MS = 30_000;
 
 function sanitizeContainerName(projectId: string, projectName: string): string {
   const slug = projectName.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
@@ -22,10 +33,13 @@ function sanitizeContainerName(projectId: string, projectName: string): string {
 
 @Injectable()
 export class DeployProjectUseCase {
+  private readonly logger = new Logger(DeployProjectUseCase.name);
+
   constructor(
     @Inject(PROJECT_REPOSITORY) private readonly repository: ProjectRepository,
     @Inject(DOCKERFILE_GENERATOR) private readonly dockerfileGenerator: DockerfileGenerator,
     @Inject(CONTAINER_ORCHESTRATOR) private readonly orchestrator: ContainerOrchestrator,
+    @Inject(HEALTH_CHECKER) private readonly healthChecker: HealthChecker,
     private readonly portAllocator: PortAllocator,
     private readonly resourceBudget: ResourceBudgetCalculator,
     private readonly composeFileBuilder: DockerComposeFileBuilder,
@@ -68,11 +82,31 @@ export class DeployProjectUseCase {
     try {
       await this.orchestrator.deploy(deployConfig);
     } catch (error) {
+      await this.rollback(deployConfig, "o container não subiu");
       await this.repository.save(project.withFailedDeployment());
       throw error;
     }
 
+    const healthy = await this.healthChecker.waitUntilHealthy(hostPort, HEALTH_CHECK_TIMEOUT_MS);
+    if (!healthy) {
+      await this.rollback(deployConfig, "falhou no health check");
+      await this.repository.save(project.withFailedDeployment());
+      throw new InternalServerErrorException(
+        `Deploy cancelado: o container subiu mas não respondeu na porta ${hostPort} em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. Rollback automático executado.`,
+      );
+    }
+
     const deployedProject = project.withDeployment(containerName, hostPort);
     return this.repository.save(deployedProject);
+  }
+
+  private async rollback(config: TeardownConfig, reason: string): Promise<void> {
+    this.logger.warn(`Rollback: ${reason} (${config.containerName}) — removendo container`);
+    try {
+      await this.orchestrator.teardown(config);
+    } catch (teardownError) {
+      // Não deixa o erro do rollback mascarar a causa original da falha do deploy.
+      this.logger.error(`Falha ao limpar container após rollback: ${teardownError}`);
+    }
   }
 }

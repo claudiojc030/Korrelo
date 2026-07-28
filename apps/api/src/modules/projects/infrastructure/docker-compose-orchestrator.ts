@@ -1,7 +1,11 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import type { ContainerOrchestrator, DeployConfig } from "../domain/container-orchestrator";
+import type {
+  ContainerOrchestrator,
+  DeployConfig,
+  TeardownConfig,
+} from "../domain/container-orchestrator";
 import { COMPOSE_FILENAME } from "../domain/container-orchestrator";
 
 const execFile = promisify(execFileCallback);
@@ -31,5 +35,13 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       const message = error instanceof Error ? error.message : String(error);
       throw new InternalServerErrorException(`Falha ao subir o container: ${message}`);
     }
+  }
+
+  async teardown(config: TeardownConfig): Promise<void> {
+    await execFile(
+      "docker",
+      ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "down", "--remove-orphans"],
+      { cwd: config.projectPath, timeout: 60 * 1000 },
+    );
   }
 }
