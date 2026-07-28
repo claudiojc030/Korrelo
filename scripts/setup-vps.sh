@@ -130,10 +130,12 @@ log "Configurando .env da API"
 if [ ! -f apps/api/.env ]; then
   cp apps/api/.env.example apps/api/.env
   JWT_SECRET=$(node -e "console.log(require('crypto').randomBytes(48).toString('hex'))")
+  ENV_ENCRYPTION_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
   sed -i "s#^JWT_SECRET=.*#JWT_SECRET=${JWT_SECRET}#" apps/api/.env
+  sed -i "s#^ENV_ENCRYPTION_KEY=.*#ENV_ENCRYPTION_KEY=${ENV_ENCRYPTION_KEY}#" apps/api/.env
   sed -i "s#^FORGEDESK_WEB_URL=.*#FORGEDESK_WEB_URL=${BASE_WEB_URL}#" apps/api/.env
   sed -i "s#^CORS_ORIGINS=.*#CORS_ORIGINS=${BASE_WEB_URL}#" apps/api/.env
-  echo "apps/api/.env criado — JWT_SECRET, FORGEDESK_WEB_URL e CORS_ORIGINS preenchidos automaticamente."
+  echo "apps/api/.env criado — JWT_SECRET, ENV_ENCRYPTION_KEY, FORGEDESK_WEB_URL e CORS_ORIGINS preenchidos automaticamente."
   echo "IMPORTANTE: falta preencher GITHUB_APP_SLUG, GITHUB_APP_ID e GITHUB_APP_PRIVATE_KEY em apps/api/.env"
   echo "(veja as instruções de cadastro do GitHub App no README) antes de continuar."
   read -rp "Pressione ENTER depois de editar apps/api/.env para continuar..."
@@ -210,16 +212,52 @@ pm2 save
 pm2 startup systemd -u "$USER" --hp "$HOME" | tail -1 | sudo bash || true
 
 log "Configurando backup automático diário"
-# Backup do banco Core + bancos gerenciados por projeto (Postgres/MongoDB via
-# docker exec; Redis é pulado — cache/fila, não costuma precisar). Guarda os
-# últimos 7 dias por padrão em ~/forgedesk-backups (BACKUP_RETENTION_DAYS e
-# BACKUP_DIR são configuráveis via env se quiser mudar).
+# Backup do banco Core + bancos gerenciados por projeto (Postgres/MongoDB
+# sempre; Redis só se marcado como persistente). Guarda os últimos 7 dias por
+# padrão em ~/forgedesk-backups (BACKUP_RETENTION_DAYS e BACKUP_DIR
+# configuráveis via apps/api/.env se quiser mudar).
 REPO_DIR="$(pwd)"
 BACKUP_LOG="$HOME/forgedesk-backups/backup.log"
 mkdir -p "$(dirname "$BACKUP_LOG")"
 BACKUP_CRON_LINE="0 3 * * * cd ${REPO_DIR} && bash scripts/backup.sh >> ${BACKUP_LOG} 2>&1"
 (crontab -l 2>/dev/null | grep -v "scripts/backup.sh"; echo "$BACKUP_CRON_LINE") | crontab -
 echo "Backup agendado todo dia às 3h. Rode manualmente com: bash scripts/backup.sh"
+
+log "Alerta de falha de backup (opcional)"
+read -rp "Tópico do ntfy.sh pra avisar se o backup falhar? (deixe em branco pra pular — ex: forgedesk-backup-$(whoami)-$(hostname)): " NTFY_TOPIC
+if [ -n "$NTFY_TOPIC" ]; then
+  if ! grep -q "^BACKUP_ALERT_NTFY_TOPIC=" apps/api/.env 2>/dev/null; then
+    echo "BACKUP_ALERT_NTFY_TOPIC=${NTFY_TOPIC}" >> apps/api/.env
+  else
+    sed -i "s#^BACKUP_ALERT_NTFY_TOPIC=.*#BACKUP_ALERT_NTFY_TOPIC=${NTFY_TOPIC}#" apps/api/.env
+  fi
+  echo "Configurado. Instale o app ntfy (ntfy.sh) no celular e inscreva-se no tópico '${NTFY_TOPIC}' pra receber o aviso."
+else
+  echo "Pulado — se o backup diário falhar, só vai aparecer no log (${BACKUP_LOG})."
+fi
+
+log "Backup externo — Google Drive via rclone (opcional)"
+read -rp "Quer copiar os backups pro seu Google Drive também? [s/N]: " SETUP_RCLONE
+if [[ "$SETUP_RCLONE" =~ ^[sS] ]]; then
+  if ! command -v rclone &> /dev/null; then
+    curl -fsSL https://rclone.org/install.sh | sudo bash
+  else
+    echo "rclone já instalado."
+  fi
+  echo "Agora vamos configurar o remote 'gdrive'. O rclone vai te dar um link —"
+  echo "abra ele em QUALQUER navegador (seu celular/notebook, não precisa ser aqui na VPS),"
+  echo "autorize com sua conta Google, e cole o código de volta aqui quando pedir."
+  rclone config create gdrive drive scope drive.file || warn "Configuração do rclone não concluída — rode 'rclone config' manualmente depois."
+  if ! grep -q "^BACKUP_RCLONE_REMOTE=" apps/api/.env 2>/dev/null; then
+    echo "BACKUP_RCLONE_REMOTE=gdrive" >> apps/api/.env
+  else
+    sed -i "s#^BACKUP_RCLONE_REMOTE=.*#BACKUP_RCLONE_REMOTE=gdrive#" apps/api/.env
+  fi
+  echo "Backups agora também são copiados pra uma pasta 'forgedesk-backups' no seu Google Drive."
+else
+  echo "Pulado. Pra ligar depois: instale o rclone, rode 'rclone config' criando um remote"
+  echo "chamado 'gdrive' (ou outro nome), e adicione BACKUP_RCLONE_REMOTE=<nome> em apps/api/.env."
+fi
 
 if [ -n "$DOMAIN" ]; then
   log "Configurando site + TLS do ForgeDesk (${DOMAIN})"

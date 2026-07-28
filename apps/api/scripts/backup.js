@@ -5,7 +5,13 @@
 // por padrão é tratado como cache/fila descartável).
 //
 // Uso: node scripts/backup.js   (roda a partir de apps/api, ou via scripts/backup.sh)
-// Env opcionais: BACKUP_DIR (padrão ~/forgedesk-backups), BACKUP_RETENTION_DAYS (padrão 7)
+//
+// Env opcionais:
+//   BACKUP_DIR                (padrão ~/forgedesk-backups)
+//   BACKUP_RETENTION_DAYS     (padrão 7)
+//   BACKUP_ALERT_NTFY_TOPIC   se definido, manda um push via ntfy.sh quando o backup falha
+//   BACKUP_RCLONE_REMOTE      se definido (ex: "gdrive"), copia o backup do dia pra esse
+//                             remote configurado via `rclone config` (Google Drive, S3, etc.)
 "use strict";
 
 require("dotenv/config");
@@ -43,12 +49,13 @@ async function backupCoreDatabase(destDir) {
     await fs.writeFile(dest, stdout);
     console.log(`Core (Postgres) -> ${dest}`);
   } else {
-    console.warn(`DATABASE_URL não reconhecido pra backup: ${databaseUrl}`);
+    throw new Error(`DATABASE_URL não reconhecido pra backup: ${databaseUrl}`);
   }
 }
 
 async function backupManagedDatabases(prisma, destDir) {
   const projects = await prisma.project.findMany({ include: { managedDatabase: true } });
+  const failures = [];
 
   for (const project of projects) {
     const db = project.managedDatabase;
@@ -101,8 +108,11 @@ async function backupManagedDatabases(prisma, destDir) {
       }
     } catch (error) {
       console.error(`Falha ao fazer backup de "${project.name}": ${error.message}`);
+      failures.push(`${project.name}: ${error.message}`);
     }
   }
+
+  return failures;
 }
 
 async function pruneOldBackups() {
@@ -125,6 +135,37 @@ async function pruneOldBackups() {
   }
 }
 
+async function syncOffsite(destDir, stamp) {
+  const remote = process.env.BACKUP_RCLONE_REMOTE;
+  if (!remote) return;
+
+  try {
+    await run("rclone", ["copy", destDir, `${remote}:forgedesk-backups/${stamp}`], {
+      maxBuffer: MAX_BUFFER,
+      timeout: 10 * 60 * 1000,
+    });
+    console.log(`Enviado pra ${remote}:forgedesk-backups/${stamp}`);
+  } catch (error) {
+    throw new Error(`Falha ao enviar backup pro remote "${remote}": ${error.message}`);
+  }
+}
+
+async function notifyFailure(message) {
+  const topic = process.env.BACKUP_ALERT_NTFY_TOPIC;
+  if (!topic) return;
+
+  try {
+    await fetch(`https://ntfy.sh/${topic}`, {
+      method: "POST",
+      headers: { Title: "ForgeDesk: backup falhou" },
+      body: message.slice(0, 1000),
+    });
+  } catch (error) {
+    // Não deixa uma falha de rede na notificação mascarar o motivo real do backup ter falhado.
+    console.error(`Falha ao mandar alerta via ntfy.sh: ${error.message}`);
+  }
+}
+
 async function main() {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const destDir = path.join(BACKUP_ROOT, stamp);
@@ -132,17 +173,24 @@ async function main() {
   console.log(`Backup em ${destDir}`);
 
   const prisma = new PrismaClient();
+  let failures = [];
   try {
     await backupCoreDatabase(destDir);
-    await backupManagedDatabases(prisma, destDir);
+    failures = await backupManagedDatabases(prisma, destDir);
   } finally {
     await prisma.$disconnect();
   }
 
   await pruneOldBackups();
+  await syncOffsite(destDir, stamp);
+
+  if (failures.length > 0) {
+    throw new Error(`Backup de ${stamp} com falhas:\n${failures.join("\n")}`);
+  }
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
   console.error(error);
+  await notifyFailure(`Backup falhou: ${error.message}`);
   process.exit(1);
 });

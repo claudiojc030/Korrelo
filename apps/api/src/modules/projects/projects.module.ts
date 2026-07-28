@@ -34,6 +34,7 @@ import { HttpHealthChecker } from "./infrastructure/http-health-checker";
 import { DockerLogReader } from "./infrastructure/docker-log-reader";
 import { NginxCertbotDomainProvisioner } from "./infrastructure/nginx-certbot-domain-provisioner";
 import { ProjectDiskUsageService } from "./infrastructure/project-disk-usage.service";
+import { EnvVarCipher } from "../../infrastructure/crypto/env-var-cipher";
 import { PROJECT_REPOSITORY } from "./domain/project.repository";
 import { ENV_VAR_REPOSITORY } from "./domain/env-var.repository";
 import { MANAGED_DATABASE_REPOSITORY } from "./domain/managed-database.repository";
@@ -73,6 +74,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     PortAllocator,
     ResourceBudgetCalculator,
     ProjectDiskUsageService,
+    EnvVarCipher,
     { provide: PROJECT_REPOSITORY, useClass: PrismaProjectRepository },
     { provide: ENV_VAR_REPOSITORY, useClass: PrismaEnvVarRepository },
     { provide: MANAGED_DATABASE_REPOSITORY, useClass: PrismaManagedDatabaseRepository },
