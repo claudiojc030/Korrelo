@@ -2,7 +2,7 @@ import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import { User } from "../domain/user.entity";
 import { USER_REPOSITORY, type UserRepository } from "../domain/user.repository";
 import { PASSWORD_HASHER, type PasswordHasher } from "../domain/password-hasher";
-import { TOKEN_SERVICE, type TokenService } from "../domain/token-service";
+import { TokenPairIssuer } from "./token-pair-issuer";
 
 export interface RegisterFirstUserInput {
   email: string;
@@ -11,6 +11,7 @@ export interface RegisterFirstUserInput {
 
 export interface AuthResult {
   accessToken: string;
+  refreshToken: string;
   email: string;
 }
 
@@ -19,7 +20,7 @@ export class RegisterFirstUserUseCase {
   constructor(
     @Inject(USER_REPOSITORY) private readonly repository: UserRepository,
     @Inject(PASSWORD_HASHER) private readonly passwordHasher: PasswordHasher,
-    @Inject(TOKEN_SERVICE) private readonly tokenService: TokenService,
+    private readonly tokenPairIssuer: TokenPairIssuer,
   ) {}
 
   async execute(input: RegisterFirstUserInput): Promise<AuthResult> {
@@ -34,7 +35,7 @@ export class RegisterFirstUserUseCase {
     const user = User.create(input.email, passwordHash);
     await this.repository.save(user);
 
-    const accessToken = this.tokenService.sign({ sub: user.id, email: user.email });
-    return { accessToken, email: user.email };
+    const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(user.id, user.email);
+    return { accessToken, refreshToken, email: user.email };
   }
 }

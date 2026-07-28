@@ -3,8 +3,8 @@ import { LoginUseCase } from "./login.use-case";
 import { User } from "../domain/user.entity";
 import type { UserRepository } from "../domain/user.repository";
 import type { PasswordHasher } from "../domain/password-hasher";
-import type { TokenService } from "../domain/token-service";
 import type { TwoFactorService } from "../domain/two-factor-service";
+import type { TokenPairIssuer } from "./token-pair-issuer";
 
 function buildUseCase(overrides?: {
   user?: User | null;
@@ -25,10 +25,9 @@ function buildUseCase(overrides?: {
     hash: jest.fn(),
     compare: jest.fn().mockResolvedValue(overrides?.passwordMatches ?? true),
   };
-  const tokenService: TokenService = {
-    sign: jest.fn().mockReturnValue("signed-jwt-token"),
-    verify: jest.fn(),
-  };
+  const tokenPairIssuer: TokenPairIssuer = {
+    issue: jest.fn().mockResolvedValue({ accessToken: "signed-jwt-token", refreshToken: "raw-refresh-token" }),
+  } as unknown as TokenPairIssuer;
   const twoFactorService: TwoFactorService = {
     generateSecret: jest.fn(),
     buildOtpAuthUrl: jest.fn(),
@@ -38,24 +37,27 @@ function buildUseCase(overrides?: {
   };
 
   return {
-    useCase: new LoginUseCase(repository, passwordHasher, tokenService, twoFactorService),
+    useCase: new LoginUseCase(repository, passwordHasher, twoFactorService, tokenPairIssuer),
     repository,
     passwordHasher,
-    tokenService,
+    tokenPairIssuer,
     twoFactorService,
   };
 }
 
 describe("LoginUseCase", () => {
   it("retorna um access token quando as credenciais são válidas", async () => {
-    const { useCase, tokenService } = buildUseCase({ passwordMatches: true });
+    const { useCase, tokenPairIssuer } = buildUseCase({ passwordMatches: true });
 
     const result = await useCase.execute({ email: "admin@forgedesk.local", password: "correta" });
 
-    expect(result).toEqual({ requiresTwoFactor: false, accessToken: "signed-jwt-token", email: "admin@forgedesk.local" });
-    expect(tokenService.sign).toHaveBeenCalledWith(
-      expect.objectContaining({ email: "admin@forgedesk.local" }),
-    );
+    expect(result).toEqual({
+      requiresTwoFactor: false,
+      accessToken: "signed-jwt-token",
+      refreshToken: "raw-refresh-token",
+      email: "admin@forgedesk.local",
+    });
+    expect(tokenPairIssuer.issue).toHaveBeenCalledWith(expect.any(String), "admin@forgedesk.local");
   });
 
   it("rejeita quando o usuário não existe", async () => {

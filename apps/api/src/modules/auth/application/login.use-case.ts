@@ -2,8 +2,8 @@ import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import type { User } from "../domain/user.entity";
 import { USER_REPOSITORY, type UserRepository } from "../domain/user.repository";
 import { PASSWORD_HASHER, type PasswordHasher } from "../domain/password-hasher";
-import { TOKEN_SERVICE, type TokenService } from "../domain/token-service";
 import { TWO_FACTOR_SERVICE, type TwoFactorService } from "../domain/two-factor-service";
+import { TokenPairIssuer } from "./token-pair-issuer";
 
 export interface LoginInput {
   email: string;
@@ -14,6 +14,7 @@ export interface LoginInput {
 export interface LoginResult {
   requiresTwoFactor: boolean;
   accessToken?: string;
+  refreshToken?: string;
   email?: string;
 }
 
@@ -22,8 +23,8 @@ export class LoginUseCase {
   constructor(
     @Inject(USER_REPOSITORY) private readonly repository: UserRepository,
     @Inject(PASSWORD_HASHER) private readonly passwordHasher: PasswordHasher,
-    @Inject(TOKEN_SERVICE) private readonly tokenService: TokenService,
     @Inject(TWO_FACTOR_SERVICE) private readonly twoFactorService: TwoFactorService,
+    private readonly tokenPairIssuer: TokenPairIssuer,
   ) {}
 
   async execute(input: LoginInput): Promise<LoginResult> {
@@ -53,8 +54,8 @@ export class LoginUseCase {
       }
     }
 
-    const accessToken = this.tokenService.sign({ sub: user.id, email: user.email });
-    return { requiresTwoFactor: false, accessToken, email: user.email };
+    const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(user.id, user.email);
+    return { requiresTwoFactor: false, accessToken, refreshToken, email: user.email };
   }
 
   private async tryConsumeBackupCode(user: User, code: string): Promise<boolean> {

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, Res } from "@nestjs/common";
+import { Body, Controller, Get, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
 import { RegisterFirstUserUseCase } from "../application/register-first-user.use-case";
@@ -8,11 +8,18 @@ import { SetupTwoFactorUseCase } from "../application/setup-two-factor.use-case"
 import { EnableTwoFactorUseCase } from "../application/enable-two-factor.use-case";
 import { DisableTwoFactorUseCase } from "../application/disable-two-factor.use-case";
 import { GetTwoFactorStatusUseCase } from "../application/get-two-factor-status.use-case";
+import { RefreshAccessTokenUseCase } from "../application/refresh-access-token.use-case";
+import { LogoutUseCase } from "../application/logout.use-case";
 import { AuthCredentialsDto } from "./auth-credentials.dto";
 import { EnableTwoFactorDto } from "./enable-two-factor.dto";
 import { DisableTwoFactorDto } from "./disable-two-factor.dto";
 import { Public } from "./public.decorator";
-import { TOKEN_COOKIE, buildTokenCookieOptions } from "./token-cookie";
+import {
+  TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+  buildTokenCookieOptions,
+  buildRefreshTokenCookieOptions,
+} from "./token-cookie";
 
 const AUTH_ATTEMPT_LIMIT = { default: { ttl: 60_000, limit: 5 } };
 
@@ -26,6 +33,8 @@ export class AuthController {
     private readonly enableTwoFactor: EnableTwoFactorUseCase,
     private readonly disableTwoFactor: DisableTwoFactorUseCase,
     private readonly getTwoFactorStatus: GetTwoFactorStatusUseCase,
+    private readonly refreshAccessToken: RefreshAccessTokenUseCase,
+    private readonly logoutUseCase: LogoutUseCase,
   ) {}
 
   @Public()
@@ -44,7 +53,8 @@ export class AuthController {
   ) {
     const result = await this.registerFirstUser.execute(dto);
     res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
-    return result;
+    res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
+    return { accessToken: result.accessToken, email: result.email };
   }
 
   @Public()
@@ -56,16 +66,36 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.login.execute(dto);
-    if (result.accessToken) {
+    if (result.accessToken && result.refreshToken) {
       res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
+      res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
     }
-    return result;
+    return { requiresTwoFactor: result.requiresTwoFactor, accessToken: result.accessToken, email: result.email };
+  }
+
+  @Public()
+  @Post("refresh")
+  async refresh(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const rawToken = req.cookies?.[REFRESH_TOKEN_COOKIE];
+    if (!rawToken) {
+      res.clearCookie(TOKEN_COOKIE, { path: "/" });
+      res.clearCookie(REFRESH_TOKEN_COOKIE, { path: "/auth" });
+      throw new UnauthorizedException("Sessão expirada. Faça login novamente.");
+    }
+
+    const result = await this.refreshAccessToken.execute(rawToken);
+    res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
+    res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
+    return { ok: true };
   }
 
   @Post("logout")
   @Public()
-  logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+  async logout(@Req() req: Request, @Res({ passthrough: true }) res: Response) {
+    const rawToken = req.cookies?.[REFRESH_TOKEN_COOKIE];
+    await this.logoutUseCase.execute(rawToken);
     res.clearCookie(TOKEN_COOKIE, { path: "/" });
+    res.clearCookie(REFRESH_TOKEN_COOKIE, { path: "/auth" });
     return { ok: true };
   }
 

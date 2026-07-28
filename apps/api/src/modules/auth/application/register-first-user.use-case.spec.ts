@@ -2,7 +2,7 @@ import { ConflictException } from "@nestjs/common";
 import { RegisterFirstUserUseCase } from "./register-first-user.use-case";
 import type { UserRepository } from "../domain/user.repository";
 import type { PasswordHasher } from "../domain/password-hasher";
-import type { TokenService } from "../domain/token-service";
+import type { TokenPairIssuer } from "./token-pair-issuer";
 
 function buildUseCase(existingUserCount: number) {
   const repository: UserRepository = {
@@ -17,13 +17,12 @@ function buildUseCase(existingUserCount: number) {
     hash: jest.fn().mockResolvedValue("hashed-password"),
     compare: jest.fn(),
   };
-  const tokenService: TokenService = {
-    sign: jest.fn().mockReturnValue("signed-jwt-token"),
-    verify: jest.fn(),
-  };
+  const tokenPairIssuer: TokenPairIssuer = {
+    issue: jest.fn().mockResolvedValue({ accessToken: "signed-jwt-token", refreshToken: "raw-refresh-token" }),
+  } as unknown as TokenPairIssuer;
 
   return {
-    useCase: new RegisterFirstUserUseCase(repository, passwordHasher, tokenService),
+    useCase: new RegisterFirstUserUseCase(repository, passwordHasher, tokenPairIssuer),
     repository,
     passwordHasher,
   };
@@ -37,7 +36,11 @@ describe("RegisterFirstUserUseCase", () => {
 
     expect(passwordHasher.hash).toHaveBeenCalledWith("senha-forte");
     expect(repository.save).toHaveBeenCalled();
-    expect(result).toEqual({ accessToken: "signed-jwt-token", email: "admin@forgedesk.local" });
+    expect(result).toEqual({
+      accessToken: "signed-jwt-token",
+      refreshToken: "raw-refresh-token",
+      email: "admin@forgedesk.local",
+    });
   });
 
   it("recusa criar uma segunda conta quando já existe um usuário", async () => {
