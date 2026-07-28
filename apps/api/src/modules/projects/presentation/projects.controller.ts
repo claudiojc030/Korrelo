@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query } from "@nestjs/common";
 import { ListProjectsUseCase } from "../application/list-projects.use-case";
 import { GetProjectUseCase } from "../application/get-project.use-case";
 import { CreateProjectUseCase } from "../application/create-project.use-case";
@@ -13,6 +13,7 @@ import { ProvisionDatabaseUseCase } from "../application/provision-database.use-
 import { DeprovisionDatabaseUseCase } from "../application/deprovision-database.use-case";
 import { GetManagedDatabaseUseCase } from "../application/get-managed-database.use-case";
 import { UpdateProjectSettingsUseCase } from "../application/update-project-settings.use-case";
+import { GetProjectLogsUseCase, type LogTarget } from "../application/get-project-logs.use-case";
 import { CreateProjectDto } from "./create-project.dto";
 import { DetectStackDto } from "./detect-stack.dto";
 import { SetEnvVarsDto } from "./set-env-vars.dto";
@@ -36,6 +37,7 @@ export class ProjectsController {
     private readonly deprovisionDatabase: DeprovisionDatabaseUseCase,
     private readonly getManagedDatabase: GetManagedDatabaseUseCase,
     private readonly updateProjectSettings: UpdateProjectSettingsUseCase,
+    private readonly getProjectLogs: GetProjectLogsUseCase,
   ) {}
 
   @Get()
@@ -71,6 +73,13 @@ export class ProjectsController {
   @Patch(":id/settings")
   updateSettings(@Param("id") id: string, @Body() dto: UpdateProjectSettingsDto) {
     return this.updateProjectSettings.execute(id, dto);
+  }
+
+  @Get(":id/logs")
+  getLogs(@Param("id") id: string, @Query("target") target?: string, @Query("tail") tail?: string) {
+    const logTarget: LogTarget = target === "database" ? "database" : "app";
+    const tailLines = Math.min(Math.max(Number.parseInt(tail ?? "200", 10) || 200, 20), 2000);
+    return this.getProjectLogs.execute(id, logTarget, tailLines);
   }
 
   @Get(":id/database")

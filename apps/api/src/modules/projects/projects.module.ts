@@ -15,6 +15,7 @@ import { ProvisionDatabaseUseCase } from "./application/provision-database.use-c
 import { DeprovisionDatabaseUseCase } from "./application/deprovision-database.use-case";
 import { GetManagedDatabaseUseCase } from "./application/get-managed-database.use-case";
 import { UpdateProjectSettingsUseCase } from "./application/update-project-settings.use-case";
+import { GetProjectLogsUseCase } from "./application/get-project-logs.use-case";
 import { PrismaProjectRepository } from "./infrastructure/prisma-project.repository";
 import { PrismaEnvVarRepository } from "./infrastructure/prisma-env-var.repository";
 import { PrismaManagedDatabaseRepository } from "./infrastructure/prisma-managed-database.repository";
@@ -27,6 +28,7 @@ import { DockerComposeFileBuilder } from "./infrastructure/docker-compose-file-b
 import { PortAllocator } from "./infrastructure/port-allocator";
 import { ResourceBudgetCalculator } from "./infrastructure/resource-budget-calculator";
 import { HttpHealthChecker } from "./infrastructure/http-health-checker";
+import { DockerLogReader } from "./infrastructure/docker-log-reader";
 import { ProjectDiskUsageService } from "./infrastructure/project-disk-usage.service";
 import { PROJECT_REPOSITORY } from "./domain/project.repository";
 import { ENV_VAR_REPOSITORY } from "./domain/env-var.repository";
@@ -36,6 +38,7 @@ import { REPOSITORY_CLONER } from "./domain/repository-cloner";
 import { DOCKERFILE_GENERATOR } from "./domain/dockerfile-generator";
 import { CONTAINER_ORCHESTRATOR } from "./domain/container-orchestrator";
 import { HEALTH_CHECKER } from "./domain/health-checker";
+import { LOG_READER } from "./domain/log-reader";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
 @Module({
@@ -57,6 +60,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     DeprovisionDatabaseUseCase,
     GetManagedDatabaseUseCase,
     UpdateProjectSettingsUseCase,
+    GetProjectLogsUseCase,
     NodeDockerfileGenerator,
     DockerComposeFileBuilder,
     PortAllocator,
@@ -70,6 +74,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: DOCKERFILE_GENERATOR, useClass: DockerfileGeneratorRegistry },
     { provide: CONTAINER_ORCHESTRATOR, useClass: DockerComposeOrchestrator },
     { provide: HEALTH_CHECKER, useClass: HttpHealthChecker },
+    { provide: LOG_READER, useClass: DockerLogReader },
   ],
   exports: [PROJECT_REPOSITORY],
 })

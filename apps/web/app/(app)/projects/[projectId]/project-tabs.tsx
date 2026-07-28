@@ -18,6 +18,7 @@ export function ProjectTabs({
     { href: `/projects/${projectId}/env`, label: "Variáveis de Ambiente" },
     ...(databaseEnabled ? [{ href: `/projects/${projectId}/database`, label: "Banco de Dados" }] : []),
     ...(terminalEnabled ? [{ href: `/projects/${projectId}/terminal`, label: "Terminal" }] : []),
+    { href: `/projects/${projectId}/logs`, label: "Logs" },
     { href: `/projects/${projectId}/settings`, label: "Configurações" },
   ];
 
