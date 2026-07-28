@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LayoutDashboard, FolderGit2, ShieldHalf, ShieldCheck, LogOut } from "lucide-react";
 import { apiFetch } from "../lib/api-client";
+import { ThemeToggle } from "./theme-toggle";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -77,6 +78,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="truncate">{email}</span>
             </div>
           )}
+          <ThemeToggle />
           <button
             onClick={handleLogout}
             className="flex items-center gap-3 rounded-lg px-3.5 py-2.5 text-[14px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"

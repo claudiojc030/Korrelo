@@ -2,7 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root,
+:root[data-theme="dark"] {
   --color-background: #0f172a;
   --color-surface: #131b2e;
   --color-foreground: #f8fafc;
@@ -21,6 +22,25 @@
   color-scheme: dark;
 }
 
+:root[data-theme="light"] {
+  --color-background: #f8fafc;
+  --color-surface: #ffffff;
+  --color-foreground: #0f172a;
+  --color-primary: #e2e8f0;
+  --color-on-primary: #0f172a;
+  --color-secondary: #cbd5e1;
+  --color-accent: #16a34a;
+  --color-accent-foreground: #ffffff;
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #64748b;
+  --color-border: #e2e8f0;
+  --color-border-subtle: rgba(15, 23, 42, 0.08);
+  --color-destructive: #dc2626;
+  --color-warning: #d97706;
+  --color-ring: #16a34a;
+  color-scheme: light;
+}
+
 * {
   border-color: var(--color-border);
 }
@@ -29,6 +49,7 @@ html,
 body {
   background: var(--color-background);
   color: var(--color-foreground);
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 body {
