@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Backup diário do banco Core (SQLite ou Postgres, dependendo do DATABASE_URL)
-// e dos bancos gerenciados por projeto (containers postgres/mongodb). Redis é
-// pulado de propósito — geralmente é cache/fila, não dado que precisa persistir.
+// e dos bancos gerenciados por projeto (containers postgres/mongodb sempre;
+// redis só quando o projeto marcou explicitamente como persistente, já que
+// por padrão é tratado como cache/fila descartável).
 //
 // Uso: node scripts/backup.js   (roda a partir de apps/api, ou via scripts/backup.sh)
 // Env opcionais: BACKUP_DIR (padrão ~/forgedesk-backups), BACKUP_RETENTION_DAYS (padrão 7)
@@ -87,7 +88,16 @@ async function backupManagedDatabases(prisma, destDir) {
         await fs.writeFile(dest, stdout);
         console.log(`${project.name} (MongoDB) -> ${dest}`);
       } else if (db.type === "redis") {
-        console.log(`${project.name} (Redis) — pulado (cache/fila, não costuma precisar de backup).`);
+        if (!db.persistent) {
+          console.log(`${project.name} (Redis) — pulado (marcado como cache/fila, sem persistência).`);
+          continue;
+        }
+        const dest = path.join(destDir, `${safeName}-redis.rdb`);
+        await run("docker", ["exec", containerName, "redis-cli", "-a", db.password, "SAVE"], {
+          maxBuffer: MAX_BUFFER,
+        });
+        await run("docker", ["cp", `${containerName}:/data/dump.rdb`, dest], { maxBuffer: MAX_BUFFER });
+        console.log(`${project.name} (Redis) -> ${dest}`);
       }
     } catch (error) {
       console.error(`Falha ao fazer backup de "${project.name}": ${error.message}`);

@@ -14,6 +14,7 @@ const DEFAULT_CUSTOM_ENV_VAR_KEY = "DATABASE_URL";
 export interface ProvisionDatabaseOptions {
   connectionString?: string;
   envVarKey?: string;
+  persistRedis?: boolean;
 }
 
 function buildConnectionEnvVar(db: ManagedDatabase): { key: string; value: string } {
@@ -71,7 +72,7 @@ export class ProvisionDatabaseUseCase {
       database = ManagedDatabase.createCustom(projectId, connectionString, envVarKey);
     } else {
       const password = crypto.randomBytes(16).toString("hex");
-      database = ManagedDatabase.createManaged(projectId, type, password);
+      database = ManagedDatabase.createManaged(projectId, type, password, options.persistRedis ?? false);
     }
 
     await this.databaseRepository.save(database);

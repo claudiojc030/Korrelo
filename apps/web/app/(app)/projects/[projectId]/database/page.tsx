@@ -16,6 +16,7 @@ interface ManagedDatabase {
   databaseName: string | null;
   connectionString: string | null;
   envVarKey: string | null;
+  persistent: boolean;
   createdAt: string;
 }
 
@@ -52,6 +53,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
   const [customOpen, setCustomOpen] = useState(false);
   const [customEnvVarKey, setCustomEnvVarKey] = useState("DATABASE_URL");
   const [customConnectionString, setCustomConnectionString] = useState("");
+  const [redisPersistent, setRedisPersistent] = useState(false);
 
   function load() {
     apiFetch(`/projects/${params.projectId}/database`)
@@ -136,12 +138,28 @@ export default function DatabasePage({ params }: { params: { projectId: string }
                 <span className="text-[13.5px] font-medium">{TYPE_LABEL[type]}</span>
               </div>
               <p className="mt-1 text-[12px] text-muted-foreground">
-                {type === "postgres" && "Banco relacional, com volume persistente."}
-                {type === "redis" && "Cache/fila em memória."}
-                {type === "mongodb" && "Banco de documentos, com volume persistente."}
+                {type === "postgres" && "Banco relacional, com volume persistente e no backup diário."}
+                {type === "redis" && "Cache/fila em memória — por padrão não sobrevive a reinício nem entra no backup."}
+                {type === "mongodb" && "Banco de documentos, com volume persistente e no backup diário."}
               </p>
+
+              {type === "redis" && (
+                <label className="mt-2.5 flex items-start gap-2 text-[12px] text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={redisPersistent}
+                    onChange={(e) => setRedisPersistent(e.target.checked)}
+                    className="mt-0.5 accent-accent"
+                  />
+                  <span>
+                    Este Redis guarda dado importante (não sei ao certo? marque por segurança) — persistir em
+                    disco e incluir no backup diário. Deixa a escrita um pouco mais lenta.
+                  </span>
+                </label>
+              )}
+
               <button
-                onClick={() => handleProvision(type)}
+                onClick={() => handleProvision(type, type === "redis" ? { persistRedis: redisPersistent } : {})}
                 disabled={provisioning !== null}
                 className="mt-3 inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
               >
@@ -257,6 +275,18 @@ export default function DatabasePage({ params }: { params: { projectId: string }
             {db.type !== "redis" && <InfoRow label="Banco" value={db.databaseName} />}
             <InfoRow label="Senha" value={reveal ? db.password : "••••••••"} />
             <InfoRow label="Connection string" value={<span className="break-all">{connectionString}</span>} />
+            {db.type === "redis" && (
+              <InfoRow
+                label="Persistência / backup"
+                value={
+                  db.persistent ? (
+                    <span className="text-accent">Ativada — incluído no backup diário</span>
+                  ) : (
+                    <span className="text-muted-foreground">Desativada — cache descartável</span>
+                  )
+                }
+              />
+            )}
           </>
         )}
       </div>

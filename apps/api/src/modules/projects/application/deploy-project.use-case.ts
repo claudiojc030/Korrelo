@@ -97,6 +97,7 @@ export class DeployProjectUseCase {
             // Metade do orçamento do app: bancos gerenciados são um extra, não
             // podem competir igualmente pela RAM já apertada de uma VPS pequena.
             memoryLimitMb: Math.round(memoryLimitMb / 2),
+            persistent: managedContainerDatabase.persistent,
           }
         : undefined,
     };

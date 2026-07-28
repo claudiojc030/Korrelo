@@ -4,4 +4,5 @@ export class ProvisionDatabaseDto {
   type!: DatabaseType;
   connectionString?: string;
   envVarKey?: string;
+  persistRedis?: boolean;
 }

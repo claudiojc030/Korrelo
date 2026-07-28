@@ -107,6 +107,7 @@ export class ProjectsController {
     return this.provisionDatabase.execute(id, dto.type, {
       connectionString: dto.connectionString,
       envVarKey: dto.envVarKey,
+      persistRedis: dto.persistRedis,
     });
   }
 

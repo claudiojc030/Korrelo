@@ -24,6 +24,7 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
         databaseName: db.databaseName,
         connectionString: db.connectionString,
         envVarKey: db.envVarKey,
+        persistent: db.persistent,
         createdAt: db.createdAt,
       },
       update: {
@@ -33,6 +34,7 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
         databaseName: db.databaseName,
         connectionString: db.connectionString,
         envVarKey: db.envVarKey,
+        persistent: db.persistent,
       },
     });
     return this.toDomain(row);
@@ -51,6 +53,7 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
     databaseName: string | null;
     connectionString: string | null;
     envVarKey: string | null;
+    persistent: boolean;
     createdAt: Date;
   }): ManagedDatabase {
     return new ManagedDatabase(
@@ -62,6 +65,7 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
       row.databaseName,
       row.connectionString,
       row.envVarKey,
+      row.persistent,
       row.createdAt,
     );
   }

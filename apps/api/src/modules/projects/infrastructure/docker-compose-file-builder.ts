@@ -62,13 +62,42 @@ export class DockerComposeFileBuilder {
     }
 
     if (db.type === "redis") {
+      const command = db.persistent
+        ? [
+            "redis-server",
+            "--requirepass",
+            db.password,
+            "--maxmemory",
+            `${db.memoryLimitMb}mb`,
+            "--maxmemory-policy",
+            "allkeys-lru",
+            // Sem persistência por padrão (é cache/fila) — só liga RDB+AOF
+            // quando o projeto marcou esse Redis como "guarda dado importante".
+            "--save",
+            "60",
+            "1000",
+            "--appendonly",
+            "yes",
+          ]
+        : [
+            "redis-server",
+            "--requirepass",
+            db.password,
+            "--maxmemory",
+            `${db.memoryLimitMb}mb`,
+            "--maxmemory-policy",
+            "allkeys-lru",
+          ];
+
       return [
         "  db:",
         "    image: redis:7-alpine",
         "    restart: unless-stopped",
-        `    command: ["redis-server", "--requirepass", "${db.password}", "--maxmemory", "${db.memoryLimitMb}mb", "--maxmemory-policy", "allkeys-lru"]`,
+        `    command: [${command.map((c) => `"${c}"`).join(", ")}]`,
         `    mem_limit: ${db.memoryLimitMb}m`,
+        ...(db.persistent ? ["    volumes:", "      - db-data:/data"] : []),
         ...LOGGING_BLOCK,
+        ...(db.persistent ? ["volumes:", "  db-data:"] : []),
       ];
     }
 

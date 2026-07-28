@@ -10,10 +10,19 @@ export class ManagedDatabase {
     public readonly databaseName: string | null,
     public readonly connectionString: string | null,
     public readonly envVarKey: string | null,
+    // Só relevante pro Redis: Postgres/MongoDB sempre persistem em volume e
+    // sempre entram no backup. Redis nasce efêmero (cache/fila) e só ganha
+    // volume + entra no backup diário se isso for marcado explicitamente.
+    public readonly persistent: boolean,
     public readonly createdAt: Date,
   ) {}
 
-  static createManaged(projectId: string, type: "postgres" | "redis" | "mongodb", password: string): ManagedDatabase {
+  static createManaged(
+    projectId: string,
+    type: "postgres" | "redis" | "mongodb",
+    password: string,
+    persistent = false,
+  ): ManagedDatabase {
     return new ManagedDatabase(
       crypto.randomUUID(),
       projectId,
@@ -23,6 +32,7 @@ export class ManagedDatabase {
       "forgedesk",
       null,
       null,
+      type === "redis" ? persistent : true,
       new Date(),
     );
   }
@@ -37,6 +47,7 @@ export class ManagedDatabase {
       null,
       connectionString,
       envVarKey,
+      false,
       new Date(),
     );
   }

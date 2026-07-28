@@ -34,6 +34,7 @@ model ManagedDatabase {
   databaseName     String?
   connectionString String?
   envVarKey        String?
+  persistent       Boolean  @default(false)
   createdAt        DateTime @default(now())
 }
 
