@@ -64,6 +64,9 @@ fi
 log "Instalando nginx + certbot"
 sudo apt-get install -y nginx certbot python3-certbot-nginx
 
+log "Instalando sqlite3 (usado no backup do banco Core)"
+sudo apt-get install -y sqlite3
+
 log "Preparando diretório de sites por projeto"
 FORGEDESK_SITES_DIR=/etc/nginx/forgedesk-sites
 sudo mkdir -p "$FORGEDESK_SITES_DIR"
@@ -205,6 +208,18 @@ log "Subindo o Core via PM2"
 pm2 start ecosystem.config.js
 pm2 save
 pm2 startup systemd -u "$USER" --hp "$HOME" | tail -1 | sudo bash || true
+
+log "Configurando backup automático diário"
+# Backup do banco Core + bancos gerenciados por projeto (Postgres/MongoDB via
+# docker exec; Redis é pulado — cache/fila, não costuma precisar). Guarda os
+# últimos 7 dias por padrão em ~/forgedesk-backups (BACKUP_RETENTION_DAYS e
+# BACKUP_DIR são configuráveis via env se quiser mudar).
+REPO_DIR="$(pwd)"
+BACKUP_LOG="$HOME/forgedesk-backups/backup.log"
+mkdir -p "$(dirname "$BACKUP_LOG")"
+BACKUP_CRON_LINE="0 3 * * * cd ${REPO_DIR} && bash scripts/backup.sh >> ${BACKUP_LOG} 2>&1"
+(crontab -l 2>/dev/null | grep -v "scripts/backup.sh"; echo "$BACKUP_CRON_LINE") | crontab -
+echo "Backup agendado todo dia às 3h. Rode manualmente com: bash scripts/backup.sh"
 
 if [ -n "$DOMAIN" ]; then
   log "Configurando site + TLS do ForgeDesk (${DOMAIN})"
