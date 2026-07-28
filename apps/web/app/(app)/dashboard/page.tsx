@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Cpu, MemoryStick, HardDrive, Clock, Box, Server, ExternalLink, SquareTerminal } from "lucide-react";
 import { CONTAINER_MEMORY_LIMIT_MB, type ContainerSummary, type Project, type SystemMetrics } from "@forgedesk/shared-types";
 import { MetricTile } from "./metric-tile";
+import { MetricsHistoryChart } from "./metrics-history-chart";
 import { GithubConnectButton } from "../../github-connect-button";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
 import { AutoRefresh } from "../../../components/auto-refresh";
@@ -149,6 +150,8 @@ export default async function DashboardPage() {
             <Clock size={15} strokeWidth={1.75} />
             Uptime <span className="font-mono text-foreground">{formatUptime(metrics.uptimeSeconds)}</span>
           </div>
+
+          <MetricsHistoryChart />
 
           <div className="mt-8">
             <div className="mb-2.5 flex items-center gap-2 text-muted-foreground">

@@ -96,6 +96,16 @@ model User {
   refreshTokens        RefreshToken[]
 }
 
+model MetricSample {
+  id              String   @id @default(uuid())
+  cpuPercent      Float
+  usedMemPercent  Float
+  usedDiskPercent Float
+  capturedAt      DateTime @default(now())
+
+  @@index([capturedAt])
+}
+
 model RefreshToken {
   id         String    @id @default(uuid())
   userId     String
