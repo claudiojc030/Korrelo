@@ -160,6 +160,47 @@ sudo ufw allow 3000/tcp      # Web do ForgeDesk direto pelo IP
 sudo ufw allow 3001/tcp      # API do ForgeDesk direto pelo IP
 sudo ufw --force enable
 
+log "Hardening de acesso SSH"
+AUTHORIZED_KEYS="$HOME/.ssh/authorized_keys"
+if [ -s "$AUTHORIZED_KEYS" ]; then
+  log "Instalando fail2ban"
+  sudo apt-get install -y fail2ban
+  sudo tee /etc/fail2ban/jail.local > /dev/null <<'JAILCONF'
+[sshd]
+enabled = true
+maxretry = 5
+findtime = 10m
+bantime = 1h
+JAILCONF
+  sudo systemctl enable --now fail2ban
+  sudo systemctl restart fail2ban
+
+  log "Desabilitando login por senha no SSH (você já tem chave em authorized_keys)"
+  SSHD_CONFIG=/etc/ssh/sshd_config
+  SSHD_CONFIG_TMP=$(mktemp)
+  sudo cp "$SSHD_CONFIG" "$SSHD_CONFIG_TMP"
+  sudo sed -i \
+    -e 's/^#\?PasswordAuthentication[[:space:]].*/PasswordAuthentication no/' \
+    -e 's/^#\?PermitRootLogin[[:space:]].*/PermitRootLogin no/' \
+    -e 's/^#\?ChallengeResponseAuthentication[[:space:]].*/ChallengeResponseAuthentication no/' \
+    "$SSHD_CONFIG_TMP"
+  grep -q '^PasswordAuthentication' "$SSHD_CONFIG_TMP" || echo "PasswordAuthentication no" | sudo tee -a "$SSHD_CONFIG_TMP" > /dev/null
+  grep -q '^PermitRootLogin' "$SSHD_CONFIG_TMP" || echo "PermitRootLogin no" | sudo tee -a "$SSHD_CONFIG_TMP" > /dev/null
+
+  if sudo sshd -t -f "$SSHD_CONFIG_TMP"; then
+    sudo cp "$SSHD_CONFIG_TMP" "$SSHD_CONFIG"
+    sudo systemctl restart ssh
+    echo "SSH agora só aceita chave (login root e por senha desabilitados). fail2ban ativo."
+    warn "Antes de fechar este terminal, abra OUTRO terminal e confirme que ainda consegue entrar via SSH com sua chave."
+  else
+    warn "Config de sshd_config gerada ficou inválida — não mexi no arquivo real, por segurança. Rode este bloco manualmente depois."
+  fi
+  rm -f "$SSHD_CONFIG_TMP"
+else
+  warn "Nenhuma chave encontrada em ${AUTHORIZED_KEYS} — pulando hardening de SSH pra não te trancar fora."
+  warn "Adicione sua chave pública lá e rode este script de novo (ou só essa etapa manualmente)."
+fi
+
 log "Subindo o Core via PM2"
 pm2 start ecosystem.config.js
 pm2 save
