@@ -11,6 +11,7 @@ coverage/
 .DS_Store
 Thumbs.db
 /apps/api/prisma/*.db
+/apps/api/prisma/*.db-journal
 *.tsbuildinfo
 /apps/api/workspace/
 /infra/nginx/certs/
