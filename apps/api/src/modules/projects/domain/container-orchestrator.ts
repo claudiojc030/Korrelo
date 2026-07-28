@@ -1,5 +1,6 @@
 export const CONTAINER_ORCHESTRATOR = Symbol("CONTAINER_ORCHESTRATOR");
 export const COMPOSE_FILENAME = "docker-compose.forgedesk.yml";
+export const ENV_FILENAME = ".env.forgedesk";
 
 export interface DeployConfig {
   projectPath: string;

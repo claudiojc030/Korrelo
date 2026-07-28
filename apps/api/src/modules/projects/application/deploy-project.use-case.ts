@@ -15,10 +15,12 @@ import { DOCKERFILE_GENERATOR, type DockerfileGenerator } from "../domain/docker
 import {
   CONTAINER_ORCHESTRATOR,
   COMPOSE_FILENAME,
+  ENV_FILENAME,
   type ContainerOrchestrator,
   type TeardownConfig,
 } from "../domain/container-orchestrator";
 import { HEALTH_CHECKER, type HealthChecker } from "../domain/health-checker";
+import { ENV_VAR_REPOSITORY, type EnvVarRepository } from "../domain/env-var.repository";
 import { PortAllocator } from "../infrastructure/port-allocator";
 import { ResourceBudgetCalculator } from "../infrastructure/resource-budget-calculator";
 import { DockerComposeFileBuilder } from "../infrastructure/docker-compose-file-builder";
@@ -40,6 +42,7 @@ export class DeployProjectUseCase {
     @Inject(DOCKERFILE_GENERATOR) private readonly dockerfileGenerator: DockerfileGenerator,
     @Inject(CONTAINER_ORCHESTRATOR) private readonly orchestrator: ContainerOrchestrator,
     @Inject(HEALTH_CHECKER) private readonly healthChecker: HealthChecker,
+    @Inject(ENV_VAR_REPOSITORY) private readonly envVarRepository: EnvVarRepository,
     private readonly portAllocator: PortAllocator,
     private readonly resourceBudget: ResourceBudgetCalculator,
     private readonly composeFileBuilder: DockerComposeFileBuilder,
@@ -78,6 +81,12 @@ export class DeployProjectUseCase {
 
     const composeContent = this.composeFileBuilder.build(deployConfig);
     await fs.writeFile(path.join(projectPath, COMPOSE_FILENAME), composeContent, "utf-8");
+
+    // O compose sempre referencia esse arquivo via env_file — precisa existir mesmo
+    // vazio, ou o `docker compose up` falha procurando um arquivo que não está lá.
+    const envVars = await this.envVarRepository.findByProjectId(project.id);
+    const envFileContent = envVars.map((v) => `${v.key}=${v.value}`).join("\n") + "\n";
+    await fs.writeFile(path.join(projectPath, ENV_FILENAME), envFileContent, "utf-8");
 
     try {
       await this.orchestrator.deploy(deployConfig);

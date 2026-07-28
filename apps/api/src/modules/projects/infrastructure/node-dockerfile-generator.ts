@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import type { DetectedStack } from "@forgedesk/shared-types";
 import type { DockerfileGenerator, GeneratedDockerfile } from "../domain/dockerfile-generator";
+import { COMPOSE_FILENAME, ENV_FILENAME } from "../domain/container-orchestrator";
 
 const NODE_BASE_IMAGE = "node:20-alpine";
 
@@ -46,7 +47,12 @@ export class NodeDockerfileGenerator implements DockerfileGenerator {
 
     return {
       dockerfile: lines.join("\n") + "\n",
-      dockerignore: ["node_modules", ".git", ".next", "dist", "*.log"].join("\n") + "\n",
+      dockerignore:
+        // .env.forgedesk carrega segredos do projeto: env_file já injeta essas
+        // variáveis no container em runtime, então o arquivo NUNCA deve ser copiado
+        // pra dentro da imagem (senão fica gravado permanentemente numa camada).
+        ["node_modules", ".git", ".next", "dist", "*.log", ENV_FILENAME, COMPOSE_FILENAME].join("\n") +
+        "\n",
     };
   }
 }

@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { DeployConfig } from "../domain/container-orchestrator";
+import { ENV_FILENAME } from "../domain/container-orchestrator";
 
 @Injectable()
 export class DockerComposeFileBuilder {
@@ -10,6 +11,8 @@ export class DockerComposeFileBuilder {
       "    build: .",
       `    container_name: ${config.containerName}`,
       "    restart: unless-stopped",
+      `    env_file:`,
+      `      - ${ENV_FILENAME}`,
       "    ports:",
       `      - "${config.hostPort}:${config.containerPort}"`,
       `    mem_limit: ${config.memoryLimitMb}m`,

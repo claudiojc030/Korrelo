@@ -41,7 +41,9 @@ function ProjectCard({ project, accent }: { project: Project; accent: "good" | "
       className={`flex flex-col rounded-xl border border-border-subtle bg-surface p-4 ${borderClass}`}
     >
       <div className="flex items-start justify-between gap-3">
-        <p className="truncate font-medium text-foreground">{project.name}</p>
+        <Link href={`/projects/${project.id}`} className="truncate font-medium text-foreground hover:underline">
+          {project.name}
+        </Link>
         <DeleteProjectButton projectId={project.id} projectName={project.name} />
       </div>
       <p className="-mt-1 truncate text-[12px] text-muted-foreground">{project.repoUrl}</p>
