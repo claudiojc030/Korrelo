@@ -15,3 +15,10 @@ model Project {
   status         String   @default("detected")
   createdAt      DateTime @default(now())
 }
+
+model GithubInstallation {
+  id             String   @id @default(uuid())
+  installationId Int      @unique
+  accountLogin   String
+  createdAt      DateTime @default(now())
+}

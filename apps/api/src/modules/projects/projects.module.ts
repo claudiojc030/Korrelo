@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { GithubModule } from "../github/github.module";
 import { ProjectsController } from "./presentation/projects.controller";
 import { ListProjectsUseCase } from "./application/list-projects.use-case";
 import { CreateProjectUseCase } from "./application/create-project.use-case";
@@ -13,6 +14,7 @@ import { REPOSITORY_CLONER } from "./domain/repository-cloner";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
 @Module({
+  imports: [GithubModule],
   controllers: [ProjectsController],
   providers: [
     PrismaService,
