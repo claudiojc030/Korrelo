@@ -1,3 +1,4 @@
+import Link from "next/link";
 import type { DetectedStack, Project } from "@forgedesk/shared-types";
 import { ImportFromGithub } from "./import-from-github";
 import { DeployButton } from "./deploy-button";
@@ -48,14 +49,22 @@ function ProjectCard({ project }: { project: Project }) {
         </p>
       )}
       {project.status === "running" && project.assignedPort ? (
-        <a
-          href={`http://localhost:${project.assignedPort}`}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-2 inline-block text-sm text-green-400 underline"
-        >
-          Rodando em localhost:{project.assignedPort}
-        </a>
+        <div className="mt-2 flex items-center gap-3">
+          <a
+            href={`http://localhost:${project.assignedPort}`}
+            target="_blank"
+            rel="noreferrer"
+            className="text-sm text-green-400 underline"
+          >
+            Rodando em localhost:{project.assignedPort}
+          </a>
+          <Link
+            href={`/projects/${project.id}/terminal`}
+            className="text-sm text-neutral-400 underline hover:text-neutral-200"
+          >
+            Terminal
+          </Link>
+        </div>
       ) : (
         stack && <DeployButton projectId={project.id} />
       )}

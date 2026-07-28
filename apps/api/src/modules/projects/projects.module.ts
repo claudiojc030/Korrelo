@@ -45,5 +45,6 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: CONTAINER_ORCHESTRATOR, useClass: DockerComposeOrchestrator },
     { provide: HEALTH_CHECKER, useClass: HttpHealthChecker },
   ],
+  exports: [PROJECT_REPOSITORY],
 })
 export class ProjectsModule {}
