@@ -90,23 +90,31 @@ async function getContainers(): Promise<ContainerSummary[]> {
     if (rows.length === 0) return [];
 
     let memByName = new Map<string, number>();
+    let cpuByName = new Map<string, number>();
     try {
       const { stdout: statsOut } = await execFile("docker", [
         "stats",
         "--no-stream",
         "--format",
-        "{{.Name}}|{{.MemUsage}}",
+        "{{.Name}}|{{.MemUsage}}|{{.CPUPerc}}",
       ]);
+      const lines = statsOut.trim().split("\n").filter(Boolean);
       memByName = new Map(
-        statsOut
-          .trim()
-          .split("\n")
-          .filter(Boolean)
+        lines
           .map((line) => {
             const [name, memUsage] = line.split("|");
             return [name, parseMemUsageMb(memUsage)] as const;
           })
           .filter((entry): entry is [string, number] => entry[1] !== null),
+      );
+      cpuByName = new Map(
+        lines
+          .map((line) => {
+            const [name, , cpuPerc] = line.split("|");
+            const value = Number(cpuPerc?.replace("%", ""));
+            return [name, value] as const;
+          })
+          .filter((entry): entry is [string, number] => !Number.isNaN(entry[1])),
       );
     } catch {
       // docker stats pode ser lento/instável; degrada sem quebrar o dashboard inteiro.
@@ -116,6 +124,7 @@ async function getContainers(): Promise<ContainerSummary[]> {
       name: row.name,
       status: row.status,
       memUsageMb: memByName.get(row.name) ?? null,
+      cpuPercent: cpuByName.get(row.name) ?? null,
     }));
   } catch {
     return [];

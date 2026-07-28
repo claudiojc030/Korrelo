@@ -65,6 +65,7 @@ export interface ContainerSummary {
   name: string;
   status: string;
   memUsageMb: number | null;
+  cpuPercent: number | null;
 }
 
 export interface SystemMetrics {
