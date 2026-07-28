@@ -22,6 +22,21 @@ model Project {
   createdAt        DateTime @default(now())
   envVars          EnvVar[]
   managedDatabase  ManagedDatabase?
+  cronJobs         CronJob[]
+}
+
+model CronJob {
+  id         String    @id @default(uuid())
+  projectId  String
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name       String
+  command    String
+  schedule   String
+  enabled    Boolean   @default(true)
+  lastRunAt  DateTime?
+  lastStatus String?
+  lastOutput String?
+  createdAt  DateTime  @default(now())
 }
 
 model ManagedDatabase {

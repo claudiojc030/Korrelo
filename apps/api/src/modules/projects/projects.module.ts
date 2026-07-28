@@ -1,7 +1,9 @@
 import { Module } from "@nestjs/common";
+import { ScheduleModule } from "@nestjs/schedule";
 import { GithubModule } from "../github/github.module";
 import { AuthModule } from "../auth/auth.module";
 import { ProjectsController } from "./presentation/projects.controller";
+import { CronJobsController } from "./presentation/cron-jobs.controller";
 import { ListProjectsUseCase } from "./application/list-projects.use-case";
 import { GetProjectUseCase } from "./application/get-project.use-case";
 import { CreateProjectUseCase } from "./application/create-project.use-case";
@@ -19,6 +21,11 @@ import { UpdateProjectSettingsUseCase } from "./application/update-project-setti
 import { GetProjectLogsUseCase } from "./application/get-project-logs.use-case";
 import { AttachDomainUseCase } from "./application/attach-domain.use-case";
 import { DetachDomainUseCase } from "./application/detach-domain.use-case";
+import { ListCronJobsUseCase } from "./application/list-cron-jobs.use-case";
+import { CreateCronJobUseCase } from "./application/create-cron-job.use-case";
+import { UpdateCronJobUseCase } from "./application/update-cron-job.use-case";
+import { DeleteCronJobUseCase } from "./application/delete-cron-job.use-case";
+import { RunCronJobNowUseCase } from "./application/run-cron-job-now.use-case";
 import { PrismaProjectRepository } from "./infrastructure/prisma-project.repository";
 import { PrismaEnvVarRepository } from "./infrastructure/prisma-env-var.repository";
 import { PrismaManagedDatabaseRepository } from "./infrastructure/prisma-managed-database.repository";
@@ -34,6 +41,9 @@ import { HttpHealthChecker } from "./infrastructure/http-health-checker";
 import { DockerLogReader } from "./infrastructure/docker-log-reader";
 import { NginxCertbotDomainProvisioner } from "./infrastructure/nginx-certbot-domain-provisioner";
 import { ProjectDiskUsageService } from "./infrastructure/project-disk-usage.service";
+import { PrismaCronJobRepository } from "./infrastructure/prisma-cron-job.repository";
+import { DockerExecCronRunner } from "./infrastructure/docker-exec-cron-runner";
+import { CronSchedulerService } from "./infrastructure/cron-scheduler.service";
 import { EnvVarCipher } from "../../infrastructure/crypto/env-var-cipher";
 import { PROJECT_REPOSITORY } from "./domain/project.repository";
 import { ENV_VAR_REPOSITORY } from "./domain/env-var.repository";
@@ -45,13 +55,21 @@ import { CONTAINER_ORCHESTRATOR } from "./domain/container-orchestrator";
 import { HEALTH_CHECKER } from "./domain/health-checker";
 import { LOG_READER } from "./domain/log-reader";
 import { DOMAIN_PROVISIONER } from "./domain/domain-provisioner";
+import { CRON_JOB_REPOSITORY } from "./domain/cron-job.repository";
+import { CRON_JOB_RUNNER } from "./domain/cron-job-runner";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
 @Module({
-  imports: [GithubModule, AuthModule],
-  controllers: [ProjectsController],
+  imports: [GithubModule, AuthModule, ScheduleModule.forRoot()],
+  controllers: [ProjectsController, CronJobsController],
   providers: [
     PrismaService,
+    ListCronJobsUseCase,
+    CreateCronJobUseCase,
+    UpdateCronJobUseCase,
+    DeleteCronJobUseCase,
+    RunCronJobNowUseCase,
+    CronSchedulerService,
     ListProjectsUseCase,
     GetProjectUseCase,
     CreateProjectUseCase,
@@ -85,6 +103,8 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: HEALTH_CHECKER, useClass: HttpHealthChecker },
     { provide: LOG_READER, useClass: DockerLogReader },
     { provide: DOMAIN_PROVISIONER, useClass: NginxCertbotDomainProvisioner },
+    { provide: CRON_JOB_REPOSITORY, useClass: PrismaCronJobRepository },
+    { provide: CRON_JOB_RUNNER, useClass: DockerExecCronRunner },
   ],
   exports: [PROJECT_REPOSITORY],
 })

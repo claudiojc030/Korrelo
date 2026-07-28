@@ -19,6 +19,7 @@ export function ProjectTabs({
     ...(databaseEnabled ? [{ href: `/projects/${projectId}/database`, label: "Banco de Dados" }] : []),
     ...(terminalEnabled ? [{ href: `/projects/${projectId}/terminal`, label: "Terminal" }] : []),
     { href: `/projects/${projectId}/logs`, label: "Logs" },
+    { href: `/projects/${projectId}/cron`, label: "Cron" },
     { href: `/projects/${projectId}/settings`, label: "Configurações" },
   ];
 
