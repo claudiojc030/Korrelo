@@ -43,6 +43,7 @@ describe("FileBasedStackDetector", () => {
       recommendedPort: 3000,
       startCommand: "npm run start",
       buildCommand: "npm run build",
+      entryPoint: null,
     });
   });
 
@@ -92,8 +93,9 @@ describe("FileBasedStackDetector", () => {
       framework: "Laravel",
       packageManager: "composer",
       recommendedPort: 8000,
-      startCommand: "php artisan serve",
+      startCommand: "php artisan serve --host=0.0.0.0 --port=8000",
       buildCommand: null,
+      entryPoint: null,
     });
   });
 
@@ -107,6 +109,65 @@ describe("FileBasedStackDetector", () => {
     expect(result.language).toBe("Python");
     expect(result.framework).toBe("Django");
     expect(result.startCommand).toBe("python manage.py runserver 0.0.0.0:8000");
+  });
+
+  it("detecta Flask com Gunicorn no requirements.txt e usa gunicorn como start command", async () => {
+    const dir = await withFixture({
+      "requirements.txt": "Flask\nGunicorn\n",
+      "app.py": "from flask import Flask\napp = Flask(__name__)\n",
+    });
+
+    const result = await detector.detect(dir);
+
+    expect(result.framework).toBe("Flask");
+    expect(result.startCommand).toBe("gunicorn app:app --bind 0.0.0.0:5000");
+  });
+
+  it("detecta Go com framework Gin via go.mod", async () => {
+    const dir = await withFixture({
+      "go.mod": "module exemplo.com/app\n\nrequire github.com/gin-gonic/gin v1.9.0\n",
+    });
+
+    const result = await detector.detect(dir);
+
+    expect(result.language).toBe("Go");
+    expect(result.framework).toBe("Gin");
+    expect(result.recommendedPort).toBe(8080);
+  });
+
+  it("detecta Rust e extrai o nome do pacote do Cargo.toml", async () => {
+    const dir = await withFixture({
+      "Cargo.toml": '[package]\nname = "meu-servidor"\nversion = "0.1.0"\n\n[dependencies]\naxum = "0.7"\n',
+    });
+
+    const result = await detector.detect(dir);
+
+    expect(result.language).toBe("Rust");
+    expect(result.framework).toBe("Axum");
+    expect(result.entryPoint).toBe("meu-servidor");
+  });
+
+  it("detecta Java com Spring Boot via pom.xml (Maven)", async () => {
+    const dir = await withFixture({
+      "pom.xml": "<project><dependencies><dependency><artifactId>spring-boot-starter-web</artifactId></dependency></dependencies></project>",
+    });
+
+    const result = await detector.detect(dir);
+
+    expect(result.language).toBe("Java");
+    expect(result.framework).toBe("Spring Boot");
+    expect(result.packageManager).toBe("maven");
+  });
+
+  it("detecta .NET via arquivo .csproj", async () => {
+    const dir = await withFixture({
+      "MinhaApi.csproj": "<Project Sdk=\"Microsoft.NET.Sdk.Web\"></Project>",
+    });
+
+    const result = await detector.detect(dir);
+
+    expect(result.language).toBe(".NET");
+    expect(result.packageManager).toBe("dotnet");
   });
 
   it("retorna 'Desconhecida' quando nenhum arquivo reconhecido existe", async () => {

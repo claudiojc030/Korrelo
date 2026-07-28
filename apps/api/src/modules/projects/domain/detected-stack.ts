@@ -5,4 +5,5 @@ export interface DetectedStack {
   recommendedPort: number | null;
   startCommand: string | null;
   buildCommand: string | null;
+  entryPoint: string | null;
 }

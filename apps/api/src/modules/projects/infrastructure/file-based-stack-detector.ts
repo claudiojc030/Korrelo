@@ -54,6 +54,23 @@ async function readJson(filePath: string): Promise<Record<string, unknown> | nul
   }
 }
 
+async function readTextLower(filePath: string): Promise<string> {
+  try {
+    return (await fs.readFile(filePath, "utf-8")).toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+async function findFileByExtension(projectPath: string, extension: string): Promise<string | null> {
+  try {
+    const entries = await fs.readdir(projectPath);
+    return entries.find((entry) => entry.toLowerCase().endsWith(extension)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 @Injectable()
 export class FileBasedStackDetector implements StackDetector {
   async detect(projectPath: string): Promise<DetectedStack> {
@@ -74,21 +91,28 @@ export class FileBasedStackDetector implements StackDetector {
     }
 
     if (await fileExists(path.join(projectPath, "go.mod"))) {
-      return this.unknownFrameworkStack("Go", null);
+      return this.detectGo(projectPath);
     }
 
     if (await fileExists(path.join(projectPath, "Cargo.toml"))) {
-      return this.unknownFrameworkStack("Rust", null);
+      return this.detectRust(projectPath);
     }
 
+    if (await fileExists(path.join(projectPath, "pom.xml"))) {
+      return this.detectJava(projectPath, "maven");
+    }
     if (
-      (await fileExists(path.join(projectPath, "pom.xml"))) ||
-      (await fileExists(path.join(projectPath, "build.gradle")))
+      (await fileExists(path.join(projectPath, "build.gradle"))) ||
+      (await fileExists(path.join(projectPath, "build.gradle.kts")))
     ) {
-      return this.unknownFrameworkStack("Java", null);
+      return this.detectJava(projectPath, "gradle");
     }
 
-    return this.unknownFrameworkStack("Desconhecida", null);
+    if (await findFileByExtension(projectPath, ".csproj")) {
+      return this.detectDotnet();
+    }
+
+    return this.unknownStack("Desconhecida");
   }
 
   private async detectNode(projectPath: string, packageJsonPath: string): Promise<DetectedStack> {
@@ -109,6 +133,7 @@ export class FileBasedStackDetector implements StackDetector {
         recommendedPort: 3000,
         startCommand: scriptCommand(packageManager, "start"),
         buildCommand: null,
+        entryPoint: null,
       };
     }
 
@@ -119,6 +144,7 @@ export class FileBasedStackDetector implements StackDetector {
       recommendedPort: rule.defaultPort,
       startCommand: scriptCommand(packageManager, rule.startScript),
       buildCommand: rule.buildScript ? scriptCommand(packageManager, rule.buildScript) : null,
+      entryPoint: null,
     };
   }
 
@@ -139,17 +165,14 @@ export class FileBasedStackDetector implements StackDetector {
       framework: isLaravel ? "Laravel" : null,
       packageManager: "composer",
       recommendedPort: 8000,
-      startCommand: isLaravel ? "php artisan serve" : "php -S 0.0.0.0:8000",
+      startCommand: isLaravel ? "php artisan serve --host=0.0.0.0 --port=8000" : "php -S 0.0.0.0:8000",
       buildCommand: null,
+      entryPoint: null,
     };
   }
 
   private async detectPython(projectPath: string): Promise<DetectedStack> {
-    const requirementsPath = path.join(projectPath, "requirements.txt");
-    let requirements = "";
-    if (await fileExists(requirementsPath)) {
-      requirements = (await fs.readFile(requirementsPath, "utf-8")).toLowerCase();
-    }
+    const requirements = await readTextLower(path.join(projectPath, "requirements.txt"));
 
     const framework = requirements.includes("django")
       ? "Django"
@@ -159,29 +182,120 @@ export class FileBasedStackDetector implements StackDetector {
           ? "FastAPI"
           : null;
 
+    // Muito projeto Flask/FastAPI de exemplo (Heroku/Render etc) não chama
+    // app.run() no próprio arquivo — espera rodar via gunicorn/uvicorn como
+    // processo web "de produção". "python app.py" nesses casos não sobe nada.
+    const hasGunicorn = requirements.includes("gunicorn");
+
+    let startCommand: string;
+    let port: number;
+    if (framework === "Django") {
+      startCommand = "python manage.py runserver 0.0.0.0:8000";
+      port = 8000;
+    } else if (framework === "FastAPI") {
+      startCommand = "uvicorn main:app --host 0.0.0.0 --port 5000";
+      port = 5000;
+    } else if (hasGunicorn) {
+      // Convenção comum: app.py com uma variável `app = Flask(__name__)`.
+      startCommand = "gunicorn app:app --bind 0.0.0.0:5000";
+      port = 5000;
+    } else {
+      startCommand = "python app.py";
+      port = 5000;
+    }
+
     return {
       language: "Python",
       framework,
       packageManager: "pip",
-      recommendedPort: framework === "Django" ? 8000 : 5000,
-      startCommand:
-        framework === "Django"
-          ? "python manage.py runserver 0.0.0.0:8000"
-          : framework === "FastAPI"
-            ? "uvicorn main:app --host 0.0.0.0"
-            : "python app.py",
+      recommendedPort: port,
+      startCommand,
       buildCommand: null,
+      entryPoint: null,
     };
   }
 
-  private unknownFrameworkStack(language: string, framework: string | null): DetectedStack {
+  private async detectGo(projectPath: string): Promise<DetectedStack> {
+    const goMod = await readTextLower(path.join(projectPath, "go.mod"));
+    const framework = goMod.includes("gin-gonic/gin")
+      ? "Gin"
+      : goMod.includes("labstack/echo")
+        ? "Echo"
+        : goMod.includes("gofiber/fiber")
+          ? "Fiber"
+          : null;
+
+    return {
+      language: "Go",
+      framework,
+      packageManager: "go",
+      recommendedPort: 8080,
+      startCommand: null,
+      buildCommand: null,
+      entryPoint: null,
+    };
+  }
+
+  private async detectRust(projectPath: string): Promise<DetectedStack> {
+    const cargoToml = await readTextLower(path.join(projectPath, "Cargo.toml"));
+    const nameMatch = cargoToml.match(/name\s*=\s*"([a-z0-9_-]+)"/);
+    const entryPoint = nameMatch ? nameMatch[1] : "app";
+    const framework = cargoToml.includes("actix-web")
+      ? "Actix Web"
+      : cargoToml.includes("axum")
+        ? "Axum"
+        : cargoToml.includes("rocket")
+          ? "Rocket"
+          : null;
+
+    return {
+      language: "Rust",
+      framework,
+      packageManager: "cargo",
+      recommendedPort: 8080,
+      startCommand: null,
+      buildCommand: null,
+      entryPoint,
+    };
+  }
+
+  private async detectJava(projectPath: string, buildTool: "maven" | "gradle"): Promise<DetectedStack> {
+    const manifestFile = buildTool === "maven" ? "pom.xml" : "build.gradle";
+    const manifest = await readTextLower(path.join(projectPath, manifestFile));
+    const isSpringBoot = manifest.includes("spring-boot");
+
+    return {
+      language: "Java",
+      framework: isSpringBoot ? "Spring Boot" : null,
+      packageManager: buildTool,
+      recommendedPort: 8080,
+      startCommand: null,
+      buildCommand: null,
+      entryPoint: null,
+    };
+  }
+
+  private detectDotnet(): DetectedStack {
+    return {
+      language: ".NET",
+      framework: "ASP.NET Core",
+      packageManager: "dotnet",
+      recommendedPort: 8080,
+      startCommand: null,
+      buildCommand: null,
+      entryPoint: null,
+    };
+  }
+
+  private unknownStack(language: string): DetectedStack {
     return {
       language,
-      framework,
+      framework: null,
       packageManager: null,
       recommendedPort: null,
       startCommand: null,
       buildCommand: null,
+      entryPoint: null,
     };
   }
 }

@@ -34,6 +34,12 @@ import { PrismaManagedDatabaseRepository } from "./infrastructure/prisma-managed
 import { FileBasedStackDetector } from "./infrastructure/file-based-stack-detector";
 import { SimpleGitRepositoryCloner } from "./infrastructure/simple-git-repository-cloner";
 import { NodeDockerfileGenerator } from "./infrastructure/node-dockerfile-generator";
+import { PhpDockerfileGenerator } from "./infrastructure/php-dockerfile-generator";
+import { PythonDockerfileGenerator } from "./infrastructure/python-dockerfile-generator";
+import { GoDockerfileGenerator } from "./infrastructure/go-dockerfile-generator";
+import { RustDockerfileGenerator } from "./infrastructure/rust-dockerfile-generator";
+import { JavaDockerfileGenerator } from "./infrastructure/java-dockerfile-generator";
+import { DotnetDockerfileGenerator } from "./infrastructure/dotnet-dockerfile-generator";
 import { DockerfileGeneratorRegistry } from "./infrastructure/dockerfile-generator-registry";
 import { DockerComposeOrchestrator } from "./infrastructure/docker-compose-orchestrator";
 import { DockerComposeFileBuilder } from "./infrastructure/docker-compose-file-builder";
@@ -91,6 +97,12 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     AttachDomainUseCase,
     DetachDomainUseCase,
     NodeDockerfileGenerator,
+    PhpDockerfileGenerator,
+    PythonDockerfileGenerator,
+    GoDockerfileGenerator,
+    RustDockerfileGenerator,
+    JavaDockerfileGenerator,
+    DotnetDockerfileGenerator,
     DockerComposeFileBuilder,
     PortAllocator,
     ResourceBudgetCalculator,
