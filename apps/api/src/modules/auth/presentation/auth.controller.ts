@@ -4,7 +4,13 @@ import type { Request, Response } from "express";
 import { RegisterFirstUserUseCase } from "../application/register-first-user.use-case";
 import { LoginUseCase } from "../application/login.use-case";
 import { HasUserUseCase } from "../application/has-user.use-case";
+import { SetupTwoFactorUseCase } from "../application/setup-two-factor.use-case";
+import { EnableTwoFactorUseCase } from "../application/enable-two-factor.use-case";
+import { DisableTwoFactorUseCase } from "../application/disable-two-factor.use-case";
+import { GetTwoFactorStatusUseCase } from "../application/get-two-factor-status.use-case";
 import { AuthCredentialsDto } from "./auth-credentials.dto";
+import { EnableTwoFactorDto } from "./enable-two-factor.dto";
+import { DisableTwoFactorDto } from "./disable-two-factor.dto";
 import { Public } from "./public.decorator";
 import { TOKEN_COOKIE, buildTokenCookieOptions } from "./token-cookie";
 
@@ -16,6 +22,10 @@ export class AuthController {
     private readonly registerFirstUser: RegisterFirstUserUseCase,
     private readonly login: LoginUseCase,
     private readonly hasUser: HasUserUseCase,
+    private readonly setupTwoFactor: SetupTwoFactorUseCase,
+    private readonly enableTwoFactor: EnableTwoFactorUseCase,
+    private readonly disableTwoFactor: DisableTwoFactorUseCase,
+    private readonly getTwoFactorStatus: GetTwoFactorStatusUseCase,
   ) {}
 
   @Public()
@@ -46,7 +56,9 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.login.execute(dto);
-    res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
+    if (result.accessToken) {
+      res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
+    }
     return result;
   }
 
@@ -61,5 +73,30 @@ export class AuthController {
   me(@Req() req: Request) {
     const user = (req as Request & { user?: { sub: string; email: string } }).user;
     return { email: user?.email ?? null };
+  }
+
+  @Get("2fa/status")
+  twoFactorStatus(@Req() req: Request) {
+    const user = (req as Request & { user?: { sub: string } }).user;
+    return this.getTwoFactorStatus.execute(user!.sub);
+  }
+
+  @Post("2fa/setup")
+  setupTwoFactorEndpoint(@Req() req: Request) {
+    const user = (req as Request & { user?: { sub: string } }).user;
+    return this.setupTwoFactor.execute(user!.sub);
+  }
+
+  @Post("2fa/enable")
+  enableTwoFactorEndpoint(@Req() req: Request, @Body() dto: EnableTwoFactorDto) {
+    const user = (req as Request & { user?: { sub: string } }).user;
+    return this.enableTwoFactor.execute(user!.sub, dto.code);
+  }
+
+  @Post("2fa/disable")
+  async disableTwoFactorEndpoint(@Req() req: Request, @Body() dto: DisableTwoFactorDto) {
+    const user = (req as Request & { user?: { sub: string } }).user;
+    await this.disableTwoFactor.execute(user!.sub, dto.password);
+    return { ok: true };
   }
 }

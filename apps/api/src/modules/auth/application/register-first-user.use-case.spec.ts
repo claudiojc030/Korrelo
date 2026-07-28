@@ -9,7 +9,9 @@ function buildUseCase(existingUserCount: number) {
     count: jest.fn().mockResolvedValue(existingUserCount),
     findByEmail: jest.fn(),
     findFirst: jest.fn(),
+    findById: jest.fn(),
     save: jest.fn().mockImplementation((user) => Promise.resolve(user)),
+    update: jest.fn(),
   };
   const passwordHasher: PasswordHasher = {
     hash: jest.fn().mockResolvedValue("hashed-password"),
