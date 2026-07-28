@@ -3,8 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { API_URL } from "../../lib/api-client";
-import { setTokenClient } from "../../lib/auth-cookie-client";
+import { apiFetch } from "../../lib/api-client";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,7 +15,7 @@ export default function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_URL}/auth/has-user`)
+    apiFetch(`/auth/has-user`)
       .then((res) => res.json())
       .then((data: { hasUser: boolean }) => setMode(data.hasUser ? "login" : "setup"))
       .catch(() => setMode("login"));
@@ -29,7 +28,7 @@ export default function LoginPage() {
 
     try {
       const endpoint = mode === "setup" ? "/auth/register" : "/auth/login";
-      const res = await fetch(`${API_URL}${endpoint}`, {
+      const res = await apiFetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -40,8 +39,6 @@ export default function LoginPage() {
         throw new Error(body.message ?? "Falha ao autenticar.");
       }
 
-      const data = (await res.json()) as { accessToken: string };
-      setTokenClient(data.accessToken);
       router.push("/dashboard");
       router.refresh();
     } catch (err) {

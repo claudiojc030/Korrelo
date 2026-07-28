@@ -13,3 +13,4 @@ Thumbs.db
 /apps/api/prisma/*.db
 *.tsbuildinfo
 /apps/api/workspace/
+/infra/nginx/certs/

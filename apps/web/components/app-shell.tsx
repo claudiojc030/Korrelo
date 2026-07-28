@@ -4,8 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { LayoutDashboard, FolderGit2, LogOut } from "lucide-react";
-import { getTokenClient, clearTokenClient } from "../lib/auth-cookie-client";
-import { decodeJwtEmail } from "../lib/decode-jwt";
+import { apiFetch } from "../lib/api-client";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -29,11 +28,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [email, setEmail] = useState<string | null>(null);
 
   useEffect(() => {
-    setEmail(decodeJwtEmail(getTokenClient()));
+    apiFetch("/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: { email: string | null } | null) => setEmail(data?.email ?? null))
+      .catch(() => {});
   }, []);
 
-  function handleLogout() {
-    clearTokenClient();
+  async function handleLogout() {
+    await apiFetch("/auth/logout", { method: "POST" });
     router.push("/login");
     router.refresh();
   }

@@ -7,16 +7,24 @@ import {
   SubscribeMessage,
   WebSocketGateway,
 } from "@nestjs/websockets";
+import cookie from "cookie";
 import type { Socket } from "socket.io";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../../projects/domain/project.repository";
 import { SHELL_SESSION_FACTORY, type ShellSessionFactory, type ShellSession } from "../domain/shell-session";
 import { TOKEN_SERVICE, type TokenService } from "../../auth/domain/token-service";
+import { TOKEN_COOKIE } from "../../auth/presentation/token-cookie";
 
 interface StartPayload {
   projectId: string;
 }
 
-@WebSocketGateway({ namespace: "/terminal", cors: { origin: "*" } })
+function getAllowedOrigins(): string[] {
+  const configured = process.env.CORS_ORIGINS;
+  if (configured) return configured.split(",").map((origin) => origin.trim());
+  return [process.env.FORGEDESK_WEB_URL ?? "http://localhost:3000"];
+}
+
+@WebSocketGateway({ namespace: "/terminal", cors: { origin: getAllowedOrigins(), credentials: true } })
 export class TerminalGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(TerminalGateway.name);
   private readonly sessions = new Map<string, ShellSession>();
@@ -28,9 +36,11 @@ export class TerminalGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {}
 
   handleConnection(client: Socket): void {
-    // O token vem do handshake (auth.token), não de um header HTTP — o guard
-    // global de HTTP não cobre WebSocket, então validamos aqui manualmente.
-    const token = client.handshake.auth?.token as string | undefined;
+    // O guard global de HTTP não cobre WebSocket — validamos aqui manualmente,
+    // lendo o cookie httpOnly que o navegador manda junto do handshake
+    // (socket.io client precisa de withCredentials: true pra isso).
+    const cookieHeader = client.handshake.headers.cookie;
+    const token = cookieHeader ? cookie.parse(cookieHeader)[TOKEN_COOKIE] : undefined;
     const payload = token ? this.tokenService.verify(token) : null;
 
     if (!payload) {

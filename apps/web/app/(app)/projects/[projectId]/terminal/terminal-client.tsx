@@ -2,7 +2,6 @@
 
 import { useEffect, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
-import { getTokenClient } from "../../../../../lib/auth-cookie-client";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -41,7 +40,9 @@ export function TerminalClient({ projectId }: { projectId: string }) {
       term.open(containerRef.current);
       fitAddon.fit();
 
-      socket = io(`${API_URL}/terminal`, { auth: { token: getTokenClient() } });
+      // withCredentials manda o cookie httpOnly de auth junto do handshake —
+      // o gateway valida lendo esse cookie (ver terminal.gateway.ts).
+      socket = io(`${API_URL}/terminal`, { withCredentials: true });
       socket.on("connect", () => socket?.emit("start", { projectId }));
       socket.on("output", (data: string) => term?.write(data));
       socket.on("error", (message: string) => term?.write(`\r\n\x1b[31m[erro] ${message}\x1b[0m\r\n`));
