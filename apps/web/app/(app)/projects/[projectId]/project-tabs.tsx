@@ -3,13 +3,22 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-export function ProjectTabs({ projectId }: { projectId: string }) {
+export function ProjectTabs({
+  projectId,
+  terminalEnabled,
+  databaseEnabled,
+}: {
+  projectId: string;
+  terminalEnabled: boolean;
+  databaseEnabled: boolean;
+}) {
   const pathname = usePathname();
   const tabs = [
     { href: `/projects/${projectId}`, label: "Resumo" },
     { href: `/projects/${projectId}/env`, label: "Variáveis de Ambiente" },
-    { href: `/projects/${projectId}/database`, label: "Banco de Dados" },
-    { href: `/projects/${projectId}/terminal`, label: "Terminal" },
+    ...(databaseEnabled ? [{ href: `/projects/${projectId}/database`, label: "Banco de Dados" }] : []),
+    ...(terminalEnabled ? [{ href: `/projects/${projectId}/terminal`, label: "Terminal" }] : []),
+    { href: `/projects/${projectId}/settings`, label: "Configurações" },
   ];
 
   return (

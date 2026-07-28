@@ -22,6 +22,8 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
         username: db.username,
         password: db.password,
         databaseName: db.databaseName,
+        connectionString: db.connectionString,
+        envVarKey: db.envVarKey,
         createdAt: db.createdAt,
       },
       update: {
@@ -29,6 +31,8 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
         username: db.username,
         password: db.password,
         databaseName: db.databaseName,
+        connectionString: db.connectionString,
+        envVarKey: db.envVarKey,
       },
     });
     return this.toDomain(row);
@@ -42,9 +46,11 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
     id: string;
     projectId: string;
     type: string;
-    username: string;
-    password: string;
-    databaseName: string;
+    username: string | null;
+    password: string | null;
+    databaseName: string | null;
+    connectionString: string | null;
+    envVarKey: string | null;
     createdAt: Date;
   }): ManagedDatabase {
     return new ManagedDatabase(
@@ -54,6 +60,8 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
       row.username,
       row.password,
       row.databaseName,
+      row.connectionString,
+      row.envVarKey,
       row.createdAt,
     );
   }

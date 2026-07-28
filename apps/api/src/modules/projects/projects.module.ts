@@ -14,6 +14,7 @@ import { GetProjectDiskUsageUseCase } from "./application/get-project-disk-usage
 import { ProvisionDatabaseUseCase } from "./application/provision-database.use-case";
 import { DeprovisionDatabaseUseCase } from "./application/deprovision-database.use-case";
 import { GetManagedDatabaseUseCase } from "./application/get-managed-database.use-case";
+import { UpdateProjectSettingsUseCase } from "./application/update-project-settings.use-case";
 import { PrismaProjectRepository } from "./infrastructure/prisma-project.repository";
 import { PrismaEnvVarRepository } from "./infrastructure/prisma-env-var.repository";
 import { PrismaManagedDatabaseRepository } from "./infrastructure/prisma-managed-database.repository";
@@ -55,6 +56,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     ProvisionDatabaseUseCase,
     DeprovisionDatabaseUseCase,
     GetManagedDatabaseUseCase,
+    UpdateProjectSettingsUseCase,
     NodeDockerfileGenerator,
     DockerComposeFileBuilder,
     PortAllocator,

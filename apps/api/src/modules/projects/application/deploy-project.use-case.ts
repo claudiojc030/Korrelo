@@ -77,6 +77,10 @@ export class DeployProjectUseCase {
     const memoryLimitMb = this.resourceBudget.getContainerMemoryLimitMb();
 
     const managedDatabase = await this.managedDatabaseRepository.findByProjectId(project.id);
+    // Bancos "custom" são externos (o usuário cola a própria connection string) —
+    // o ForgeDesk nunca sobe container pra eles, só injeta a env var.
+    const managedContainerDatabase =
+      managedDatabase && managedDatabase.type !== "custom" ? managedDatabase : null;
 
     const deployConfig = {
       projectPath,
@@ -84,12 +88,12 @@ export class DeployProjectUseCase {
       hostPort,
       containerPort,
       memoryLimitMb,
-      database: managedDatabase
+      database: managedContainerDatabase
         ? {
-            type: managedDatabase.type,
-            username: managedDatabase.username,
-            password: managedDatabase.password,
-            databaseName: managedDatabase.databaseName,
+            type: managedContainerDatabase.type as "postgres" | "redis" | "mongodb",
+            username: managedContainerDatabase.username as string,
+            password: managedContainerDatabase.password as string,
+            databaseName: managedContainerDatabase.databaseName as string,
             // Metade do orçamento do app: bancos gerenciados são um extra, não
             // podem competir igualmente pela RAM já apertada de uma VPS pequena.
             memoryLimitMb: Math.round(memoryLimitMb / 2),

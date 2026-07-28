@@ -8,6 +8,8 @@ export interface Project {
   status: ProjectStatus;
   assignedPort: number | null;
   containerName: string | null;
+  terminalEnabled: boolean;
+  databaseEnabled: boolean;
   createdAt: string;
 }
 

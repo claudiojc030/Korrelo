@@ -29,6 +29,8 @@ export class PrismaProjectRepository implements ProjectRepository {
         status: project.status,
         assignedPort: project.assignedPort,
         containerName: project.containerName,
+        terminalEnabled: project.terminalEnabled,
+        databaseEnabled: project.databaseEnabled,
         createdAt: project.createdAt,
       },
       update: {
@@ -38,6 +40,8 @@ export class PrismaProjectRepository implements ProjectRepository {
         status: project.status,
         assignedPort: project.assignedPort,
         containerName: project.containerName,
+        terminalEnabled: project.terminalEnabled,
+        databaseEnabled: project.databaseEnabled,
       },
     });
     return this.toDomain(row);
@@ -55,6 +59,8 @@ export class PrismaProjectRepository implements ProjectRepository {
     status: string;
     assignedPort: number | null;
     containerName: string | null;
+    terminalEnabled: boolean;
+    databaseEnabled: boolean;
     createdAt: Date;
   }): Project {
     return new Project(
@@ -65,6 +71,8 @@ export class PrismaProjectRepository implements ProjectRepository {
       row.status as ProjectStatus,
       row.assignedPort,
       row.containerName,
+      row.terminalEnabled,
+      row.databaseEnabled,
       row.createdAt,
     );
   }

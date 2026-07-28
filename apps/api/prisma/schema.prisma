@@ -8,27 +8,31 @@ datasource db {
 }
 
 model Project {
-  id             String   @id @default(uuid())
-  name           String
-  repoUrl        String
-  detectedStack  String?
-  status         String   @default("detected")
-  assignedPort   Int?
-  containerName  String?
-  createdAt      DateTime @default(now())
-  envVars        EnvVar[]
-  managedDatabase ManagedDatabase?
+  id               String   @id @default(uuid())
+  name             String
+  repoUrl          String
+  detectedStack    String?
+  status           String   @default("detected")
+  assignedPort     Int?
+  containerName    String?
+  terminalEnabled  Boolean  @default(true)
+  databaseEnabled  Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  envVars          EnvVar[]
+  managedDatabase  ManagedDatabase?
 }
 
 model ManagedDatabase {
-  id           String   @id @default(uuid())
-  projectId    String   @unique
-  project      Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  type         String
-  username     String
-  password     String
-  databaseName String
-  createdAt    DateTime @default(now())
+  id               String   @id @default(uuid())
+  projectId        String   @unique
+  project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  type             String
+  username         String?
+  password         String?
+  databaseName     String?
+  connectionString String?
+  envVarKey        String?
+  createdAt        DateTime @default(now())
 }
 
 model EnvVar {

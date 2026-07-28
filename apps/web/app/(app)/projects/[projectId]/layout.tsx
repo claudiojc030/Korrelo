@@ -66,7 +66,11 @@ export default async function ProjectLayout({
       </div>
 
       <div className="mt-5 border-b border-border-subtle">
-        <ProjectTabs projectId={project.id} />
+        <ProjectTabs
+          projectId={project.id}
+          terminalEnabled={project.terminalEnabled}
+          databaseEnabled={project.databaseEnabled}
+        />
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col">{children}</div>

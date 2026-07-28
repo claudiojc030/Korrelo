@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Post, Put } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put } from "@nestjs/common";
 import { ListProjectsUseCase } from "../application/list-projects.use-case";
 import { GetProjectUseCase } from "../application/get-project.use-case";
 import { CreateProjectUseCase } from "../application/create-project.use-case";
@@ -12,10 +12,12 @@ import { GetProjectDiskUsageUseCase } from "../application/get-project-disk-usag
 import { ProvisionDatabaseUseCase } from "../application/provision-database.use-case";
 import { DeprovisionDatabaseUseCase } from "../application/deprovision-database.use-case";
 import { GetManagedDatabaseUseCase } from "../application/get-managed-database.use-case";
+import { UpdateProjectSettingsUseCase } from "../application/update-project-settings.use-case";
 import { CreateProjectDto } from "./create-project.dto";
 import { DetectStackDto } from "./detect-stack.dto";
 import { SetEnvVarsDto } from "./set-env-vars.dto";
 import { ProvisionDatabaseDto } from "./provision-database.dto";
+import { UpdateProjectSettingsDto } from "./update-project-settings.dto";
 
 @Controller("projects")
 export class ProjectsController {
@@ -33,6 +35,7 @@ export class ProjectsController {
     private readonly provisionDatabase: ProvisionDatabaseUseCase,
     private readonly deprovisionDatabase: DeprovisionDatabaseUseCase,
     private readonly getManagedDatabase: GetManagedDatabaseUseCase,
+    private readonly updateProjectSettings: UpdateProjectSettingsUseCase,
   ) {}
 
   @Get()
@@ -65,6 +68,11 @@ export class ProjectsController {
     return this.setEnvVars.execute(id, dto.vars);
   }
 
+  @Patch(":id/settings")
+  updateSettings(@Param("id") id: string, @Body() dto: UpdateProjectSettingsDto) {
+    return this.updateProjectSettings.execute(id, dto);
+  }
+
   @Get(":id/database")
   getDatabase(@Param("id") id: string) {
     return this.getManagedDatabase.execute(id);
@@ -72,7 +80,10 @@ export class ProjectsController {
 
   @Post(":id/database")
   provisionDatabaseEndpoint(@Param("id") id: string, @Body() dto: ProvisionDatabaseDto) {
-    return this.provisionDatabase.execute(id, dto.type);
+    return this.provisionDatabase.execute(id, dto.type, {
+      connectionString: dto.connectionString,
+      envVarKey: dto.envVarKey,
+    });
   }
 
   @Delete(":id/database")

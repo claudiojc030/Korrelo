@@ -61,13 +61,31 @@ export class DockerComposeFileBuilder {
       ];
     }
 
+    if (db.type === "redis") {
+      return [
+        "  db:",
+        "    image: redis:7-alpine",
+        "    restart: unless-stopped",
+        `    command: ["redis-server", "--requirepass", "${db.password}", "--maxmemory", "${db.memoryLimitMb}mb", "--maxmemory-policy", "allkeys-lru"]`,
+        `    mem_limit: ${db.memoryLimitMb}m`,
+        ...LOGGING_BLOCK,
+      ];
+    }
+
     return [
       "  db:",
-      "    image: redis:7-alpine",
+      "    image: mongo:7",
       "    restart: unless-stopped",
-      `    command: ["redis-server", "--requirepass", "${db.password}", "--maxmemory", "${db.memoryLimitMb}mb", "--maxmemory-policy", "allkeys-lru"]`,
+      "    environment:",
+      `      MONGO_INITDB_ROOT_USERNAME: ${db.username}`,
+      `      MONGO_INITDB_ROOT_PASSWORD: ${db.password}`,
+      `      MONGO_INITDB_DATABASE: ${db.databaseName}`,
+      "    volumes:",
+      "      - db-data:/data/db",
       `    mem_limit: ${db.memoryLimitMb}m`,
       ...LOGGING_BLOCK,
+      "volumes:",
+      "  db-data:",
     ];
   }
 }

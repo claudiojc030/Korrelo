@@ -2,23 +2,34 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Database, Eye, EyeOff, Loader2, TriangleAlert } from "lucide-react";
+import { Database, DatabaseZap, Eye, EyeOff, Loader2, TriangleAlert } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
 
-type DatabaseType = "postgres" | "redis";
+type DatabaseType = "postgres" | "redis" | "mongodb" | "custom";
 
 interface ManagedDatabase {
   id: string;
   projectId: string;
   type: DatabaseType;
-  username: string;
-  password: string;
-  databaseName: string;
+  username: string | null;
+  password: string | null;
+  databaseName: string | null;
+  connectionString: string | null;
+  envVarKey: string | null;
   createdAt: string;
 }
 
-const TYPE_LABEL: Record<DatabaseType, string> = { postgres: "PostgreSQL", redis: "Redis" };
-const TYPE_PORT: Record<DatabaseType, number> = { postgres: 5432, redis: 6379 };
+const TYPE_LABEL: Record<DatabaseType, string> = {
+  postgres: "PostgreSQL",
+  redis: "Redis",
+  mongodb: "MongoDB",
+  custom: "Externo / Custom",
+};
+const TYPE_PORT: Record<"postgres" | "redis" | "mongodb", number> = {
+  postgres: 5432,
+  redis: 6379,
+  mongodb: 27017,
+};
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -32,17 +43,25 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 export default function DatabasePage({ params }: { params: { projectId: string } }) {
   const router = useRouter();
   const [db, setDb] = useState<ManagedDatabase | null | undefined>(undefined);
+  const [databaseEnabled, setDatabaseEnabled] = useState(true);
   const [provisioning, setProvisioning] = useState<DatabaseType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [removing, setRemoving] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
+  const [customEnvVarKey, setCustomEnvVarKey] = useState("DATABASE_URL");
+  const [customConnectionString, setCustomConnectionString] = useState("");
 
   function load() {
     apiFetch(`/projects/${params.projectId}/database`)
       .then((res) => (res.status === 200 ? res.json() : null))
       .then(setDb)
       .catch(() => setDb(null));
+    apiFetch(`/projects/${params.projectId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((p) => setDatabaseEnabled(p ? p.databaseEnabled : true))
+      .catch(() => {});
   }
 
   useEffect(() => {
@@ -50,19 +69,20 @@ export default function DatabasePage({ params }: { params: { projectId: string }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.projectId]);
 
-  async function handleProvision(type: DatabaseType) {
+  async function handleProvision(type: DatabaseType, body: Record<string, unknown> = {}) {
     setProvisioning(type);
     setError(null);
     try {
       const res = await apiFetch(`/projects/${params.projectId}/database`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type }),
+        body: JSON.stringify({ type, ...body }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Falha ao provisionar o banco.");
+        const resBody = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(resBody.message ?? "Falha ao provisionar o banco.");
       }
+      setCustomOpen(false);
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro desconhecido");
@@ -91,6 +111,16 @@ export default function DatabasePage({ params }: { params: { projectId: string }
     );
   }
 
+  if (!databaseEnabled) {
+    return (
+      <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-center justify-center gap-2 px-8 py-6 text-center">
+        <Database size={20} strokeWidth={1.75} className="text-muted-foreground" />
+        <p className="text-[13.5px] font-medium text-foreground">Banco de dados desativado para este projeto</p>
+        <p className="text-[12.5px] text-muted-foreground">Ative de novo na aba Configurações.</p>
+      </div>
+    );
+  }
+
   if (db === null) {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 py-6">
@@ -98,15 +128,17 @@ export default function DatabasePage({ params }: { params: { projectId: string }
           Nenhum banco de dados provisionado pra este projeto ainda.
         </p>
         {error && <p className="mb-3 text-[13px] text-destructive">{error}</p>}
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {(["postgres", "redis"] as DatabaseType[]).map((type) => (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {(["postgres", "redis", "mongodb"] as DatabaseType[]).map((type) => (
             <div key={type} className="rounded-xl border border-border-subtle bg-surface p-4">
               <div className="flex items-center gap-2 text-foreground">
                 <Database size={15} strokeWidth={1.75} />
                 <span className="text-[13.5px] font-medium">{TYPE_LABEL[type]}</span>
               </div>
               <p className="mt-1 text-[12px] text-muted-foreground">
-                {type === "postgres" ? "Banco relacional, com volume persistente." : "Cache/fila em memória."}
+                {type === "postgres" && "Banco relacional, com volume persistente."}
+                {type === "redis" && "Cache/fila em memória."}
+                {type === "mongodb" && "Banco de documentos, com volume persistente."}
               </p>
               <button
                 onClick={() => handleProvision(type)}
@@ -118,15 +150,82 @@ export default function DatabasePage({ params }: { params: { projectId: string }
               </button>
             </div>
           ))}
+
+          <div className="rounded-xl border border-border-subtle bg-surface p-4 sm:col-span-3">
+            <div className="flex items-center gap-2 text-foreground">
+              <DatabaseZap size={15} strokeWidth={1.75} />
+              <span className="text-[13.5px] font-medium">{TYPE_LABEL.custom}</span>
+            </div>
+            <p className="mt-1 text-[12px] text-muted-foreground">
+              Já usa outra coisa (MongoDB Atlas, Supabase, um Postgres seu, etc.)? Cole a connection string
+              aqui — o ForgeDesk não sobe container nenhum, só injeta como variável de ambiente.
+            </p>
+
+            {!customOpen ? (
+              <button
+                onClick={() => setCustomOpen(true)}
+                className="mt-3 rounded-md border border-border-subtle px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                Conectar banco externo
+              </button>
+            ) : (
+              <div className="mt-3 flex flex-col gap-3">
+                <div>
+                  <label className="mb-1 block text-[12px] text-muted-foreground">Nome da variável de ambiente</label>
+                  <input
+                    value={customEnvVarKey}
+                    onChange={(e) => setCustomEnvVarKey(e.target.value)}
+                    placeholder="DATABASE_URL"
+                    className="w-full rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[12px] text-muted-foreground">Connection string</label>
+                  <textarea
+                    value={customConnectionString}
+                    onChange={(e) => setCustomConnectionString(e.target.value)}
+                    placeholder="mongodb+srv://usuario:senha@cluster.mongodb.net/meubanco"
+                    rows={2}
+                    className="w-full resize-none rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none focus:border-accent"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() =>
+                      handleProvision("custom", {
+                        envVarKey: customEnvVarKey,
+                        connectionString: customConnectionString,
+                      })
+                    }
+                    disabled={provisioning !== null || !customConnectionString.trim()}
+                    className="inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+                  >
+                    {provisioning === "custom" && <Loader2 size={14} className="animate-spin" />}
+                    Conectar
+                  </button>
+                  <button
+                    onClick={() => setCustomOpen(false)}
+                    className="rounded-md px-3.5 py-2 text-[13px] font-medium text-muted-foreground hover:bg-muted"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
-  const connectionString =
-    db.type === "postgres"
+  const isCustom = db.type === "custom";
+  const connectionString = isCustom
+    ? (reveal ? db.connectionString : "••••••••") ?? ""
+    : db.type === "postgres"
       ? `postgresql://${db.username}:${reveal ? db.password : "••••••••"}@db:5432/${db.databaseName}`
-      : `redis://:${reveal ? db.password : "••••••••"}@db:6379`;
+      : db.type === "mongodb"
+        ? `mongodb://${db.username}:${reveal ? db.password : "••••••••"}@db:27017/${db.databaseName}?authSource=admin`
+        : `redis://:${reveal ? db.password : "••••••••"}@db:6379`;
 
   return (
     <div className="mx-auto w-full max-w-5xl px-8 py-6">
@@ -145,18 +244,37 @@ export default function DatabasePage({ params }: { params: { projectId: string }
       </div>
 
       <div className="rounded-xl border border-border-subtle bg-surface p-4">
-        <InfoRow label="Host (dentro da rede do projeto)" value="db" />
-        <InfoRow label="Porta" value={TYPE_PORT[db.type]} />
-        {db.type === "postgres" && <InfoRow label="Usuário" value={db.username} />}
-        {db.type === "postgres" && <InfoRow label="Banco" value={db.databaseName} />}
-        <InfoRow label="Senha" value={reveal ? db.password : "••••••••"} />
-        <InfoRow label="Connection string" value={<span className="break-all">{connectionString}</span>} />
+        {isCustom ? (
+          <>
+            <InfoRow label="Variável de ambiente" value={db.envVarKey} />
+            <InfoRow label="Connection string" value={<span className="break-all">{connectionString}</span>} />
+          </>
+        ) : (
+          <>
+            <InfoRow label="Host (dentro da rede do projeto)" value="db" />
+            <InfoRow label="Porta" value={TYPE_PORT[db.type as "postgres" | "redis" | "mongodb"]} />
+            {db.type !== "redis" && <InfoRow label="Usuário" value={db.username} />}
+            {db.type !== "redis" && <InfoRow label="Banco" value={db.databaseName} />}
+            <InfoRow label="Senha" value={reveal ? db.password : "••••••••"} />
+            <InfoRow label="Connection string" value={<span className="break-all">{connectionString}</span>} />
+          </>
+        )}
       </div>
 
       <p className="mt-3 text-[12.5px] text-muted-foreground">
-        Já configurado como variável de ambiente ({db.type === "postgres" ? "DATABASE_URL" : "REDIS_URL"}).
-        Rode <span className="font-mono text-foreground">Deploy</span> na aba Resumo pra subir o container do
-        banco.
+        {isCustom ? (
+          <>
+            Banco externo — o ForgeDesk não sobe container pra ele, só injeta{" "}
+            <span className="font-mono text-foreground">{db.envVarKey}</span> como variável de ambiente.
+          </>
+        ) : (
+          <>
+            Já configurado como variável de ambiente (
+            {db.type === "postgres" ? "DATABASE_URL" : db.type === "mongodb" ? "MONGODB_URI" : "REDIS_URL"}).
+            Rode <span className="font-mono text-foreground">Deploy</span> na aba Resumo pra subir o container do
+            banco.
+          </>
+        )}
       </p>
 
       <div className="mt-5">
@@ -186,7 +304,9 @@ export default function DatabasePage({ params }: { params: { projectId: string }
               <div>
                 <p className="text-[14.5px] font-semibold text-foreground">Remover o banco de dados?</p>
                 <p className="mt-1 text-[13px] text-muted-foreground">
-                  Os dados são perdidos no próximo deploy. Não pode ser desfeito.
+                  {isCustom
+                    ? "A variável de ambiente continua salva, mas deixa de ser gerenciada aqui."
+                    : "Os dados são perdidos no próximo deploy. Não pode ser desfeito."}
                 </p>
               </div>
             </div>

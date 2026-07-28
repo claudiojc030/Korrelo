@@ -9,6 +9,8 @@ export class Project {
     public readonly status: ProjectStatus,
     public readonly assignedPort: number | null,
     public readonly containerName: string | null,
+    public readonly terminalEnabled: boolean,
+    public readonly databaseEnabled: boolean,
     public readonly createdAt: Date,
   ) {}
 
@@ -21,6 +23,8 @@ export class Project {
       "detected",
       null,
       null,
+      true,
+      true,
       new Date(),
     );
   }
@@ -34,6 +38,8 @@ export class Project {
       "configuring",
       this.assignedPort,
       this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
       this.createdAt,
     );
   }
@@ -47,6 +53,8 @@ export class Project {
       "running",
       assignedPort,
       containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
       this.createdAt,
     );
   }
@@ -60,6 +68,23 @@ export class Project {
       "failed",
       this.assignedPort,
       this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.createdAt,
+    );
+  }
+
+  withSettings(terminalEnabled: boolean, databaseEnabled: boolean): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      terminalEnabled,
+      databaseEnabled,
       this.createdAt,
     );
   }

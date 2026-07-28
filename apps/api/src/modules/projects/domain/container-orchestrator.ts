@@ -3,7 +3,7 @@ export const COMPOSE_FILENAME = "docker-compose.forgedesk.yml";
 export const ENV_FILENAME = ".env.forgedesk";
 
 export interface DatabaseServiceConfig {
-  type: "postgres" | "redis";
+  type: "postgres" | "redis" | "mongodb";
   username: string;
   password: string;
   databaseName: string;
