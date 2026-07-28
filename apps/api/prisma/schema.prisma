@@ -19,6 +19,8 @@ model Project {
   databaseEnabled  Boolean  @default(true)
   customDomain     String?  @unique
   domainSslStatus  String   @default("none")
+  autoDeployEnabled Boolean @default(false)
+  deployBranch     String   @default("main")
   createdAt        DateTime @default(now())
   envVars          EnvVar[]
   managedDatabase  ManagedDatabase?

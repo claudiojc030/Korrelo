@@ -23,6 +23,11 @@ export class PrismaProjectRepository implements ProjectRepository {
     return row ? this.toDomain(row) : null;
   }
 
+  async findByRepoUrl(repoUrl: string): Promise<Project[]> {
+    const rows = await this.prisma.project.findMany({ where: { repoUrl } });
+    return rows.map(this.toDomain);
+  }
+
   async save(project: Project): Promise<Project> {
     const row = await this.prisma.project.upsert({
       where: { id: project.id },
@@ -38,6 +43,8 @@ export class PrismaProjectRepository implements ProjectRepository {
         databaseEnabled: project.databaseEnabled,
         customDomain: project.customDomain,
         domainSslStatus: project.domainSslStatus,
+        autoDeployEnabled: project.autoDeployEnabled,
+        deployBranch: project.deployBranch,
         createdAt: project.createdAt,
       },
       update: {
@@ -51,6 +58,8 @@ export class PrismaProjectRepository implements ProjectRepository {
         databaseEnabled: project.databaseEnabled,
         customDomain: project.customDomain,
         domainSslStatus: project.domainSslStatus,
+        autoDeployEnabled: project.autoDeployEnabled,
+        deployBranch: project.deployBranch,
       },
     });
     return this.toDomain(row);
@@ -72,6 +81,8 @@ export class PrismaProjectRepository implements ProjectRepository {
     databaseEnabled: boolean;
     customDomain: string | null;
     domainSslStatus: string;
+    autoDeployEnabled: boolean;
+    deployBranch: string;
     createdAt: Date;
   }): Project {
     return new Project(
@@ -86,6 +97,8 @@ export class PrismaProjectRepository implements ProjectRepository {
       row.databaseEnabled,
       row.customDomain,
       row.domainSslStatus as DomainSslStatus,
+      row.autoDeployEnabled,
+      row.deployBranch,
       row.createdAt,
     );
   }

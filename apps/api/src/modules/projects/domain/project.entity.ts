@@ -15,6 +15,8 @@ export class Project {
     public readonly databaseEnabled: boolean,
     public readonly customDomain: string | null,
     public readonly domainSslStatus: DomainSslStatus,
+    public readonly autoDeployEnabled: boolean,
+    public readonly deployBranch: string,
     public readonly createdAt: Date,
   ) {}
 
@@ -31,6 +33,8 @@ export class Project {
       true,
       null,
       "none",
+      false,
+      "main",
       new Date(),
     );
   }
@@ -48,6 +52,8 @@ export class Project {
       this.databaseEnabled,
       this.customDomain,
       this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
       this.createdAt,
     );
   }
@@ -65,6 +71,8 @@ export class Project {
       this.databaseEnabled,
       this.customDomain,
       this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
       this.createdAt,
     );
   }
@@ -82,6 +90,8 @@ export class Project {
       this.databaseEnabled,
       this.customDomain,
       this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
       this.createdAt,
     );
   }
@@ -99,6 +109,8 @@ export class Project {
       databaseEnabled,
       this.customDomain,
       this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
       this.createdAt,
     );
   }
@@ -116,6 +128,27 @@ export class Project {
       this.databaseEnabled,
       customDomain,
       domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
+      this.createdAt,
+    );
+  }
+
+  withAutoDeploy(autoDeployEnabled: boolean, deployBranch: string): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      autoDeployEnabled,
+      deployBranch,
       this.createdAt,
     );
   }

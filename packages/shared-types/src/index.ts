@@ -13,6 +13,8 @@ export interface Project {
   databaseEnabled: boolean;
   customDomain: string | null;
   domainSslStatus: DomainSslStatus;
+  autoDeployEnabled: boolean;
+  deployBranch: string;
   createdAt: string;
 }
 

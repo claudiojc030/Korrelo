@@ -139,8 +139,12 @@ if [ ! -f apps/api/.env ]; then
   sed -i "s#^FORGEDESK_WEB_URL=.*#FORGEDESK_WEB_URL=${BASE_WEB_URL}#" apps/api/.env
   sed -i "s#^CORS_ORIGINS=.*#CORS_ORIGINS=${BASE_WEB_URL}#" apps/api/.env
   echo "apps/api/.env criado — JWT_SECRET, ENV_ENCRYPTION_KEY, FORGEDESK_WEB_URL e CORS_ORIGINS preenchidos automaticamente."
-  echo "IMPORTANTE: falta preencher GITHUB_APP_SLUG, GITHUB_APP_ID e GITHUB_APP_PRIVATE_KEY em apps/api/.env"
-  echo "(veja as instruções de cadastro do GitHub App no README) antes de continuar."
+  echo "IMPORTANTE: falta preencher GITHUB_APP_SLUG, GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY e"
+  echo "GITHUB_APP_WEBHOOK_SECRET em apps/api/.env (veja as instruções de cadastro do GitHub App"
+  echo "no README). O GITHUB_APP_WEBHOOK_SECRET precisa bater com o 'Webhook secret' configurado"
+  echo "nas settings do App em github.com — e o 'Webhook URL' de lá precisa apontar pra"
+  echo "${BASE_API_URL}/github/webhook, com o evento \"Push\" habilitado — é isso que liga o"
+  echo "deploy automático ao dar push."
   read -rp "Pressione ENTER depois de editar apps/api/.env para continuar..."
 else
   echo "apps/api/.env já existe — não mexi nele."

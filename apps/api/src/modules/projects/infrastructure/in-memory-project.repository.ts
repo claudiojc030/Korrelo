@@ -18,6 +18,10 @@ export class InMemoryProjectRepository implements ProjectRepository {
     return this.projects.find((p) => p.customDomain === customDomain) ?? null;
   }
 
+  async findByRepoUrl(repoUrl: string): Promise<Project[]> {
+    return this.projects.filter((p) => p.repoUrl === repoUrl);
+  }
+
   async save(project: Project): Promise<Project> {
     const index = this.projects.findIndex((p) => p.id === project.id);
     if (index >= 0) {
