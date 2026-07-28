@@ -22,6 +22,7 @@ import { UpdateProjectSettingsUseCase } from "./application/update-project-setti
 import { GetProjectLogsUseCase } from "./application/get-project-logs.use-case";
 import { AttachDomainUseCase } from "./application/attach-domain.use-case";
 import { DetachDomainUseCase } from "./application/detach-domain.use-case";
+import { ListDeployRecordsUseCase } from "./application/list-deploy-records.use-case";
 import { ListCronJobsUseCase } from "./application/list-cron-jobs.use-case";
 import { CreateCronJobUseCase } from "./application/create-cron-job.use-case";
 import { UpdateCronJobUseCase } from "./application/update-cron-job.use-case";
@@ -31,6 +32,7 @@ import { HandleGithubPushWebhookUseCase } from "./application/handle-github-push
 import { PrismaProjectRepository } from "./infrastructure/prisma-project.repository";
 import { PrismaEnvVarRepository } from "./infrastructure/prisma-env-var.repository";
 import { PrismaManagedDatabaseRepository } from "./infrastructure/prisma-managed-database.repository";
+import { PrismaDeployRecordRepository } from "./infrastructure/prisma-deploy-record.repository";
 import { FileBasedStackDetector } from "./infrastructure/file-based-stack-detector";
 import { SimpleGitRepositoryCloner } from "./infrastructure/simple-git-repository-cloner";
 import { NodeDockerfileGenerator } from "./infrastructure/node-dockerfile-generator";
@@ -63,6 +65,7 @@ import { CONTAINER_ORCHESTRATOR } from "./domain/container-orchestrator";
 import { HEALTH_CHECKER } from "./domain/health-checker";
 import { LOG_READER } from "./domain/log-reader";
 import { DOMAIN_PROVISIONER } from "./domain/domain-provisioner";
+import { DEPLOY_RECORD_REPOSITORY } from "./domain/deploy-record.repository";
 import { CRON_JOB_REPOSITORY } from "./domain/cron-job.repository";
 import { CRON_JOB_RUNNER } from "./domain/cron-job-runner";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
@@ -96,6 +99,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     GetProjectLogsUseCase,
     AttachDomainUseCase,
     DetachDomainUseCase,
+    ListDeployRecordsUseCase,
     NodeDockerfileGenerator,
     PhpDockerfileGenerator,
     PythonDockerfileGenerator,
@@ -118,6 +122,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: HEALTH_CHECKER, useClass: HttpHealthChecker },
     { provide: LOG_READER, useClass: DockerLogReader },
     { provide: DOMAIN_PROVISIONER, useClass: NginxCertbotDomainProvisioner },
+    { provide: DEPLOY_RECORD_REPOSITORY, useClass: PrismaDeployRecordRepository },
     { provide: CRON_JOB_REPOSITORY, useClass: PrismaCronJobRepository },
     { provide: CRON_JOB_RUNNER, useClass: DockerExecCronRunner },
   ],

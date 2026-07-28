@@ -25,6 +25,8 @@ import {
   MANAGED_DATABASE_REPOSITORY,
   type ManagedDatabaseRepository,
 } from "../domain/managed-database.repository";
+import { DEPLOY_RECORD_REPOSITORY, type DeployRecordRepository } from "../domain/deploy-record.repository";
+import { DeployRecord, type DeployTrigger } from "../domain/deploy-record.entity";
 import { PortAllocator } from "../infrastructure/port-allocator";
 import { ResourceBudgetCalculator } from "../infrastructure/resource-budget-calculator";
 import { DockerComposeFileBuilder } from "../infrastructure/docker-compose-file-builder";
@@ -48,12 +50,13 @@ export class DeployProjectUseCase {
     @Inject(HEALTH_CHECKER) private readonly healthChecker: HealthChecker,
     @Inject(ENV_VAR_REPOSITORY) private readonly envVarRepository: EnvVarRepository,
     @Inject(MANAGED_DATABASE_REPOSITORY) private readonly managedDatabaseRepository: ManagedDatabaseRepository,
+    @Inject(DEPLOY_RECORD_REPOSITORY) private readonly deployRecordRepository: DeployRecordRepository,
     private readonly portAllocator: PortAllocator,
     private readonly resourceBudget: ResourceBudgetCalculator,
     private readonly composeFileBuilder: DockerComposeFileBuilder,
   ) {}
 
-  async execute(projectId: string): Promise<Project> {
+  async execute(projectId: string, triggeredBy: DeployTrigger = "manual"): Promise<Project> {
     const project = await this.repository.findById(projectId);
     if (!project) {
       throw new NotFoundException(`Projeto ${projectId} não encontrado`);
@@ -63,6 +66,8 @@ export class DeployProjectUseCase {
         "Este projeto ainda não tem stack detectada. Rode /import ou /detect-stack antes do deploy.",
       );
     }
+
+    const deployRecord = await this.deployRecordRepository.save(DeployRecord.start(projectId, triggeredBy));
 
     const stack = JSON.parse(project.detectedStack) as DetectedStack;
     const projectPath = getProjectWorkspacePath(project.id);
@@ -116,6 +121,8 @@ export class DeployProjectUseCase {
     } catch (error) {
       await this.rollback(deployConfig, "o container não subiu");
       await this.repository.save(project.withFailedDeployment());
+      const message = error instanceof Error ? error.message : String(error);
+      await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
       throw error;
     }
 
@@ -123,11 +130,12 @@ export class DeployProjectUseCase {
     if (!healthy) {
       await this.rollback(deployConfig, "falhou no health check");
       await this.repository.save(project.withFailedDeployment());
-      throw new InternalServerErrorException(
-        `Deploy cancelado: o container subiu mas não respondeu na porta ${hostPort} em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. Rollback automático executado.`,
-      );
+      const message = `Container subiu mas não respondeu na porta ${hostPort} em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. Rollback automático executado.`;
+      await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
+      throw new InternalServerErrorException(`Deploy cancelado: ${message}`);
     }
 
+    await this.deployRecordRepository.save(deployRecord.withResult("success", null));
     const deployedProject = project.withDeployment(containerName, hostPort);
     return this.repository.save(deployedProject);
   }

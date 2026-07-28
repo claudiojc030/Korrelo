@@ -16,6 +16,7 @@ import { UpdateProjectSettingsUseCase } from "../application/update-project-sett
 import { GetProjectLogsUseCase, type LogTarget } from "../application/get-project-logs.use-case";
 import { AttachDomainUseCase } from "../application/attach-domain.use-case";
 import { DetachDomainUseCase } from "../application/detach-domain.use-case";
+import { ListDeployRecordsUseCase } from "../application/list-deploy-records.use-case";
 import { CreateProjectDto } from "./create-project.dto";
 import { DetectStackDto } from "./detect-stack.dto";
 import { SetEnvVarsDto } from "./set-env-vars.dto";
@@ -43,6 +44,7 @@ export class ProjectsController {
     private readonly getProjectLogs: GetProjectLogsUseCase,
     private readonly attachDomain: AttachDomainUseCase,
     private readonly detachDomain: DetachDomainUseCase,
+    private readonly listDeployRecords: ListDeployRecordsUseCase,
   ) {}
 
   @Get()
@@ -129,7 +131,12 @@ export class ProjectsController {
 
   @Post(":id/deploy")
   deploy(@Param("id") id: string) {
-    return this.deployProject.execute(id);
+    return this.deployProject.execute(id, "manual");
+  }
+
+  @Get(":id/deploys")
+  getDeploys(@Param("id") id: string) {
+    return this.listDeployRecords.execute(id);
   }
 
   @Delete(":id")

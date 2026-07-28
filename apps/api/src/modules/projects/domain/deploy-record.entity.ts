@@ -1,0 +1,22 @@
+export type DeployStatus = "running" | "success" | "failed";
+export type DeployTrigger = "manual" | "webhook";
+
+export class DeployRecord {
+  constructor(
+    public readonly id: string,
+    public readonly projectId: string,
+    public readonly status: DeployStatus,
+    public readonly triggeredBy: DeployTrigger,
+    public readonly errorMessage: string | null,
+    public readonly startedAt: Date,
+    public readonly finishedAt: Date | null,
+  ) {}
+
+  static start(projectId: string, triggeredBy: DeployTrigger): DeployRecord {
+    return new DeployRecord(crypto.randomUUID(), projectId, "running", triggeredBy, null, new Date(), null);
+  }
+
+  withResult(status: "success" | "failed", errorMessage: string | null): DeployRecord {
+    return new DeployRecord(this.id, this.projectId, status, this.triggeredBy, errorMessage, this.startedAt, new Date());
+  }
+}
