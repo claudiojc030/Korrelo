@@ -28,6 +28,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
           "up",
           "-d",
           "--build",
+          "--remove-orphans",
         ],
         { cwd: config.projectPath, timeout: 5 * 60 * 1000 },
       );

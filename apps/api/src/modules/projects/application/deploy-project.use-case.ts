@@ -21,6 +21,10 @@ import {
 } from "../domain/container-orchestrator";
 import { HEALTH_CHECKER, type HealthChecker } from "../domain/health-checker";
 import { ENV_VAR_REPOSITORY, type EnvVarRepository } from "../domain/env-var.repository";
+import {
+  MANAGED_DATABASE_REPOSITORY,
+  type ManagedDatabaseRepository,
+} from "../domain/managed-database.repository";
 import { PortAllocator } from "../infrastructure/port-allocator";
 import { ResourceBudgetCalculator } from "../infrastructure/resource-budget-calculator";
 import { DockerComposeFileBuilder } from "../infrastructure/docker-compose-file-builder";
@@ -43,6 +47,7 @@ export class DeployProjectUseCase {
     @Inject(CONTAINER_ORCHESTRATOR) private readonly orchestrator: ContainerOrchestrator,
     @Inject(HEALTH_CHECKER) private readonly healthChecker: HealthChecker,
     @Inject(ENV_VAR_REPOSITORY) private readonly envVarRepository: EnvVarRepository,
+    @Inject(MANAGED_DATABASE_REPOSITORY) private readonly managedDatabaseRepository: ManagedDatabaseRepository,
     private readonly portAllocator: PortAllocator,
     private readonly resourceBudget: ResourceBudgetCalculator,
     private readonly composeFileBuilder: DockerComposeFileBuilder,
@@ -71,12 +76,25 @@ export class DeployProjectUseCase {
     const containerName = sanitizeContainerName(project.id, project.name);
     const memoryLimitMb = this.resourceBudget.getContainerMemoryLimitMb();
 
+    const managedDatabase = await this.managedDatabaseRepository.findByProjectId(project.id);
+
     const deployConfig = {
       projectPath,
       containerName,
       hostPort,
       containerPort,
       memoryLimitMb,
+      database: managedDatabase
+        ? {
+            type: managedDatabase.type,
+            username: managedDatabase.username,
+            password: managedDatabase.password,
+            databaseName: managedDatabase.databaseName,
+            // Metade do orçamento do app: bancos gerenciados são um extra, não
+            // podem competir igualmente pela RAM já apertada de uma VPS pequena.
+            memoryLimitMb: Math.round(memoryLimitMb / 2),
+          }
+        : undefined,
     };
 
     const composeContent = this.composeFileBuilder.build(deployConfig);

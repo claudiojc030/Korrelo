@@ -24,4 +24,12 @@ export class PrismaEnvVarRepository implements EnvVarRepository {
     ]);
     return this.findByProjectId(projectId);
   }
+
+  async upsertOne(projectId: string, input: EnvVarInput): Promise<void> {
+    await this.prisma.envVar.upsert({
+      where: { projectId_key: { projectId, key: input.key } },
+      create: { projectId, key: input.key, value: input.value },
+      update: { value: input.value },
+    });
+  }
 }

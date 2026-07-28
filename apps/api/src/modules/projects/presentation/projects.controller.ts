@@ -9,9 +9,13 @@ import { DeleteProjectUseCase } from "../application/delete-project.use-case";
 import { ListEnvVarsUseCase } from "../application/list-env-vars.use-case";
 import { SetEnvVarsUseCase } from "../application/set-env-vars.use-case";
 import { GetProjectDiskUsageUseCase } from "../application/get-project-disk-usage.use-case";
+import { ProvisionDatabaseUseCase } from "../application/provision-database.use-case";
+import { DeprovisionDatabaseUseCase } from "../application/deprovision-database.use-case";
+import { GetManagedDatabaseUseCase } from "../application/get-managed-database.use-case";
 import { CreateProjectDto } from "./create-project.dto";
 import { DetectStackDto } from "./detect-stack.dto";
 import { SetEnvVarsDto } from "./set-env-vars.dto";
+import { ProvisionDatabaseDto } from "./provision-database.dto";
 
 @Controller("projects")
 export class ProjectsController {
@@ -26,6 +30,9 @@ export class ProjectsController {
     private readonly listEnvVars: ListEnvVarsUseCase,
     private readonly setEnvVars: SetEnvVarsUseCase,
     private readonly getProjectDiskUsage: GetProjectDiskUsageUseCase,
+    private readonly provisionDatabase: ProvisionDatabaseUseCase,
+    private readonly deprovisionDatabase: DeprovisionDatabaseUseCase,
+    private readonly getManagedDatabase: GetManagedDatabaseUseCase,
   ) {}
 
   @Get()
@@ -56,6 +63,22 @@ export class ProjectsController {
   @Put(":id/env")
   setEnv(@Param("id") id: string, @Body() dto: SetEnvVarsDto) {
     return this.setEnvVars.execute(id, dto.vars);
+  }
+
+  @Get(":id/database")
+  getDatabase(@Param("id") id: string) {
+    return this.getManagedDatabase.execute(id);
+  }
+
+  @Post(":id/database")
+  provisionDatabaseEndpoint(@Param("id") id: string, @Body() dto: ProvisionDatabaseDto) {
+    return this.provisionDatabase.execute(id, dto.type);
+  }
+
+  @Delete(":id/database")
+  @HttpCode(204)
+  async removeDatabase(@Param("id") id: string) {
+    await this.deprovisionDatabase.execute(id);
   }
 
   @Post(":id/detect-stack")

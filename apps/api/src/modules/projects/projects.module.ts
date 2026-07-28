@@ -11,8 +11,12 @@ import { DeleteProjectUseCase } from "./application/delete-project.use-case";
 import { ListEnvVarsUseCase } from "./application/list-env-vars.use-case";
 import { SetEnvVarsUseCase } from "./application/set-env-vars.use-case";
 import { GetProjectDiskUsageUseCase } from "./application/get-project-disk-usage.use-case";
+import { ProvisionDatabaseUseCase } from "./application/provision-database.use-case";
+import { DeprovisionDatabaseUseCase } from "./application/deprovision-database.use-case";
+import { GetManagedDatabaseUseCase } from "./application/get-managed-database.use-case";
 import { PrismaProjectRepository } from "./infrastructure/prisma-project.repository";
 import { PrismaEnvVarRepository } from "./infrastructure/prisma-env-var.repository";
+import { PrismaManagedDatabaseRepository } from "./infrastructure/prisma-managed-database.repository";
 import { FileBasedStackDetector } from "./infrastructure/file-based-stack-detector";
 import { SimpleGitRepositoryCloner } from "./infrastructure/simple-git-repository-cloner";
 import { NodeDockerfileGenerator } from "./infrastructure/node-dockerfile-generator";
@@ -25,6 +29,7 @@ import { HttpHealthChecker } from "./infrastructure/http-health-checker";
 import { ProjectDiskUsageService } from "./infrastructure/project-disk-usage.service";
 import { PROJECT_REPOSITORY } from "./domain/project.repository";
 import { ENV_VAR_REPOSITORY } from "./domain/env-var.repository";
+import { MANAGED_DATABASE_REPOSITORY } from "./domain/managed-database.repository";
 import { STACK_DETECTOR } from "./domain/stack-detector";
 import { REPOSITORY_CLONER } from "./domain/repository-cloner";
 import { DOCKERFILE_GENERATOR } from "./domain/dockerfile-generator";
@@ -47,6 +52,9 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     ListEnvVarsUseCase,
     SetEnvVarsUseCase,
     GetProjectDiskUsageUseCase,
+    ProvisionDatabaseUseCase,
+    DeprovisionDatabaseUseCase,
+    GetManagedDatabaseUseCase,
     NodeDockerfileGenerator,
     DockerComposeFileBuilder,
     PortAllocator,
@@ -54,6 +62,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     ProjectDiskUsageService,
     { provide: PROJECT_REPOSITORY, useClass: PrismaProjectRepository },
     { provide: ENV_VAR_REPOSITORY, useClass: PrismaEnvVarRepository },
+    { provide: MANAGED_DATABASE_REPOSITORY, useClass: PrismaManagedDatabaseRepository },
     { provide: STACK_DETECTOR, useClass: FileBasedStackDetector },
     { provide: REPOSITORY_CLONER, useClass: SimpleGitRepositoryCloner },
     { provide: DOCKERFILE_GENERATOR, useClass: DockerfileGeneratorRegistry },

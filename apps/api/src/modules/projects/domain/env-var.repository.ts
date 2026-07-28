@@ -10,4 +10,5 @@ export interface EnvVarInput {
 export interface EnvVarRepository {
   findByProjectId(projectId: string): Promise<EnvVar[]>;
   replaceAll(projectId: string, vars: EnvVarInput[]): Promise<EnvVar[]>;
+  upsertOne(projectId: string, input: EnvVarInput): Promise<void>;
 }

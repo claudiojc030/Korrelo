@@ -8,6 +8,7 @@ export function ProjectTabs({ projectId }: { projectId: string }) {
   const tabs = [
     { href: `/projects/${projectId}`, label: "Resumo" },
     { href: `/projects/${projectId}/env`, label: "Variáveis de Ambiente" },
+    { href: `/projects/${projectId}/database`, label: "Banco de Dados" },
     { href: `/projects/${projectId}/terminal`, label: "Terminal" },
   ];
 
