@@ -7,6 +7,7 @@ import { GithubModule } from "./modules/github/github.module";
 import { MonitoringModule } from "./modules/monitoring/monitoring.module";
 import { TerminalModule } from "./modules/terminal/terminal.module";
 import { AuthModule } from "./modules/auth/auth.module";
+import { SystemServicesModule } from "./modules/system-services/system-services.module";
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { AuthModule } from "./modules/auth/auth.module";
     GithubModule,
     MonitoringModule,
     TerminalModule,
+    SystemServicesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

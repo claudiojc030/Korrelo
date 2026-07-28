@@ -80,17 +80,20 @@ else
   echo "nginx.conf já inclui forgedesk-sites — pulando."
 fi
 
-log "Configurando sudo restrito (só reload do nginx + certbot)"
-# O Core roda como usuário sem privilégio de propósito. Essas duas linhas são
-# a ÚNICA elevação que ele ganha — nada além de recarregar o nginx e rodar o
-# certbot (usado quando um domínio é anexado a um projeto pela API). O
-# certbot precisa de argumentos livres (*) porque cada emissão passa domínio/
-# e-mail diferentes; ainda assim ele só sabe emitir/renovar certificado, não
-# dá acesso geral de root.
+log "Configurando sudo restrito (nginx, certbot, enable/disable de serviço)"
+# O Core roda como usuário sem privilégio de propósito. Essas linhas são a
+# ÚNICA elevação que ele ganha: recarregar o nginx, rodar o certbot (domínio
+# de projeto), e ligar/desligar serviços do SO (aba "Serviços do sistema" no
+# ForgeDesk). O certbot precisa de argumentos livres (*) porque cada emissão
+# passa domínio/e-mail diferentes; "enable/disable --now *" também aceita
+# qualquer nome de serviço no sudoers — quem realmente restringe QUAL serviço
+# pode ser tocado é a lista fechada em
+# apps/api/src/modules/system-services/domain/service-catalog.ts, não esta
+# regra (ela só garante que a AÇÃO fica limitada a enable/disable).
 SYSTEMCTL_BIN=$(command -v systemctl)
 CERTBOT_BIN=$(command -v certbot)
 SUDOERS_TMP=$(mktemp)
-echo "$USER ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} reload nginx, ${CERTBOT_BIN} *" > "$SUDOERS_TMP"
+echo "$USER ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} reload nginx, ${CERTBOT_BIN} *, ${SYSTEMCTL_BIN} enable --now *, ${SYSTEMCTL_BIN} disable --now *" > "$SUDOERS_TMP"
 if sudo visudo -c -f "$SUDOERS_TMP" > /dev/null 2>&1; then
   sudo install -m 440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/forgedesk
   echo "Regra criada em /etc/sudoers.d/forgedesk."

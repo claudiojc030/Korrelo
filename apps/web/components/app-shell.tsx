@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, FolderGit2, LogOut } from "lucide-react";
+import { LayoutDashboard, FolderGit2, ShieldHalf, LogOut } from "lucide-react";
 import { apiFetch } from "../lib/api-client";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/projects", label: "Projetos", icon: FolderGit2 },
+  { href: "/system-services", label: "Serviços do servidor", icon: ShieldHalf },
 ];
 
 function Logo() {
