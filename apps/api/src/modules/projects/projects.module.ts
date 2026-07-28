@@ -5,6 +5,7 @@ import { AuthModule } from "../auth/auth.module";
 import { ProjectsController } from "./presentation/projects.controller";
 import { CronJobsController } from "./presentation/cron-jobs.controller";
 import { GithubWebhookController } from "./presentation/github-webhook.controller";
+import { ProjectFilesController } from "./presentation/project-files.controller";
 import { ListProjectsUseCase } from "./application/list-projects.use-case";
 import { GetProjectUseCase } from "./application/get-project.use-case";
 import { CreateProjectUseCase } from "./application/create-project.use-case";
@@ -29,6 +30,9 @@ import { UpdateCronJobUseCase } from "./application/update-cron-job.use-case";
 import { DeleteCronJobUseCase } from "./application/delete-cron-job.use-case";
 import { RunCronJobNowUseCase } from "./application/run-cron-job-now.use-case";
 import { HandleGithubPushWebhookUseCase } from "./application/handle-github-push-webhook.use-case";
+import { ListProjectFilesUseCase } from "./application/list-project-files.use-case";
+import { ReadProjectFileUseCase } from "./application/read-project-file.use-case";
+import { WriteProjectFileUseCase } from "./application/write-project-file.use-case";
 import { PrismaProjectRepository } from "./infrastructure/prisma-project.repository";
 import { PrismaEnvVarRepository } from "./infrastructure/prisma-env-var.repository";
 import { PrismaManagedDatabaseRepository } from "./infrastructure/prisma-managed-database.repository";
@@ -72,10 +76,13 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
 @Module({
   imports: [GithubModule, AuthModule, ScheduleModule.forRoot()],
-  controllers: [ProjectsController, CronJobsController, GithubWebhookController],
+  controllers: [ProjectsController, CronJobsController, GithubWebhookController, ProjectFilesController],
   providers: [
     PrismaService,
     HandleGithubPushWebhookUseCase,
+    ListProjectFilesUseCase,
+    ReadProjectFileUseCase,
+    WriteProjectFileUseCase,
     ListCronJobsUseCase,
     CreateCronJobUseCase,
     UpdateCronJobUseCase,

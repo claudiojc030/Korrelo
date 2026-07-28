@@ -41,7 +41,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.refresh();
   }
 
-  const isTerminal = pathname?.includes("/terminal");
+  const isFullHeightPage = pathname?.includes("/terminal") || pathname?.includes("/files");
 
   return (
     <div className="flex min-h-dvh">
@@ -86,7 +86,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
-      <main className={`min-w-0 flex-1 ${isTerminal ? "flex flex-col" : "overflow-y-auto"}`}>
+      <main className={`min-w-0 flex-1 ${isFullHeightPage ? "flex flex-col" : "overflow-y-auto"}`}>
         {children}
       </main>
     </div>
