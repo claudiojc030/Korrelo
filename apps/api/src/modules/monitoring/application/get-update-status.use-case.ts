@@ -1,7 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { UPDATE_CHECKER, type UpdateChecker, type UpdateStatus } from "../domain/update-checker";
 
-// Checar atualização exige um `git fetch` de verdade (rede) — não faz
+// Checar atualização exige um `git fetch` de verdade (rede), e não faz
 // sentido repetir isso a cada poll do dashboard. Cache de 10 minutos com
 // dedupe do in-flight (mesmo padrão do GetSystemMetricsUseCase).
 const CACHE_TTL_MS = 10 * 60 * 1000;

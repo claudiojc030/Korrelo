@@ -7,7 +7,7 @@ import type { DomainSslStatus } from "@forgedesk/shared-types";
 import { apiFetch } from "../../../../lib/api-client";
 
 const STATUS_LABEL: Record<DomainSslStatus, { label: string; className: string }> = {
-  none: { label: "—", className: "text-muted-foreground" },
+  none: { label: "-", className: "text-muted-foreground" },
   pending: { label: "Emitindo certificado...", className: "text-warning" },
   active: { label: "HTTPS ativo", className: "text-accent" },
   failed: { label: "Falhou", className: "text-destructive" },
@@ -103,7 +103,7 @@ export function DomainCard({
       ) : (
         <form onSubmit={handleAttach} className="mt-2 flex flex-col gap-2">
           <p className="text-[12px] text-muted-foreground">
-            Aponte o DNS do domínio pro IP desta VPS antes de anexar — o certificado TLS só é emitido se o
+            Aponte o DNS do domínio pro IP desta VPS antes de anexar. O certificado TLS só é emitido se o
             domínio já resolver pra cá.
           </p>
           <div className="flex gap-2">

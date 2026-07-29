@@ -7,7 +7,7 @@ class DockerExecShellSession implements ShellSession {
 
   constructor(containerName: string) {
     // spawn (não shell): containerName vem do banco (gerado por nós no deploy),
-    // nunca de input direto do cliente do WebSocket — e mesmo assim, argumentos
+    // nunca de input direto do cliente do WebSocket, e mesmo assim, argumentos
     // de array nunca passam por interpretação de shell.
     this.child = spawn("docker", ["exec", "-i", containerName, "sh"], {
       stdio: ["pipe", "pipe", "pipe"],

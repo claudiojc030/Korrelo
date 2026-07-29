@@ -23,7 +23,7 @@ export function TierBadge({ tier, label }: { tier: ResourceTier; label: string }
       {open && (
         <div className="absolute right-0 top-full z-30 mt-2 w-80 rounded-xl border border-border-subtle bg-surface p-3 shadow-panel">
           <p className="mb-2 px-1 text-[12px] text-muted-foreground">
-            Porte classificado pela RAM total da VPS — define o limite de memória por
+            Porte classificado pela RAM total da VPS, que define o limite de memória por
             container de projeto implantado.
           </p>
           <table className="w-full text-left text-[12.5px]">

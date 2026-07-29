@@ -25,7 +25,7 @@ export interface DetectedStack {
   recommendedPort: number | null;
   startCommand: string | null;
   buildCommand: string | null;
-  // Nome do binário/artefato final — só usado por linguagens compiladas onde o
+  // Nome do binário/artefato final. Só usado por linguagens compiladas onde o
   // Dockerfile precisa saber o nome exato pra copiar (ex: nome do pacote Rust).
   entryPoint: string | null;
 }

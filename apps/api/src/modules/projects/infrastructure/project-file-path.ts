@@ -1,8 +1,8 @@
 import { BadRequestException } from "@nestjs/common";
 import * as path from "node:path";
 
-// Arquivos que o ForgeDesk gera e que guardam segredo ou config interna —
-// nunca ficam navegáveis/editáveis por aqui, mesmo que o usuário peça o
+// Arquivos que o ForgeDesk gera e que guardam segredo ou config interna.
+// Nunca ficam navegáveis/editáveis por aqui, mesmo que o usuário peça o
 // caminho exato.
 const BLOCKED_SEGMENTS = [".git", ".env.forgedesk", "docker-compose.forgedesk.yml"];
 

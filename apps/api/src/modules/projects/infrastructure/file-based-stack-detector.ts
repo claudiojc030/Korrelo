@@ -183,7 +183,7 @@ export class FileBasedStackDetector implements StackDetector {
           : null;
 
     // Muito projeto Flask/FastAPI de exemplo (Heroku/Render etc) não chama
-    // app.run() no próprio arquivo — espera rodar via gunicorn/uvicorn como
+    // app.run() no próprio arquivo, espera rodar via gunicorn/uvicorn como
     // processo web "de produção". "python app.py" nesses casos não sobe nada.
     const hasGunicorn = requirements.includes("gunicorn");
 

@@ -19,7 +19,7 @@ function refreshAccessToken(): Promise<boolean> {
 export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const response = await fetch(`${API_URL}${path}`, {
     ...init,
-    // Token de auth vive num cookie httpOnly agora — o navegador manda
+    // Token de auth vive num cookie httpOnly agora, o navegador manda
     // sozinho, não tem mais Authorization montado a partir de JS.
     credentials: "include",
   });

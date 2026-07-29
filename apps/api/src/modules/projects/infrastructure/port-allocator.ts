@@ -8,10 +8,10 @@ const MAX_ATTEMPTS = 30;
 const CONNECT_TIMEOUT_MS = 300;
 
 // Tenta CONECTAR na porta em vez de só tentar abri-la (bind). Um bind test sozinho
-// não é confiável em todo SO — no Windows, por exemplo, é permitido religar na mesma
+// não é confiável em todo SO: no Windows, por exemplo, é permitido religar na mesma
 // porta já usada por outro processo do mesmo usuário, o que mascarava conflitos reais
-// (inclusive com a própria porta da API). Connect é o teste que realmente importa:
-// se algo responde, a porta está ocupada — em qualquer sistema operacional.
+// (inclusive com a própria porta da API). Connect é o teste que realmente importa,
+// pois se algo responde, a porta está ocupada, em qualquer sistema operacional.
 function isPortInUse(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = new net.Socket();
@@ -48,7 +48,7 @@ async function getDockerPublishedPorts(): Promise<Set<number>> {
     }
     return ports;
   } catch {
-    // Se o docker não responder, segue só com os outros testes — não trava o allocator por isso.
+    // Se o docker não responder, segue só com os outros testes. Não trava o allocator por isso.
     return new Set();
   }
 }

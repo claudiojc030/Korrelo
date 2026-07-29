@@ -34,7 +34,7 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
       setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard API pode falhar (permissão negada, contexto não-seguro,
-      // documento sem foco) — sem feedback de "copiado", mas o comando
+      // documento sem foco). Sem feedback de "copiado", mas o comando
       // continua selecionável manualmente no <pre> acima.
     }
   }
@@ -47,7 +47,7 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
           <p className="text-[13.5px] font-medium text-foreground">
             Atualização disponível
             <span className="ml-1.5 font-normal text-muted-foreground">
-              — {status.commitsBehind} commit{status.commitsBehind === 1 ? "" : "s"} atrás do repositório
+              ({status.commitsBehind} commit{status.commitsBehind === 1 ? "" : "s"} atrás do repositório)
             </span>
           </p>
         </div>

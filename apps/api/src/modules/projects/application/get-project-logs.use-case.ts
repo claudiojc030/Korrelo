@@ -22,7 +22,7 @@ export class GetProjectLogsUseCase {
       throw new NotFoundException(`Projeto ${projectId} não encontrado`);
     }
     if (!project.containerName) {
-      throw new BadRequestException("Este projeto ainda não foi implantado — não há container pra ler logs.");
+      throw new BadRequestException("Este projeto ainda não foi implantado, não há container pra ler logs.");
     }
 
     let containerName = project.containerName;

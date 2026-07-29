@@ -26,7 +26,7 @@ export class HandleGithubPushWebhookUseCase {
       if (project.deployBranch !== pushedBranch) continue;
 
       triggered.push(project.id);
-      // Não espera o deploy terminar — um build pode levar minutos, e o
+      // Não espera o deploy terminar, porque um build pode levar minutos, e o
       // GitHub considera a entrega do webhook falha depois de ~10s sem resposta.
       this.deployProject.execute(project.id, "webhook").catch((error) => {
         this.logger.error(`Auto-deploy falhou pro projeto "${project.name}" (${project.id}): ${error}`);

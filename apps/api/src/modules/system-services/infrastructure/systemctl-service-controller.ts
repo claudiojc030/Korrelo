@@ -41,7 +41,7 @@ export class SystemctlServiceController implements OsServiceController {
       return stdout.trim() === "active";
     } catch (error) {
       // "systemctl is-active" sai com código != 0 quando o serviço não está
-      // ativo — isso não é uma falha real, só o estado "inativo".
+      // ativo. Isso não é uma falha real, só o estado "inativo".
       const stdout = (error as { stdout?: string }).stdout;
       return stdout?.trim() === "active";
     }

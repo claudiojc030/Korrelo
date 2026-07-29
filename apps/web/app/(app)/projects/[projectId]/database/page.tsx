@@ -139,7 +139,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
               </div>
               <p className="mt-1 text-[12px] text-muted-foreground">
                 {type === "postgres" && "Banco relacional, com volume persistente e no backup diário."}
-                {type === "redis" && "Cache/fila em memória — por padrão não sobrevive a reinício nem entra no backup."}
+                {type === "redis" && "Cache/fila em memória, por padrão não sobrevive a reinício nem entra no backup."}
                 {type === "mongodb" && "Banco de documentos, com volume persistente e no backup diário."}
               </p>
 
@@ -152,7 +152,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
                     className="mt-0.5 accent-accent"
                   />
                   <span>
-                    Este Redis guarda dado importante (não sei ao certo? marque por segurança) — persistir em
+                    Este Redis guarda dado importante (não sei ao certo? marque por segurança): persistir em
                     disco e incluir no backup diário. Deixa a escrita um pouco mais lenta.
                   </span>
                 </label>
@@ -176,7 +176,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
             </div>
             <p className="mt-1 text-[12px] text-muted-foreground">
               Já usa outra coisa (MongoDB Atlas, Supabase, um Postgres seu, etc.)? Cole a connection string
-              aqui — o ForgeDesk não sobe container nenhum, só injeta como variável de ambiente.
+              aqui. O ForgeDesk não sobe container nenhum, só injeta como variável de ambiente.
             </p>
 
             {!customOpen ? (
@@ -280,9 +280,9 @@ export default function DatabasePage({ params }: { params: { projectId: string }
                 label="Persistência / backup"
                 value={
                   db.persistent ? (
-                    <span className="text-accent">Ativada — incluído no backup diário</span>
+                    <span className="text-accent">Ativada, incluído no backup diário</span>
                   ) : (
-                    <span className="text-muted-foreground">Desativada — cache descartável</span>
+                    <span className="text-muted-foreground">Desativada, cache descartável</span>
                   )
                 }
               />
@@ -294,7 +294,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
       <p className="mt-3 text-[12.5px] text-muted-foreground">
         {isCustom ? (
           <>
-            Banco externo — o ForgeDesk não sobe container pra ele, só injeta{" "}
+            Banco externo. O ForgeDesk não sobe container pra ele, só injeta{" "}
             <span className="font-mono text-foreground">{db.envVarKey}</span> como variável de ambiente.
           </>
         ) : (

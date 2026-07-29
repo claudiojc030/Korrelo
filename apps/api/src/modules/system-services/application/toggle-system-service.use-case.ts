@@ -7,7 +7,7 @@ export class ToggleSystemServiceUseCase {
   constructor(@Inject(OS_SERVICE_CONTROLLER) private readonly controller: OsServiceController) {}
 
   async execute(serviceId: string, enabled: boolean): Promise<void> {
-    // Só aceita IDs do catálogo fechado — nunca um nome de unit vindo direto
+    // Só aceita IDs do catálogo fechado, nunca um nome de unit vindo direto
     // do cliente, pra não virar um jeito de ligar/desligar QUALQUER serviço.
     const service = findServiceDefinition(serviceId);
     if (!service) {

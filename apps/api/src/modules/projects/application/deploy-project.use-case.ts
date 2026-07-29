@@ -82,8 +82,8 @@ export class DeployProjectUseCase {
     const memoryLimitMb = this.resourceBudget.getContainerMemoryLimitMb();
 
     const managedDatabase = await this.managedDatabaseRepository.findByProjectId(project.id);
-    // Bancos "custom" são externos (o usuário cola a própria connection string) —
-    // o ForgeDesk nunca sobe container pra eles, só injeta a env var.
+    // Bancos "custom" são externos (o usuário cola a própria connection string),
+    // então o ForgeDesk nunca sobe container pra eles, só injeta a env var.
     const managedContainerDatabase =
       managedDatabase && managedDatabase.type !== "custom" ? managedDatabase : null;
 
@@ -110,8 +110,8 @@ export class DeployProjectUseCase {
     const composeContent = this.composeFileBuilder.build(deployConfig);
     await fs.writeFile(path.join(projectPath, COMPOSE_FILENAME), composeContent, "utf-8");
 
-    // O compose sempre referencia esse arquivo via env_file — precisa existir mesmo
-    // vazio, ou o `docker compose up` falha procurando um arquivo que não está lá.
+    // O compose sempre referencia esse arquivo via env_file, então precisa existir
+    // mesmo vazio, ou o `docker compose up` falha procurando um arquivo que não está lá.
     const envVars = await this.envVarRepository.findByProjectId(project.id);
     const envFileContent = envVars.map((v) => `${v.key}=${v.value}`).join("\n") + "\n";
     await fs.writeFile(path.join(projectPath, ENV_FILENAME), envFileContent, "utf-8");
@@ -141,7 +141,7 @@ export class DeployProjectUseCase {
   }
 
   private async rollback(config: TeardownConfig, reason: string): Promise<void> {
-    this.logger.warn(`Rollback: ${reason} (${config.containerName}) — removendo container`);
+    this.logger.warn(`Rollback: ${reason} (${config.containerName}), removendo container`);
     try {
       await this.orchestrator.teardown(config);
     } catch (teardownError) {

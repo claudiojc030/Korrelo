@@ -20,7 +20,7 @@ export class ListDatabaseTablesUseCase {
       throw new NotFoundException(`Projeto ${projectId} não encontrado`);
     }
     if (!project.containerName) {
-      throw new BadRequestException("Este projeto ainda não foi implantado — não há container de banco pra navegar.");
+      throw new BadRequestException("Este projeto ainda não foi implantado, não há container de banco pra navegar.");
     }
 
     const database = await this.databaseRepository.findByProjectId(projectId);

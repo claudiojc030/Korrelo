@@ -22,7 +22,7 @@ export class WriteProjectFileUseCase {
     const workspaceRoot = getProjectWorkspacePath(projectId);
     const targetPath = resolveSafeProjectPath(workspaceRoot, relativePath);
 
-    // Só permite sobrescrever arquivo existente — criar arquivo novo pelo
+    // Só permite sobrescrever arquivo existente. Criar arquivo novo pelo
     // editor fica fora de escopo por enquanto (evita, por exemplo, criar
     // caminhos com pastas intermediárias inexistentes sem querer).
     const stat = await fs.stat(targetPath).catch(() => null);

@@ -5,7 +5,7 @@ import {
   type SystemMetricsCollector,
 } from "../domain/system-metrics-collector";
 
-// collect() roda docker ps/stats + leitura de disco — caro o bastante (chega
+// collect() roda docker ps/stats + leitura de disco, e isso é caro o bastante (chega
 // a ~2s neste ambiente) pra valer a pena não repetir se duas chamadas caírem
 // quase juntas (o poll do dashboard e o coletor em background de métricas,
 // por exemplo). Cache curtíssimo com dedupe do in-flight: uma chamada em

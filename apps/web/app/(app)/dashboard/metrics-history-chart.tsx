@@ -69,7 +69,7 @@ export function MetricsHistoryChart() {
           <p className="text-[13px] text-muted-foreground">Carregando...</p>
         ) : points.length < 2 ? (
           <p className="text-[13px] text-muted-foreground">
-            Ainda não há dados suficientes pra esse período — a coleta roda a cada minuto.
+            Ainda não há dados suficientes pra esse período. A coleta roda a cada minuto.
           </p>
         ) : (
           <ResponsiveContainer width="100%" height={220}>

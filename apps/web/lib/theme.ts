@@ -13,7 +13,7 @@ export function applyTheme(theme: Theme): void {
   try {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
   } catch {
-    // localStorage indisponível (modo privado, etc) — tema ainda funciona,
+    // localStorage indisponível (modo privado, etc), tema ainda funciona,
     // só não persiste entre sessões.
   }
 }

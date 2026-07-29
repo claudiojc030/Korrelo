@@ -143,7 +143,7 @@ export default async function DashboardPage() {
 
       {!metrics ? (
         <p className="text-[13.5px] text-destructive">
-          Não foi possível carregar as métricas — verifique se a API está no ar.
+          Não foi possível carregar as métricas. Verifique se a API está no ar.
         </p>
       ) : (
         <>
@@ -238,11 +238,11 @@ export default async function DashboardPage() {
 
                       <div className="flex flex-none items-center gap-5 font-mono text-[12.5px] text-muted-foreground">
                         <div className="flex flex-col items-end gap-1">
-                          <span>CPU {container?.cpuPercent != null ? `${container.cpuPercent.toFixed(1)}%` : "—"}</span>
+                          <span>CPU {container?.cpuPercent != null ? `${container.cpuPercent.toFixed(1)}%` : "-"}</span>
                         </div>
                         <div className="flex w-28 flex-col items-end gap-1">
                           <span>
-                            {container?.memUsageMb != null ? `${container.memUsageMb} MB` : "—"}
+                            {container?.memUsageMb != null ? `${container.memUsageMb} MB` : "-"}
                             {memLimitMb && <span className="text-muted-foreground/60"> / {memLimitMb} MB</span>}
                           </span>
                           {memPercent !== null && (
@@ -286,7 +286,7 @@ export default async function DashboardPage() {
                     </div>
                     <span className="flex-none font-mono text-[12.5px] text-muted-foreground">
                       {container.cpuPercent != null ? `${container.cpuPercent.toFixed(1)}% · ` : ""}
-                      {container.memUsageMb !== null ? `${container.memUsageMb} MB` : "—"}
+                      {container.memUsageMb !== null ? `${container.memUsageMb} MB` : "-"}
                     </span>
                   </div>
                 ))}

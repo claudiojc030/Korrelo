@@ -129,7 +129,7 @@ export default function SystemServicesPage() {
       </div>
       <p className="mb-5 text-[12.5px] text-muted-foreground">
         Serviços do sistema operacional que uma VPS rodando só o ForgeDesk normalmente não precisa. Lista fechada
-        e revisada — nunca dá pra mexer em serviços essenciais (SSH, Docker, nginx, etc.) por aqui.
+        e revisada, nunca dá pra mexer em serviços essenciais (SSH, Docker, nginx, etc.) por aqui.
       </p>
 
       {error && <p className="mb-3 text-[13px] text-destructive">{error}</p>}

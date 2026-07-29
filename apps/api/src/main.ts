@@ -17,7 +17,7 @@ function getAllowedOrigins(): string[] {
 
 async function bootstrap() {
   // bodyParser desligado aqui pra poder guardar o corpo bruto da requisição
-  // (necessário pra verificar a assinatura HMAC dos webhooks do GitHub —
+  // (necessário pra verificar a assinatura HMAC dos webhooks do GitHub,
   // ver github-webhook.controller.ts).
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   // Atrás do nginx (reverse proxy da VPS), precisa confiar no cabeçalho

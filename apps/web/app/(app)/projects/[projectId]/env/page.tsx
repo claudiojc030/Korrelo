@@ -79,7 +79,7 @@ export default function EnvVarsPage({ params }: { params: { projectId: string } 
             Variáveis de ambiente
           </p>
           <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-            Aplicadas no próximo deploy — precisa dar Deploy de novo pra valer pro container já rodando.
+            Aplicadas no próximo deploy, precisa dar Deploy de novo pra valer pro container já rodando.
           </p>
         </div>
         <button

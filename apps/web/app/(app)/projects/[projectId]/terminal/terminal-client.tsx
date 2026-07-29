@@ -40,7 +40,7 @@ export function TerminalClient({ projectId }: { projectId: string }) {
       term.open(containerRef.current);
       fitAddon.fit();
 
-      // withCredentials manda o cookie httpOnly de auth junto do handshake —
+      // withCredentials manda o cookie httpOnly de auth junto do handshake,
       // o gateway valida lendo esse cookie (ver terminal.gateway.ts).
       socket = io(`${API_URL}/terminal`, { withCredentials: true });
       socket.on("connect", () => socket?.emit("start", { projectId }));

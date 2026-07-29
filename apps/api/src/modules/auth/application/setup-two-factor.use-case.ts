@@ -30,7 +30,7 @@ export class SetupTwoFactorUseCase {
 
     // Guarda o segredo já, mas twoFactorEnabled só vira true depois que o
     // usuário provar (via EnableTwoFactorUseCase) que configurou o app
-    // autenticador corretamente — evita ficar "meio ativado" se a pessoa
+    // autenticador corretamente, o que evita ficar "meio ativado" se a pessoa
     // fechar a tela antes de confirmar.
     await this.userRepository.update(user.withPendingTwoFactorSecret(secret));
 

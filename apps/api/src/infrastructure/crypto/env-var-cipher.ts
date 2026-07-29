@@ -5,10 +5,10 @@ const ALGORITHM = "aes-256-gcm";
 const PREFIX = "enc:v1:";
 
 // Variáveis de ambiente de projeto costumam guardar segredos de verdade
-// (chaves de API, connection strings) — cifradas em repouso no banco do Core,
-// não em texto puro. Valores gravados antes dessa mudança não têm o prefixo
-// "enc:v1:" e continuam sendo lidos como estão (decrypt tenta, cai pro texto
-// original se não reconhecer o formato) — a próxima gravação já cifra.
+// (chaves de API, connection strings), por isso ficam cifradas em repouso no
+// banco do Core, não em texto puro. Valores gravados antes dessa mudança não
+// têm o prefixo "enc:v1:" e continuam sendo lidos como estão (decrypt tenta,
+// cai pro texto original se não reconhecer o formato); a próxima gravação já cifra.
 @Injectable()
 export class EnvVarCipher {
   private get key(): Buffer {
@@ -33,7 +33,7 @@ export class EnvVarCipher {
 
   decrypt(storedValue: string): string {
     if (!storedValue.startsWith(PREFIX)) {
-      // Valor legado (gravado antes da cifragem existir) — devolve como está.
+      // Valor legado (gravado antes da cifragem existir). Devolve como está.
       return storedValue;
     }
     try {
@@ -47,7 +47,7 @@ export class EnvVarCipher {
       return plaintext.toString("utf-8");
     } catch {
       throw new InternalServerErrorException(
-        "Falha ao decifrar variável de ambiente — ENV_ENCRYPTION_KEY pode estar errado.",
+        "Falha ao decifrar variável de ambiente. ENV_ENCRYPTION_KEY pode estar errado.",
       );
     }
   }

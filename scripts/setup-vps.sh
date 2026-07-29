@@ -8,7 +8,7 @@ log() { echo -e "\n\033[1;32m==> $1\033[0m"; }
 warn() { echo -e "\033[1;33m[aviso] $1\033[0m"; }
 
 if [ "$(id -u)" -eq 0 ]; then
-  echo "Não rode como root — rode como um usuário normal com sudo (evita rodar o Core como root)." >&2
+  echo "Não rode como root. Rode como um usuário normal com sudo (evita rodar o Core como root)." >&2
   exit 1
 fi
 
@@ -29,7 +29,7 @@ if [ ! -f /swapfile ] && [ "$TOTAL_MEM_MB" -le 8192 ]; then
   sudo sysctl -p > /dev/null
   echo "Swap de ${SWAP_SIZE_GB}G criado."
 else
-  echo "Swap já existe ou RAM > 8GB — pulando."
+  echo "Swap já existe ou RAM > 8GB, pulando."
 fi
 
 log "Instalando Node.js 20"
@@ -77,7 +77,7 @@ if ! grep -q "forgedesk-sites" /etc/nginx/nginx.conf; then
   sudo systemctl reload nginx
   echo "nginx.conf atualizado pra incluir ${FORGEDESK_SITES_DIR}/*.conf"
 else
-  echo "nginx.conf já inclui forgedesk-sites — pulando."
+  echo "nginx.conf já inclui forgedesk-sites, pulando."
 fi
 
 log "Configurando sudo restrito (nginx, certbot, enable/disable de serviço)"
@@ -86,7 +86,7 @@ log "Configurando sudo restrito (nginx, certbot, enable/disable de serviço)"
 # de projeto), e ligar/desligar serviços do SO (aba "Serviços do sistema" no
 # ForgeDesk). O certbot precisa de argumentos livres (*) porque cada emissão
 # passa domínio/e-mail diferentes; "enable/disable --now *" também aceita
-# qualquer nome de serviço no sudoers — quem realmente restringe QUAL serviço
+# qualquer nome de serviço no sudoers. Quem realmente restringe QUAL serviço
 # pode ser tocado é a lista fechada em
 # apps/api/src/modules/system-services/domain/service-catalog.ts, não esta
 # regra (ela só garante que a AÇÃO fica limitada a enable/disable).
@@ -98,7 +98,7 @@ if sudo visudo -c -f "$SUDOERS_TMP" > /dev/null 2>&1; then
   sudo install -m 440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/forgedesk
   echo "Regra criada em /etc/sudoers.d/forgedesk."
 else
-  echo "Regra de sudoers gerada é inválida — abortando sem tocar em /etc/sudoers.d." >&2
+  echo "Regra de sudoers gerada é inválida, abortando sem tocar em /etc/sudoers.d." >&2
   rm -f "$SUDOERS_TMP"
   exit 1
 fi
@@ -113,7 +113,7 @@ npm run build --workspace=apps/api
 
 # --- Domínio do ForgeDesk em si (opcional) ---------------------------------
 # Isso é só pra você acessar o painel do ForgeDesk por um domínio em vez do
-# IP puro — totalmente opcional, o resto do script funciona sem isso.
+# IP puro. Totalmente opcional, o resto do script funciona sem isso.
 DOMAIN=""
 LETSENCRYPT_EMAIL=""
 PUBLIC_IP=$(curl -s ifconfig.me || echo "SEU_IP")
@@ -138,16 +138,16 @@ if [ ! -f apps/api/.env ]; then
   sed -i "s#^ENV_ENCRYPTION_KEY=.*#ENV_ENCRYPTION_KEY=${ENV_ENCRYPTION_KEY}#" apps/api/.env
   sed -i "s#^FORGEDESK_WEB_URL=.*#FORGEDESK_WEB_URL=${BASE_WEB_URL}#" apps/api/.env
   sed -i "s#^CORS_ORIGINS=.*#CORS_ORIGINS=${BASE_WEB_URL}#" apps/api/.env
-  echo "apps/api/.env criado — JWT_SECRET, ENV_ENCRYPTION_KEY, FORGEDESK_WEB_URL e CORS_ORIGINS preenchidos automaticamente."
+  echo "apps/api/.env criado. JWT_SECRET, ENV_ENCRYPTION_KEY, FORGEDESK_WEB_URL e CORS_ORIGINS preenchidos automaticamente."
   echo "IMPORTANTE: falta preencher GITHUB_APP_SLUG, GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY e"
   echo "GITHUB_APP_WEBHOOK_SECRET em apps/api/.env (veja as instruções de cadastro do GitHub App"
   echo "no README). O GITHUB_APP_WEBHOOK_SECRET precisa bater com o 'Webhook secret' configurado"
-  echo "nas settings do App em github.com — e o 'Webhook URL' de lá precisa apontar pra"
-  echo "${BASE_API_URL}/github/webhook, com o evento \"Push\" habilitado — é isso que liga o"
+  echo "nas settings do App em github.com. E o 'Webhook URL' de lá precisa apontar pra"
+  echo "${BASE_API_URL}/github/webhook, com o evento \"Push\" habilitado. É isso que liga o"
   echo "deploy automático ao dar push."
   read -rp "Pressione ENTER depois de editar apps/api/.env para continuar..."
 else
-  echo "apps/api/.env já existe — não mexi nele."
+  echo "apps/api/.env já existe, não mexi nele."
 fi
 
 log "Configurando .env da Web"
@@ -156,13 +156,13 @@ if [ ! -f apps/web/.env ]; then
   sed -i "s#^NEXT_PUBLIC_API_URL=.*#NEXT_PUBLIC_API_URL=${BASE_API_URL}#" apps/web/.env
   echo "apps/web/.env criado com NEXT_PUBLIC_API_URL=${BASE_API_URL}."
 else
-  echo "apps/web/.env já existe — não mexi nele."
+  echo "apps/web/.env já existe, não mexi nele."
 fi
 
 log "Buildando a Web"
 npm run build --workspace=apps/web
 
-# next.config.js usa output: "standalone" — o build gera um server.js enxuto
+# next.config.js usa output: "standalone". O build gera um server.js enxuto
 # em .next/standalone (só as dependências realmente usadas), mas não copia
 # os assets estáticos e a pasta public sozinho (é assim que o Next.js
 # funciona, não é opcional). Sem isso o server sobe mas serve CSS/JS/fontes
@@ -177,7 +177,7 @@ log "Rodando migrations do banco (produção, não-interativo)"
 
 log "Configurando firewall (ufw)"
 sudo ufw allow OpenSSH
-sudo ufw allow "Nginx Full"  # 80/443 — pros domínios dos projetos e/ou do ForgeDesk
+sudo ufw allow "Nginx Full"  # 80/443, pros domínios dos projetos e/ou do ForgeDesk
 sudo ufw allow 3000/tcp      # Web do ForgeDesk direto pelo IP
 sudo ufw allow 3001/tcp      # API do ForgeDesk direto pelo IP
 sudo ufw --force enable
@@ -215,17 +215,17 @@ JAILCONF
     echo "SSH agora só aceita chave (login root e por senha desabilitados). fail2ban ativo."
     warn "Antes de fechar este terminal, abra OUTRO terminal e confirme que ainda consegue entrar via SSH com sua chave."
   else
-    warn "Config de sshd_config gerada ficou inválida — não mexi no arquivo real, por segurança. Rode este bloco manualmente depois."
+    warn "Config de sshd_config gerada ficou inválida, não mexi no arquivo real por segurança. Rode este bloco manualmente depois."
   fi
   rm -f "$SSHD_CONFIG_TMP"
 else
-  warn "Nenhuma chave encontrada em ${AUTHORIZED_KEYS} — pulando hardening de SSH pra não te trancar fora."
+  warn "Nenhuma chave encontrada em ${AUTHORIZED_KEYS}, pulando hardening de SSH pra não te trancar fora."
   warn "Adicione sua chave pública lá e rode este script de novo (ou só essa etapa manualmente)."
 fi
 
 log "Desativando serviços de SO desnecessários pra uma VPS rodando só o ForgeDesk"
 # Nada aqui é desinstalado (reversível, sem risco de quebrar dependência de
-# pacote) — só parado e desabilitado. snapd fica de fora de propósito: mexer
+# pacote), só parado e desabilitado. snapd fica de fora de propósito: mexer
 # nele tem risco de efeito colateral desproporcional ao pouco de RAM que
 # libera numa VPS pequena.
 UNNECESSARY_SERVICES=(avahi-daemon cups cups-browsed ModemManager bluetooth)
@@ -239,7 +239,7 @@ done
 if [ "${#DISABLED_SERVICES[@]}" -gt 0 ]; then
   echo "Desativados: ${DISABLED_SERVICES[*]}"
 else
-  echo "Nenhum desses serviços estava presente nesta imagem — nada pra desativar."
+  echo "Nenhum desses serviços estava presente nesta imagem, nada pra desativar."
 fi
 
 log "Subindo o Core via PM2"
@@ -260,7 +260,7 @@ BACKUP_CRON_LINE="0 3 * * * cd ${REPO_DIR} && bash scripts/backup.sh >> ${BACKUP
 echo "Backup agendado todo dia às 3h. Rode manualmente com: bash scripts/backup.sh"
 
 log "Alerta de falha de backup (opcional)"
-read -rp "Tópico do ntfy.sh pra avisar se o backup falhar? (deixe em branco pra pular — ex: forgedesk-backup-$(whoami)-$(hostname)): " NTFY_TOPIC
+read -rp "Tópico do ntfy.sh pra avisar se o backup falhar? (deixe em branco pra pular, ex: forgedesk-backup-$(whoami)-$(hostname)): " NTFY_TOPIC
 if [ -n "$NTFY_TOPIC" ]; then
   if ! grep -q "^BACKUP_ALERT_NTFY_TOPIC=" apps/api/.env 2>/dev/null; then
     echo "BACKUP_ALERT_NTFY_TOPIC=${NTFY_TOPIC}" >> apps/api/.env
@@ -269,10 +269,10 @@ if [ -n "$NTFY_TOPIC" ]; then
   fi
   echo "Configurado. Instale o app ntfy (ntfy.sh) no celular e inscreva-se no tópico '${NTFY_TOPIC}' pra receber o aviso."
 else
-  echo "Pulado — se o backup diário falhar, só vai aparecer no log (${BACKUP_LOG})."
+  echo "Pulado. Se o backup diário falhar, só vai aparecer no log (${BACKUP_LOG})."
 fi
 
-log "Backup externo — Google Drive via rclone (opcional)"
+log "Backup externo: Google Drive via rclone (opcional)"
 read -rp "Quer copiar os backups pro seu Google Drive também? [s/N]: " SETUP_RCLONE
 if [[ "$SETUP_RCLONE" =~ ^[sS] ]]; then
   if ! command -v rclone &> /dev/null; then
@@ -280,10 +280,10 @@ if [[ "$SETUP_RCLONE" =~ ^[sS] ]]; then
   else
     echo "rclone já instalado."
   fi
-  echo "Agora vamos configurar o remote 'gdrive'. O rclone vai te dar um link —"
+  echo "Agora vamos configurar o remote 'gdrive'. O rclone vai te dar um link:"
   echo "abra ele em QUALQUER navegador (seu celular/notebook, não precisa ser aqui na VPS),"
   echo "autorize com sua conta Google, e cole o código de volta aqui quando pedir."
-  rclone config create gdrive drive scope drive.file || warn "Configuração do rclone não concluída — rode 'rclone config' manualmente depois."
+  rclone config create gdrive drive scope drive.file || warn "Configuração do rclone não concluída, rode 'rclone config' manualmente depois."
   if ! grep -q "^BACKUP_RCLONE_REMOTE=" apps/api/.env 2>/dev/null; then
     echo "BACKUP_RCLONE_REMOTE=gdrive" >> apps/api/.env
   else

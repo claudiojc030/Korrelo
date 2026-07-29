@@ -12,7 +12,7 @@ export class RustDockerfileGenerator implements DockerfileGenerator {
   generate(stack: DetectedStack): GeneratedDockerfile {
     const port = stack.recommendedPort ?? 8080;
     // entryPoint vem do nome do pacote lido do Cargo.toml (ver
-    // file-based-stack-detector.ts) — é o nome do binário que `cargo build`
+    // file-based-stack-detector.ts). É o nome do binário que `cargo build`
     // gera em target/release/.
     const binaryName = stack.entryPoint ?? "app";
     const lines = [

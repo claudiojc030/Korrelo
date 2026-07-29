@@ -23,7 +23,7 @@ function average(values: number[]): number {
   return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
-// Uma amostra por minuto ao longo de 7 dias dá ~10k pontos — bom demais pro
+// Uma amostra por minuto ao longo de 7 dias dá ~10k pontos: bom demais pro
 // SQLite guardar, ruim demais pro gráfico renderizar. Agrupa em baldes de
 // tamanho fixo (~MAX_POINTS no total) tirando a média de cada balde.
 function downsample(samples: MetricSample[], maxPoints: number): MetricSample[] {

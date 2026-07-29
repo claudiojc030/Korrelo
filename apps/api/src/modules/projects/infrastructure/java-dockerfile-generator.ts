@@ -14,7 +14,7 @@ export class JavaDockerfileGenerator implements DockerfileGenerator {
     const isGradle = stack.packageManager === "gradle";
 
     // Simplificação assumida: o build produz um único jar executável em
-    // target/ (Maven) ou build/libs/ (Gradle) — o caso comum de um projeto
+    // target/ (Maven) ou build/libs/ (Gradle), o caso comum de um projeto
     // Spring Boot com o plugin de repackage. Projetos que geram múltiplos
     // jars (ex: com jar "-sources") podem precisar de ajuste manual.
     const buildStage = isGradle

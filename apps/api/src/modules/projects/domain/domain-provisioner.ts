@@ -6,7 +6,7 @@ export interface DomainProvisioner {
   // decide o que fazer com o registro no banco quando isso acontece).
   attach(domain: string, port: number, adminEmail: string): Promise<void>;
 
-  // Remove o site do nginx (o certificado emitido fica no disco — não
+  // Remove o site do nginx (o certificado emitido fica no disco, não
   // revogamos, só paramos de servir por ele).
   detach(domain: string): Promise<void>;
 }

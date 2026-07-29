@@ -109,12 +109,12 @@ export default async function ProjectSummaryPage({ params }: { params: { project
             Repositório
           </h2>
           <InfoRow label="URL" value={<span className="truncate">{project.repoUrl}</span>} />
-          <InfoRow label="Linguagem" value={stack?.language ?? "—"} />
-          <InfoRow label="Framework" value={stack?.framework ?? "—"} />
-          <InfoRow label="Gerenciador de pacotes" value={stack?.packageManager ?? "—"} />
+          <InfoRow label="Linguagem" value={stack?.language ?? "-"} />
+          <InfoRow label="Framework" value={stack?.framework ?? "-"} />
+          <InfoRow label="Gerenciador de pacotes" value={stack?.packageManager ?? "-"} />
           <InfoRow
             label="Comando de start"
-            value={<code className="font-mono text-[12px]">{stack?.startCommand ?? "—"}</code>}
+            value={<code className="font-mono text-[12px]">{stack?.startCommand ?? "-"}</code>}
           />
         </div>
 
@@ -136,11 +136,11 @@ export default async function ProjectSummaryPage({ params }: { params: { project
                   localhost:{project.assignedPort}
                 </a>
               ) : (
-                "—"
+                "-"
               )
             }
           />
-          <InfoRow label="Container" value={<code className="font-mono text-[12px]">{project.containerName ?? "—"}</code>} />
+          <InfoRow label="Container" value={<code className="font-mono text-[12px]">{project.containerName ?? "-"}</code>} />
           <InfoRow
             label="Criado em"
             value={new Date(project.createdAt).toLocaleString("pt-BR")}
@@ -166,7 +166,7 @@ export default async function ProjectSummaryPage({ params }: { params: { project
             <span className="text-[12.5px] font-medium">CPU</span>
           </div>
           <p className="mt-2 font-mono text-[20px] font-semibold text-foreground">
-            {container?.cpuPercent != null ? `${container.cpuPercent.toFixed(1)}%` : "—"}
+            {container?.cpuPercent != null ? `${container.cpuPercent.toFixed(1)}%` : "-"}
           </p>
           <p className="mt-1 text-[12px] text-muted-foreground">
             {project.status === "running" ? "processo ativo" : "projeto não está rodando"}
@@ -179,10 +179,10 @@ export default async function ProjectSummaryPage({ params }: { params: { project
             <span className="text-[12.5px] font-medium">Memória</span>
           </div>
           <p className="mt-2 font-mono text-[20px] font-semibold text-foreground">
-            {container?.memUsageMb != null ? `${container.memUsageMb} MB` : "—"}
+            {container?.memUsageMb != null ? `${container.memUsageMb} MB` : "-"}
           </p>
           <p className="mt-1 text-[12px] text-muted-foreground">
-            limite de {metrics ? CONTAINER_MEMORY_LIMIT_MB[metrics.tier] : "—"} MB nesse porte de servidor
+            limite de {metrics ? CONTAINER_MEMORY_LIMIT_MB[metrics.tier] : "-"} MB nesse porte de servidor
           </p>
         </div>
 
@@ -192,7 +192,7 @@ export default async function ProjectSummaryPage({ params }: { params: { project
             <span className="text-[12.5px] font-medium">Disco</span>
           </div>
           <p className="mt-2 font-mono text-[20px] font-semibold text-foreground">
-            {diskUsageMb != null ? `${diskUsageMb} MB` : "—"}
+            {diskUsageMb != null ? `${diskUsageMb} MB` : "-"}
           </p>
           <p className="mt-1 text-[12px] text-muted-foreground">
             {metrics?.diskFreeGb != null

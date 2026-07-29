@@ -6,7 +6,7 @@ import { CRON_JOB_RUNNER, type CronJobRunner } from "../domain/cron-job-runner";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import type { CronJob } from "../domain/cron-job.entity";
 
-// Registro em memória (via @nestjs/schedule) — nada é escrito no crontab do
+// Registro em memória (via @nestjs/schedule). Nada é escrito no crontab do
 // SO. Isso mantém o processo do Core sem nenhum privilégio a mais só por
 // causa dessa feature: o "docker exec" que roda o comando do projeto é o
 // mesmo mecanismo, sem sudo, que o resto do ForgeDesk já usa.

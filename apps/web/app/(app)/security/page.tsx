@@ -253,7 +253,7 @@ export default function SecurityPage() {
           <div className="mb-3 flex items-start gap-2.5 rounded-lg bg-warning/10 p-3">
             <TriangleAlert size={16} strokeWidth={1.75} className="mt-0.5 flex-none text-warning" />
             <p className="text-[12.5px] text-warning">
-              Guarde esses códigos de backup agora — eles não vão aparecer de novo. Cada um só funciona uma vez,
+              Guarde esses códigos de backup agora, eles não vão aparecer de novo. Cada um só funciona uma vez,
               e servem pra entrar caso você perca acesso ao app autenticador.
             </p>
           </div>

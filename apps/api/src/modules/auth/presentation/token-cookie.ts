@@ -19,7 +19,7 @@ export function buildTokenCookieOptions(secure: boolean): CookieOptions {
 }
 
 // Path restrito a /auth: o navegador só manda esse cookie pras rotas de auth
-// (refresh/logout), nunca em toda requisição — reduz a exposição do segredo
+// (refresh/logout), nunca em toda requisição. Isso reduz a exposição do segredo
 // de longa duração mesmo sendo httpOnly.
 export function buildRefreshTokenCookieOptions(secure: boolean): CookieOptions {
   return {

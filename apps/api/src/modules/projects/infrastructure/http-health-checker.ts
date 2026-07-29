@@ -8,7 +8,7 @@ const REQUEST_TIMEOUT_MS = 1500;
 // Um simples TCP connect não basta: no Docker Desktop (Windows/WSL2), o proxy de
 // porta publicada aceita a conexão mesmo com o processo do container já morto
 // (crash loop), e só derruba a conexão na hora de repassar pro backend. Por isso
-// exigimos uma resposta HTTP de verdade (qualquer status code já serve) — se a
+// exigimos uma resposta HTTP de verdade (qualquer status code já serve). Se a
 // conexão for aceita e depois resetada sem resposta, isso conta como não saudável.
 function checkOnce(port: number): Promise<boolean> {
   return new Promise((resolve) => {

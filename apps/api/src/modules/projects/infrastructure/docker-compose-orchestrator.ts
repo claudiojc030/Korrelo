@@ -15,7 +15,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
   async deploy(config: DeployConfig): Promise<void> {
     try {
       // execFile (não exec/shell): os argumentos vão direto pro processo, sem
-      // passar por interpretação de shell — protege contra command injection
+      // passar por interpretação de shell. Isso protege contra command injection
       // mesmo vindo de dados derivados do projeto (nome, path).
       await execFile(
         "docker",

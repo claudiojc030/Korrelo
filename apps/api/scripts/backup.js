@@ -32,7 +32,7 @@ async function backupCoreDatabase(destDir) {
   const databaseUrl = process.env.DATABASE_URL || "file:./dev.db";
   if (databaseUrl.startsWith("file:")) {
     // Caminhos relativos em DATABASE_URL são resolvidos pelo Prisma relativo à
-    // pasta do schema.prisma (apps/api/prisma/), não ao cwd — mesma regra aqui.
+    // pasta do schema.prisma (apps/api/prisma/), não ao cwd. Mesma regra aqui.
     const dbFile = path.resolve(__dirname, "..", "prisma", databaseUrl.replace("file:", ""));
     const dest = path.join(destDir, "core.db");
     try {
@@ -96,7 +96,7 @@ async function backupManagedDatabases(prisma, destDir) {
         console.log(`${project.name} (MongoDB) -> ${dest}`);
       } else if (db.type === "redis") {
         if (!db.persistent) {
-          console.log(`${project.name} (Redis) — pulado (marcado como cache/fila, sem persistência).`);
+          console.log(`${project.name} (Redis): pulado (marcado como cache/fila, sem persistência).`);
           continue;
         }
         const dest = path.join(destDir, `${safeName}-redis.rdb`);

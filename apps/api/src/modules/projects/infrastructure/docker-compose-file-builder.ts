@@ -4,7 +4,7 @@ import { ENV_FILENAME } from "../domain/container-orchestrator";
 
 const LOGGING_BLOCK = [
   // Sem isso, logs de containers enchem o disco silenciosamente numa VPS
-  // pequena — retenção curta e rotacionada por padrão em todo deploy.
+  // pequena. Retenção curta e rotacionada por padrão em todo deploy.
   "    logging:",
   '      driver: "json-file"',
   "      options:",
@@ -71,7 +71,7 @@ export class DockerComposeFileBuilder {
             `${db.memoryLimitMb}mb`,
             "--maxmemory-policy",
             "allkeys-lru",
-            // Sem persistência por padrão (é cache/fila) — só liga RDB+AOF
+            // Sem persistência por padrão (é cache/fila). Só liga RDB+AOF
             // quando o projeto marcou esse Redis como "guarda dado importante".
             "--save",
             "60",

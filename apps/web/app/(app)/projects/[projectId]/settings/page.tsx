@@ -109,7 +109,7 @@ export default function ProjectSettingsPage({ params }: { params: { projectId: s
         {saving && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
       </div>
       <p className="mb-2 text-[12.5px] text-muted-foreground">
-        Nem todo projeto precisa de tudo. Desative o que não for usar — a aba correspondente some da navegação.
+        Nem todo projeto precisa de tudo. Desative o que não for usar e a aba correspondente some da navegação.
       </p>
       <div className="rounded-xl border border-border-subtle bg-surface px-4">
         <FeatureToggleRow

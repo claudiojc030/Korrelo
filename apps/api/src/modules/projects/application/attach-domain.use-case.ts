@@ -4,7 +4,7 @@ import { DOMAIN_PROVISIONER, type DomainProvisioner } from "../domain/domain-pro
 import { USER_REPOSITORY, type UserRepository } from "../../auth/domain/user.repository";
 import type { Project } from "../domain/project.entity";
 
-// Hostname simples (sem protocolo, sem porta, sem wildcard) — o mesmo formato
+// Hostname simples (sem protocolo, sem porta, sem wildcard). É o mesmo formato
 // que entra no "-d" do certbot e no "server_name" do nginx.
 const DOMAIN_PATTERN = /^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$/;
 
@@ -30,7 +30,7 @@ export class AttachDomainUseCase {
     }
     if (!project.assignedPort) {
       throw new BadRequestException(
-        "Este projeto ainda não foi implantado — faça o deploy antes de anexar um domínio.",
+        "Este projeto ainda não foi implantado. Faça o deploy antes de anexar um domínio.",
       );
     }
     if (project.customDomain) {

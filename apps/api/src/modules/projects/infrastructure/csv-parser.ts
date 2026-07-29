@@ -1,4 +1,4 @@
-// Parser CSV minimalista (RFC4180-ish) — o resultado de `psql --csv` pode ter
+// Parser CSV minimalista (RFC4180-ish). O resultado de `psql --csv` pode ter
 // vírgulas e quebras de linha dentro de campos entre aspas, então split(",")
 // simples corromperia os dados.
 export function parseCsv(text: string): { header: string[]; rows: string[][] } {

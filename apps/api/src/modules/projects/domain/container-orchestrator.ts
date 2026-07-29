@@ -8,7 +8,7 @@ export interface DatabaseServiceConfig {
   password: string;
   databaseName: string;
   memoryLimitMb: number;
-  // Só relevante pro Redis — Postgres/MongoDB já são sempre persistentes.
+  // Só relevante pro Redis. Postgres/MongoDB já são sempre persistentes.
   persistent: boolean;
 }
 

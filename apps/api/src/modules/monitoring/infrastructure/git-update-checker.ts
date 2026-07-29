@@ -14,11 +14,11 @@ const NOT_CHECKED: UpdateStatus = {
   updateAvailable: false,
 };
 
-// Compara o commit local com o HEAD do remoto via `git` puro (sem chamar a
-// API do GitHub) — funciona igual em repositório público ou privado, usando
+// Compara o commit local com o HEAD do remoto via `git` puro, sem chamar a
+// API do GitHub. Funciona igual em repositório público ou privado, usando
 // as mesmas credenciais (SSH/HTTPS) já configuradas no `git clone` original.
 // Se não houver remote configurado (dev local) ou a rede falhar, devolve
-// "não verificado" em vez de quebrar — isso nunca deve travar o dashboard.
+// "não verificado" em vez de quebrar, porque isso nunca deve travar o dashboard.
 @Injectable()
 export class GitUpdateChecker implements UpdateChecker {
   private readonly logger = new Logger(GitUpdateChecker.name);

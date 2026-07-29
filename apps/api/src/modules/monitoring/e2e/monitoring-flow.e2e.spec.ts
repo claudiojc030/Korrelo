@@ -10,7 +10,7 @@ import type { SystemMetrics } from "@forgedesk/shared-types";
 
 // Mesmo padrão dos outros e2e (auth, projects): SQLite temporário e
 // descartável, nunca o dev.db real. O SYSTEM_METRICS_COLLECTOR de verdade
-// chama docker ps/stats + powershell/df — aqui é substituído por um fake
+// chama docker ps/stats + powershell/df. Aqui isso é substituído por um fake
 // fixo, então o teste cobre a wiring HTTP + persistência real no banco
 // (histórico, downsample, guard de auth), sem depender do ambiente real
 // de containers/SO rodando a máquina de teste.
@@ -84,7 +84,7 @@ describe("Monitoring flow (e2e)", () => {
 
     // Precisa do AuthModule na árvore igual ao app real (app.module.ts): o
     // guard global (APP_GUARD) é registrado dentro do AuthModule, não do
-    // MonitoringModule — sem ele, os endpoints ficariam abertos no teste
+    // MonitoringModule, então sem ele os endpoints ficariam abertos no teste
     // mesmo sendo protegidos na aplicação de verdade.
     const moduleFixture = await Test.createTestingModule({ imports: [AuthModule, MonitoringModule] })
       .overrideProvider(SYSTEM_METRICS_COLLECTOR)

@@ -10,7 +10,7 @@ export interface SystemServiceDefinition {
   riskNote: string;
 }
 
-// Lista fechada de propósito — a API só aceita ligar/desligar serviços que
+// Lista fechada de propósito. A API só aceita ligar/desligar serviços que
 // estão aqui, nunca um nome de unit arbitrário vindo do cliente. Serviços
 // essenciais (ssh, cron, docker, nginx, fail2ban, ufw, systemd-*, dbus,
 // NetworkManager/systemd-networkd, rsyslog) nunca entram nessa lista.
@@ -22,7 +22,7 @@ export const SERVICE_CATALOG: SystemServiceDefinition[] = [
     category: "Rede",
     description: "Anuncia e descobre dispositivos na rede local (tipo o Bonjour da Apple). Sem uso numa VPS.",
     riskLevel: "baixo",
-    riskNote: "Nenhum impacto esperado — nada no ForgeDesk ou no deploy de projetos depende disso.",
+    riskNote: "Nenhum impacto esperado, nada no ForgeDesk ou no deploy de projetos depende disso.",
   },
   {
     id: "cups",
@@ -67,7 +67,7 @@ export const SERVICE_CATALOG: SystemServiceDefinition[] = [
     category: "Diagnóstico",
     description: "Envia relatórios de erro do sistema pra Canonical.",
     riskLevel: "baixo",
-    riskNote: "Só reduz a telemetria enviada pra Canonical — não afeta nada do ForgeDesk.",
+    riskNote: "Só reduz a telemetria enviada pra Canonical, não afeta nada do ForgeDesk.",
   },
   {
     id: "apport",
@@ -83,9 +83,9 @@ export const SERVICE_CATALOG: SystemServiceDefinition[] = [
     unitName: "multipathd",
     displayName: "Multipathd (multipath de disco / SAN)",
     category: "Armazenamento",
-    description: "Gerencia múltiplos caminhos de acesso a um mesmo disco — usado em storage corporativo (SAN).",
+    description: "Gerencia múltiplos caminhos de acesso a um mesmo disco, usado em storage corporativo (SAN).",
     riskLevel: "baixo",
-    riskNote: "Só importa se sua VPS usa armazenamento SAN com múltiplos caminhos — bem incomum. Praticamente nenhuma VPS usa isso.",
+    riskNote: "Só importa se sua VPS usa armazenamento SAN com múltiplos caminhos. Bem incomum, praticamente nenhuma VPS usa isso.",
   },
   {
     id: "packagekit",

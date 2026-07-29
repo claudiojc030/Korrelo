@@ -162,7 +162,7 @@ export default async function ProjectsPage() {
         <div className="mt-4 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-16 text-center">
           <FolderGit2 size={22} strokeWidth={1.5} className="text-muted-foreground" />
           <p className="text-[13.5px] text-muted-foreground">
-            Nenhum projeto ainda — importe um repositório do GitHub pra começar.
+            Nenhum projeto ainda. Importe um repositório do GitHub pra começar.
           </p>
         </div>
       ) : (

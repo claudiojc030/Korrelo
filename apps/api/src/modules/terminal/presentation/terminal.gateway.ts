@@ -36,7 +36,7 @@ export class TerminalGateway implements OnGatewayConnection, OnGatewayDisconnect
   ) {}
 
   handleConnection(client: Socket): void {
-    // O guard global de HTTP não cobre WebSocket — validamos aqui manualmente,
+    // O guard global de HTTP não cobre WebSocket, então validamos aqui manualmente,
     // lendo o cookie httpOnly que o navegador manda junto do handshake
     // (socket.io client precisa de withCredentials: true pra isso).
     const cookieHeader = client.handshake.headers.cookie;

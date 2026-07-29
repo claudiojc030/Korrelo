@@ -54,7 +54,7 @@ export class DockerExecDatabaseQueryRunner implements DatabaseQueryRunner {
         .slice(0, 200);
     }
 
-    throw new BadRequestException("Bancos externos (custom) não têm navegador — conecte com sua própria ferramenta.");
+    throw new BadRequestException("Bancos externos (custom) não têm navegador, conecte com sua própria ferramenta.");
   }
 
   async runQuery(containerName: string, database: ManagedDatabase, query: string): Promise<DatabaseQueryResult> {
@@ -73,7 +73,7 @@ export class DockerExecDatabaseQueryRunner implements DatabaseQueryRunner {
       return this.runRedisCommand(containerName, database, trimmed);
     }
 
-    throw new BadRequestException("Bancos externos (custom) não têm console de query — conecte com sua própria ferramenta.");
+    throw new BadRequestException("Bancos externos (custom) não têm console de query, conecte com sua própria ferramenta.");
   }
 
   private async execDocker(

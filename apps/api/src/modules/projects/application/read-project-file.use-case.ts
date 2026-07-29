@@ -4,7 +4,7 @@ import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.re
 import { getProjectWorkspacePath } from "../infrastructure/workspace-paths";
 import { resolveSafeProjectPath } from "../infrastructure/project-file-path";
 
-const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; // 2MB — editor de texto, não visualizador de binário grande.
+const MAX_FILE_SIZE_BYTES = 2 * 1024 * 1024; // 2MB, é editor de texto, não visualizador de binário grande.
 
 function looksLikeBinary(buffer: Buffer): boolean {
   const sampleSize = Math.min(buffer.length, 8000);
@@ -39,7 +39,7 @@ export class ReadProjectFileUseCase {
 
     const buffer = await fs.readFile(targetPath);
     if (looksLikeBinary(buffer)) {
-      throw new BadRequestException("Esse arquivo parece binário — não dá pra abrir como texto.");
+      throw new BadRequestException("Esse arquivo parece binário, não dá pra abrir como texto.");
     }
 
     return { content: buffer.toString("utf-8") };

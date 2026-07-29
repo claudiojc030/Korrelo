@@ -12,7 +12,7 @@ import { PrismaService } from "../../../infrastructure/prisma/prisma.service";
 
 // Jest não consegue parsear a cadeia de dependências ESM do otplib
 // (@scure/base, @noble/hashes) mesmo com overrides de transformIgnorePatterns
-// (já tentado e revertido — ver histórico). Pra gerar um código TOTP válido
+// (já tentado e revertido, ver histórico). Pra gerar um código TOTP válido
 // aqui, implementamos o algoritmo (RFC 6238) direto com node:crypto, sem
 // depender do otplib nesse arquivo de teste.
 function base32Decode(input: string): Buffer {
@@ -45,7 +45,7 @@ function generateTotp(base32Secret: string, stepSeconds = 30, digits = 6): strin
 }
 
 // Testes de integração de verdade: sobem o AuthModule inteiro (Nest DI, guard
-// global, Prisma) e batem nos endpoints HTTP via supertest — diferente dos
+// global, Prisma) e batem nos endpoints HTTP via supertest, diferente dos
 // specs de use-case isolado (que usam repositórios mockados na mão). Rodam
 // contra um arquivo SQLite temporário e descartável, nunca contra o dev.db
 // que tem dados reais do usuário.
@@ -300,7 +300,7 @@ describe("Auth flow (e2e)", () => {
         .send({ email, password });
 
       // segundo usuário, inserido direto no banco (o endpoint de registro só
-      // permite o primeiro usuário) — pra testar isolamento entre contas.
+      // permite o primeiro usuário), pra testar isolamento entre contas.
       const prisma = new PrismaService();
       await prisma.$connect();
       const passwordHash = await bcrypt.hash("outra-senha-123", 10);
@@ -322,7 +322,7 @@ describe("Auth flow (e2e)", () => {
 
       expect(res.status).toBe(200);
       // O mesmo usuário já acumulou sessões de testes anteriores neste arquivo
-      // (register + logins do fluxo de 2FA) — aqui só garantimos que as duas
+      // (register + logins do fluxo de 2FA). Aqui só garantimos que as duas
       // sessões criadas NESTE describe (chrome/safari) aparecem, sem exigir
       // uma contagem exata do total.
       const chromeSession = res.body.find((s: { userAgent: string }) => s.userAgent === "chrome-e2e-test");

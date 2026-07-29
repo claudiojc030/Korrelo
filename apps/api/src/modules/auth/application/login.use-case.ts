@@ -69,7 +69,7 @@ export class LoginUseCase {
     for (let i = 0; i < user.twoFactorBackupCodes.length; i++) {
       const matches = await this.passwordHasher.compare(code, user.twoFactorBackupCodes[i]);
       if (matches) {
-        // Código de backup é de uso único — remove assim que consumido.
+        // Código de backup é de uso único, então remove assim que consumido.
         const remaining = [...user.twoFactorBackupCodes];
         remaining.splice(i, 1);
         await this.repository.update(user.withBackupCodes(remaining));

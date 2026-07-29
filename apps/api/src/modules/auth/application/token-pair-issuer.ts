@@ -9,7 +9,7 @@ export interface TokenPair {
   refreshToken: string;
 }
 
-// Emite o par access+refresh — usado por login, registro do primeiro usuário,
+// Emite o par access+refresh, usado por login, registro do primeiro usuário,
 // e pela rotação de refresh token. Fica num serviço à parte (não num use case
 // isolado) porque não é um endpoint em si, é uma etapa compartilhada por três
 // fluxos diferentes.

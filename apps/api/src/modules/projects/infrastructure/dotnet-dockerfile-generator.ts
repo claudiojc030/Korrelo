@@ -23,7 +23,7 @@ export class DotnetDockerfileGenerator implements DockerfileGenerator {
       `EXPOSE ${port}`,
       `ENV ASPNETCORE_URLS=http://+:${port}`,
       // Evita precisar saber o nome exato do .dll (igual ao nome do .csproj,
-      // que a gente não parseia) — acha o único .dll publicado em runtime.
+      // que a gente não parseia). Acha o único .dll publicado em runtime.
       'CMD ["sh", "-c", "dotnet $(ls *.dll | head -n 1)"]',
     ];
 

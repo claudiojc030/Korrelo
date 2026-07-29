@@ -4,15 +4,15 @@ Web OS pra gerenciar uma VPS sem precisar de SSH/CLI. Importe repositórios do
 GitHub, implante com um clique, gerencie bancos de dados, cron jobs, domínios
 e monitore tudo pelo navegador.
 
-- **Core** (`apps/api` + `apps/web`) roda direto na VPS via [PM2](https://pm2.keymetrics.io/) — sem privilégio de root.
+- **Core** (`apps/api` + `apps/web`) roda direto na VPS via [PM2](https://pm2.keymetrics.io/), sem privilégio de root.
 - **Projetos hospedados** rodam em containers Docker isolados, cada um com seu próprio banco (opcional), domínio e cron.
 - Autenticação com 2FA (TOTP), refresh tokens rotativos e sessões revogáveis.
 
 ## Antes de começar
 
 - Uma VPS Ubuntu 22.04+ limpa, com acesso SSH por chave (não por senha).
-- Pelo menos **1 GB de RAM** (2 GB+ recomendado se for hospedar mais de 1-2 projetos — cada container consome memória própria, além do Core).
-- Um domínio (opcional) — dá pra acessar só pelo IP, mas com domínio o ForgeDesk consegue emitir HTTPS automático (Let's Encrypt) pra si mesmo e pra cada projeto implantado.
+- Pelo menos **1 GB de RAM** (2 GB+ recomendado se for hospedar mais de 1-2 projetos, já que cada container consome memória própria, além do Core).
+- Um domínio (opcional). Dá pra acessar só pelo IP, mas com domínio o ForgeDesk consegue emitir HTTPS automático (Let's Encrypt) pra si mesmo e pra cada projeto implantado.
 
 ## 1. Suba o repositório na VPS
 
@@ -31,15 +31,15 @@ builda o Core, roda as migrations, sobe tudo via PM2 e agenda backup diário.
 
 Em dois momentos ele **para e pede informação sua**:
 
-1. **Domínio (opcional)** — deixe em branco pra acessar só pelo IP.
-2. **GitHub App** — abre o `apps/api/.env` pra você preencher e pausa
+1. **Domínio (opcional)**: deixe em branco pra acessar só pelo IP.
+2. **GitHub App**: abre o `apps/api/.env` pra você preencher e pausa
    esperando você terminar. Veja como cadastrar abaixo.
 
 ## 2. Cadastrando o GitHub App
 
 O GitHub App é o que permite o ForgeDesk listar seus repositórios e receber
 webhook de push (deploy automático). Sem ele, dá pra usar tudo o resto do
-ForgeDesk normalmente — só a importação/auto-deploy via GitHub fica indisponível.
+ForgeDesk normalmente, só a importação/auto-deploy via GitHub fica indisponível.
 
 1. Acesse **github.com/settings/apps/new** (conta pessoal) ou
    `github.com/organizations/SUA_ORG/settings/apps/new` (organização).
@@ -49,14 +49,14 @@ ForgeDesk normalmente — só a importação/auto-deploy via GitHub fica indispo
    - **Callback URL**: mesma URL acima.
    - **Webhook → Active**: marque, e em **Webhook URL** coloque
      `https://SEU_DOMINIO/api/github/webhook` (ou `http://SEU_IP:3001/github/webhook` sem domínio).
-   - **Webhook secret**: gere um valor aleatório qualquer e anote — vai virar `GITHUB_APP_WEBHOOK_SECRET`.
+   - **Webhook secret**: gere um valor aleatório qualquer e anote, vai virar `GITHUB_APP_WEBHOOK_SECRET`.
    - **Permissions → Repository permissions**: `Contents: Read-only` (é o que libera o evento `Push` abaixo; `Metadata: Read-only` já vem marcado sozinho).
    - **Subscribe to events**: marque `Push` (só aparece depois de marcar a permissão de Contents acima).
    - **Where can this GitHub App be installed?**: "Only on this account" é suficiente.
 3. Crie o App. Na página dele:
    - Anote o **App ID** (topo da página) → `GITHUB_APP_ID`.
    - Anote o **slug** (aparece na URL, ex: `forgedesk-seu-usuario`) → `GITHUB_APP_SLUG`.
-   - Em **Private keys**, clique **Generate a private key** — baixa um arquivo `.pem`.
+   - Em **Private keys**, clique **Generate a private key**. Isso baixa um arquivo `.pem`.
 4. Instale o App na sua conta/organização (botão **Install App**), autorizando os repositórios que quiser gerenciar pelo ForgeDesk (ou todos).
 5. No `apps/api/.env` que o script deixou aberto, preencha:
    ```
@@ -70,7 +70,7 @@ ForgeDesk normalmente — só a importação/auto-deploy via GitHub fica indispo
    ```bash
    awk 'BEGIN{ORS="\\n"} {print}' caminho/para/sua-chave.pem
    ```
-6. Salve o arquivo e volte pro terminal onde `setup-vps.sh` está esperando — aperte ENTER pra continuar.
+6. Salve o arquivo e volte pro terminal onde `setup-vps.sh` está esperando, e aperte ENTER pra continuar.
 
 ## 3. Acessando o ForgeDesk
 
@@ -79,9 +79,9 @@ Ao final do script, ele mostra a URL de acesso:
 - **Com domínio**: `https://SEU_DOMINIO`
 - **Sem domínio**: `http://SEU_IP:3000`
 
-Abra essa URL no navegador — como ainda não existe nenhuma conta, você cai
+Abra essa URL no navegador. Como ainda não existe nenhuma conta, você cai
 direto na tela de criação da conta de administrador (e-mail + senha). Essa é
-a **única conta** que existe no ForgeDesk hoje (single-admin) — guarde bem
+a **única conta** que existe no ForgeDesk hoje (single-admin), então guarde bem
 essa senha.
 
 **Recomendado logo de cara**: entre em **Segurança** e ative o 2FA (TOTP).
@@ -145,7 +145,7 @@ npm run dev:web    # apps/web em modo dev (porta 3000)
 
 Copie `apps/api/.env.example` → `apps/api/.env` e `apps/web/.env.example` →
 `apps/web/.env` antes de rodar (SQLite local, sem precisar de Docker pro banco
-do Core — só os projetos gerenciados usam Docker).
+do Core, só os projetos gerenciados usam Docker).
 
 Rodar os testes:
 

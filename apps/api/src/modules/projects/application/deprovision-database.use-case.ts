@@ -16,8 +16,8 @@ export class DeprovisionDatabaseUseCase {
       throw new NotFoundException("Este projeto não tem banco de dados provisionado.");
     }
     await this.databaseRepository.delete(projectId);
-    // A variável de ambiente (DATABASE_URL/REDIS_URL) fica órfã de propósito —
-    // apagá-la também poderia quebrar algo que o usuário setou manualmente por cima.
+    // A variável de ambiente (DATABASE_URL/REDIS_URL) fica órfã de propósito.
+    // Apagá-la também poderia quebrar algo que o usuário setou manualmente por cima.
     // O container do banco some no próximo deploy graças ao --remove-orphans.
   }
 }

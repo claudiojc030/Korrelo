@@ -7,7 +7,7 @@ import type { DomainProvisioner } from "../domain/domain-provisioner";
 
 const execFile = promisify(execFileCallback);
 
-// Diretório dedicado (não /etc/nginx/sites-available inteiro) — o setup-vps.sh
+// Diretório dedicado (não /etc/nginx/sites-available inteiro). O setup-vps.sh
 // faz esse diretório pertencer ao usuário do ForgeDesk, então a API escreve os
 // arquivos direto, sem sudo. Só reload do nginx e o certbot em si precisam de
 // sudo (regra restrita em /etc/sudoers.d/forgedesk, ver scripts/setup-vps.sh).

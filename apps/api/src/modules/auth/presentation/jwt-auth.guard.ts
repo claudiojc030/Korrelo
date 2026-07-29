@@ -22,7 +22,7 @@ export class JwtAuthGuard implements CanActivate {
     const authHeader: string | undefined = request.headers.authorization;
     const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice("Bearer ".length) : null;
     // Chamadas do próprio navegador (fetch com credentials: "include") não mandam
-    // Authorization — o token vai só no cookie httpOnly, inacessível a JS.
+    // Authorization: o token vai só no cookie httpOnly, inacessível a JS.
     const token = bearerToken ?? request.cookies?.[TOKEN_COOKIE] ?? null;
 
     if (!token) {

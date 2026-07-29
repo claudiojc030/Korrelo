@@ -10,7 +10,7 @@ module.exports = {
     },
     {
       // output: "standalone" (next.config.js) gera um server.js que só carrega
-      // as dependências realmente usadas — bem mais leve em RAM do que
+      // as dependências realmente usadas, bem mais leve em RAM do que
       // "next start" (que roda em cima do node_modules inteiro do monorepo).
       // scripts/setup-vps.sh copia .next/static e public/ pra dentro dessa
       // pasta depois do build (o standalone não inclui isso sozinho).

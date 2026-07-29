@@ -19,7 +19,7 @@ export class EnableTwoFactorUseCase {
       throw new NotFoundException("Usuário não encontrado.");
     }
     if (!user.twoFactorSecret) {
-      throw new BadRequestException("Nenhuma configuração de 2FA pendente — chame /auth/2fa/setup primeiro.");
+      throw new BadRequestException("Nenhuma configuração de 2FA pendente. Chame /auth/2fa/setup primeiro.");
     }
 
     const valid = await this.twoFactorService.verifyToken(user.twoFactorSecret, code);

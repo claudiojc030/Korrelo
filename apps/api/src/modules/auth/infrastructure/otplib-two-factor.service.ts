@@ -13,7 +13,7 @@ export class OtplibTwoFactorService implements TwoFactorService {
   }
 
   buildOtpAuthUrl(email: string, secret: string): string {
-    // strategy default é "totp" — não precisa especificar.
+    // strategy default é "totp", não precisa especificar.
     return otplib.generateURI({ issuer: ISSUER, label: email, secret });
   }
 
@@ -27,7 +27,7 @@ export class OtplibTwoFactorService implements TwoFactorService {
       return result.valid;
     } catch {
       // otplib lança em vez de retornar false quando o token não tem o
-      // formato esperado (6 dígitos) — acontece o tempo todo aqui, já que o
+      // formato esperado (6 dígitos). Isso acontece o tempo todo aqui, já que o
       // LoginUseCase tenta TOTP primeiro mesmo quando a pessoa digitou um
       // código de backup (formato bem diferente).
       return false;

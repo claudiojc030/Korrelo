@@ -11,7 +11,7 @@ import request from "supertest";
 // Testes de integração de verdade pro ProjectsModule: sobem o módulo inteiro
 // via @nestjs/testing + supertest contra um SQLite temporário (nunca o
 // dev.db real). Diferente do auth e2e, esse módulo toca infraestrutura real
-// (docker exec, docker compose, git clone, nginx/certbot, alocação de porta) —
+// (docker exec, docker compose, git clone, nginx/certbot, alocação de porta).
 // TODAS essas bordas são substituídas por fakes via overrideProvider(), então
 // nenhum container, repositório git ou configuração de nginx de verdade é
 // tocado. O workspace de arquivos (Dockerfile, compose, .env) usa uma pasta
@@ -89,7 +89,7 @@ class FakeDatabaseQueryRunner {
 }
 
 class FakeRepositoryCloner {
-  // Nunca clona de verdade — só cria o diretório de destino (como um clone
+  // Nunca clona de verdade, só cria o diretório de destino (como um clone
   // real faria) e larga um package.json mínimo, o suficiente pro
   // FileBasedStackDetector (esse sim real) detectar uma stack Node/Express.
   async cloneOrUpdate(_repoUrl: string, destPath: string): Promise<void> {
@@ -136,7 +136,7 @@ describe("Projects flow (e2e)", () => {
 
     // require() dinâmico DEPOIS de setar FORGEDESK_WORKSPACE_DIR: o caminho do
     // workspace (infrastructure/workspace-paths.ts) é uma constante de módulo
-    // resolvida na primeira vez que o arquivo é importado — um `import`
+    // resolvida na primeira vez que o arquivo é importado. Um `import`
     // estático no topo deste arquivo rodaria antes do beforeAll (imports são
     // hoisted), capturando o valor errado da env var.
     const { ProjectsModule } = require("../projects.module");
@@ -357,7 +357,7 @@ describe("Projects flow (e2e)", () => {
       projectId = res.body.id;
 
       // fixture real e isolada (não é o repositório de ninguém) só pra
-      // exercitar o FileBasedStackDetector de verdade — é só leitura de
+      // exercitar o FileBasedStackDetector de verdade, é só leitura de
       // arquivo, sem risco nenhum.
       fixtureDir = path.join(tempWorkspaceDir, "fixture-node-express");
       fs.mkdirSync(fixtureDir, { recursive: true });
@@ -384,7 +384,7 @@ describe("Projects flow (e2e)", () => {
 
     it("importa o projeto (clona via fake + detecta stack de verdade) e faz o deploy com sucesso", async () => {
       // /import cria o workspace do projeto (o fake cloner faz mkdir + larga
-      // um package.json) — sem isso não existe pasta pro deploy escrever
+      // um package.json), sem isso não existe pasta pro deploy escrever
       // Dockerfile/compose/env, igual aconteceria com um clone de verdade
       // que nunca rodou.
       const imported = await request(app.getHttpServer())
