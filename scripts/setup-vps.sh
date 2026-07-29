@@ -119,9 +119,17 @@ LETSENCRYPT_EMAIL=""
 PUBLIC_IP=$(curl -s ifconfig.me || echo "SEU_IP")
 
 log "Domínio do próprio Korrelo (opcional)"
-read -rp "Domínio pra acessar o painel do Korrelo? (deixe em branco pra usar só http://${PUBLIC_IP}:3000): " DOMAIN
+# Quando o script roda via 'curl | bash', o stdin já está ocupado com o
+# próprio conteúdo do script, então 'read' precisa vir do /dev/tty pra
+# pegar o que o usuário digita no terminal em vez de corromper o script.
+if [ -r /dev/tty ]; then
+  read -rp "Domínio pra acessar o painel do Korrelo? (deixe em branco pra usar só http://${PUBLIC_IP}:3000): " DOMAIN < /dev/tty
+else
+  echo "Sem terminal interativo disponível, seguindo sem domínio (só http://${PUBLIC_IP}:3000)."
+  DOMAIN=""
+fi
 if [ -n "$DOMAIN" ]; then
-  read -rp "E-mail pra avisos de renovação do Let's Encrypt: " LETSENCRYPT_EMAIL
+  read -rp "E-mail pra avisos de renovação do Let's Encrypt: " LETSENCRYPT_EMAIL < /dev/tty
   BASE_WEB_URL="https://${DOMAIN}"
   BASE_API_URL="https://${DOMAIN}/api"
 else
@@ -145,7 +153,9 @@ if [ ! -f apps/api/.env ]; then
   echo "nas settings do App em github.com. E o 'Webhook URL' de lá precisa apontar pra"
   echo "${BASE_API_URL}/github/webhook, com o evento \"Push\" habilitado. É isso que liga o"
   echo "deploy automático ao dar push."
-  read -rp "Pressione ENTER depois de editar apps/api/.env para continuar..."
+  if [ -r /dev/tty ]; then
+    read -rp "Pressione ENTER depois de editar apps/api/.env para continuar..." < /dev/tty
+  fi
 else
   echo "apps/api/.env já existe, não mexi nele."
 fi
@@ -260,7 +270,11 @@ BACKUP_CRON_LINE="0 3 * * * cd ${REPO_DIR} && bash scripts/backup.sh >> ${BACKUP
 echo "Backup agendado todo dia às 3h. Rode manualmente com: bash scripts/backup.sh"
 
 log "Alerta de falha de backup (opcional)"
-read -rp "Tópico do ntfy.sh pra avisar se o backup falhar? (deixe em branco pra pular, ex: korrelo-backup-$(whoami)-$(hostname)): " NTFY_TOPIC
+if [ -r /dev/tty ]; then
+  read -rp "Tópico do ntfy.sh pra avisar se o backup falhar? (deixe em branco pra pular, ex: korrelo-backup-$(whoami)-$(hostname)): " NTFY_TOPIC < /dev/tty
+else
+  NTFY_TOPIC=""
+fi
 if [ -n "$NTFY_TOPIC" ]; then
   if ! grep -q "^BACKUP_ALERT_NTFY_TOPIC=" apps/api/.env 2>/dev/null; then
     echo "BACKUP_ALERT_NTFY_TOPIC=${NTFY_TOPIC}" >> apps/api/.env
@@ -273,7 +287,11 @@ else
 fi
 
 log "Backup externo: Google Drive via rclone (opcional)"
-read -rp "Quer copiar os backups pro seu Google Drive também? [s/N]: " SETUP_RCLONE
+if [ -r /dev/tty ]; then
+  read -rp "Quer copiar os backups pro seu Google Drive também? [s/N]: " SETUP_RCLONE < /dev/tty
+else
+  SETUP_RCLONE=""
+fi
 if [[ "$SETUP_RCLONE" =~ ^[sS] ]]; then
   if ! command -v rclone &> /dev/null; then
     curl -fsSL https://rclone.org/install.sh | sudo bash
