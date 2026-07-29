@@ -10,7 +10,7 @@
     "dev:api": "npm run start:dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
     "dev:agent": "npm run dev --workspace=apps/agent",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspace=packages/shared-types && npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "docker:dev": "docker compose -f docker/docker-compose.dev.yml up -d"
