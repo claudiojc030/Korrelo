@@ -90,7 +90,7 @@ describe("Auth flow (e2e)", () => {
     fs.rmSync(`${dbPath}-journal`, { force: true });
   });
 
-  const email = "admin@e2e-test.local";
+  const username = "admin@e2e-test.local";
   const password = "senha-super-forte-123";
 
   it("has-user retorna false antes do registro", async () => {
@@ -100,10 +100,10 @@ describe("Auth flow (e2e)", () => {
   });
 
   it("registra o primeiro usuário e seta os cookies de access+refresh", async () => {
-    const res = await request(app.getHttpServer()).post("/auth/register").send({ email, password });
+    const res = await request(app.getHttpServer()).post("/auth/register").send({ username, password });
 
     expect(res.status).toBe(201);
-    expect(res.body.email).toBe(email);
+    expect(res.body.username).toBe(username);
     expect(res.body.accessToken).toEqual(expect.any(String));
     expect(res.body.refreshToken).toBeUndefined();
 
@@ -116,7 +116,7 @@ describe("Auth flow (e2e)", () => {
   it("recusa registrar uma segunda conta", async () => {
     const res = await request(app.getHttpServer())
       .post("/auth/register")
-      .send({ email: "outro@e2e-test.local", password: "qualquer-coisa-123" });
+      .send({ username: "outro@e2e-test.local", password: "qualquer-coisa-123" });
     expect(res.status).toBe(409);
   });
 
@@ -128,7 +128,7 @@ describe("Auth flow (e2e)", () => {
   it("rejeita login com senha errada", async () => {
     const res = await request(app.getHttpServer())
       .post("/auth/login")
-      .send({ email, password: "senha-errada" });
+      .send({ username, password: "senha-errada" });
     expect(res.status).toBe(401);
   });
 
@@ -137,7 +137,7 @@ describe("Auth flow (e2e)", () => {
     let refreshCookie: string;
 
     it("loga com sucesso e recebe os dois cookies", async () => {
-      const res = await request(app.getHttpServer()).post("/auth/login").send({ email, password });
+      const res = await request(app.getHttpServer()).post("/auth/login").send({ username, password });
       expect(res.status).toBe(201);
       expect(res.body.requiresTwoFactor).toBe(false);
 
@@ -152,7 +152,7 @@ describe("Auth flow (e2e)", () => {
         .get("/auth/me")
         .set("Cookie", [`korrelo_token=${accessCookie}`]);
       expect(res.status).toBe(200);
-      expect(res.body.email).toBe(email);
+      expect(res.body.username).toBe(username);
     });
 
     it("rotaciona o par de tokens via /auth/refresh e invalida o refresh token antigo", async () => {
@@ -198,7 +198,7 @@ describe("Auth flow (e2e)", () => {
     let backupCodes: string[];
 
     beforeAll(async () => {
-      const login = await request(app.getHttpServer()).post("/auth/login").send({ email, password });
+      const login = await request(app.getHttpServer()).post("/auth/login").send({ username, password });
       accessCookie = extractCookie(login.headers["set-cookie"], "korrelo_token")!;
     });
 
@@ -233,7 +233,7 @@ describe("Auth flow (e2e)", () => {
     });
 
     it("login sem código pede o segundo fator e não seta cookies", async () => {
-      const res = await request(app.getHttpServer()).post("/auth/login").send({ email, password });
+      const res = await request(app.getHttpServer()).post("/auth/login").send({ username, password });
       expect(res.status).toBe(201);
       expect(res.body.requiresTwoFactor).toBe(true);
       expect(res.body.accessToken).toBeUndefined();
@@ -244,7 +244,7 @@ describe("Auth flow (e2e)", () => {
       const code = generateTotp(totpSecret);
       const res = await request(app.getHttpServer())
         .post("/auth/login")
-        .send({ email, password, twoFactorCode: code });
+        .send({ username, password, twoFactorCode: code });
       expect(res.status).toBe(201);
       expect(res.body.requiresTwoFactor).toBe(false);
       expect(extractCookie(res.headers["set-cookie"], "korrelo_token")).toBeTruthy();
@@ -254,7 +254,7 @@ describe("Auth flow (e2e)", () => {
       const backupCode = backupCodes[0];
       const res = await request(app.getHttpServer())
         .post("/auth/login")
-        .send({ email, password, twoFactorCode: backupCode });
+        .send({ username, password, twoFactorCode: backupCode });
       expect(res.status).toBe(201);
       expect(res.body.requiresTwoFactor).toBe(false);
     });
@@ -263,7 +263,7 @@ describe("Auth flow (e2e)", () => {
       const backupCode = backupCodes[0];
       const res = await request(app.getHttpServer())
         .post("/auth/login")
-        .send({ email, password, twoFactorCode: backupCode });
+        .send({ username, password, twoFactorCode: backupCode });
       expect(res.status).toBe(401);
     });
 
@@ -290,14 +290,14 @@ describe("Auth flow (e2e)", () => {
       const login1 = await request(app.getHttpServer())
         .post("/auth/login")
         .set("User-Agent", "chrome-e2e-test")
-        .send({ email, password });
+        .send({ username, password });
       userACookie = extractCookie(login1.headers["set-cookie"], "korrelo_token")!;
       userARefreshCookie = extractCookie(login1.headers["set-cookie"], "korrelo_refresh_token")!;
 
       await request(app.getHttpServer())
         .post("/auth/login")
         .set("User-Agent", "safari-e2e-test")
-        .send({ email, password });
+        .send({ username, password });
 
       // segundo usuário, inserido direto no banco (o endpoint de registro só
       // permite o primeiro usuário), pra testar isolamento entre contas.
@@ -305,13 +305,13 @@ describe("Auth flow (e2e)", () => {
       await prisma.$connect();
       const passwordHash = await bcrypt.hash("outra-senha-123", 10);
       await prisma.user.create({
-        data: { email: "outro-usuario@e2e-test.local", passwordHash },
+        data: { username: "outro-usuario@e2e-test.local", passwordHash },
       });
       await prisma.$disconnect();
 
       const login2 = await request(app.getHttpServer())
         .post("/auth/login")
-        .send({ email: "outro-usuario@e2e-test.local", password: "outra-senha-123" });
+        .send({ username: "outro-usuario@e2e-test.local", password: "outra-senha-123" });
       otherUserCookie = extractCookie(login2.headers["set-cookie"], "korrelo_token")!;
     });
 

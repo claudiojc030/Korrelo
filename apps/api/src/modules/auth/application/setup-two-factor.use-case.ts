@@ -28,7 +28,7 @@ export class SetupTwoFactorUseCase {
     }
 
     const secret = this.twoFactorService.generateSecret();
-    const otpAuthUrl = this.twoFactorService.buildOtpAuthUrl(user.email, secret);
+    const otpAuthUrl = this.twoFactorService.buildOtpAuthUrl(user.username, secret);
     const qrCodeDataUrl = await this.twoFactorService.generateQrCodeDataUrl(otpAuthUrl);
 
     // Guarda o segredo já, mas twoFactorEnabled só vira true depois que o

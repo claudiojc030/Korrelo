@@ -87,7 +87,7 @@ model GithubInstallation {
 
 model User {
   id                   String         @id @default(uuid())
-  email                String         @unique
+  username             String         @unique
   passwordHash         String
   twoFactorSecret      String?
   twoFactorEnabled     Boolean        @default(false)

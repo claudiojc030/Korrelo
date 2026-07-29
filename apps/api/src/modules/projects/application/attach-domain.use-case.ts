@@ -2,8 +2,13 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { apiError } from "../../../infrastructure/api-error";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { DOMAIN_PROVISIONER, type DomainProvisioner } from "../domain/domain-provisioner";
-import { USER_REPOSITORY, type UserRepository } from "../../auth/domain/user.repository";
 import type { Project } from "../domain/project.entity";
+
+// Contato exigido pelo Let's Encrypt pra avisos de renovação de certificado.
+// O Korrelo não coleta e-mail real do administrador (login é por usuário),
+// então usamos um placeholder fixo; quem quiser avisos de verdade pode trocar
+// isso manualmente no comando do certbot depois.
+const LETSENCRYPT_CONTACT_EMAIL = "admin@localhost";
 
 // Hostname simples (sem protocolo, sem porta, sem wildcard). É o mesmo formato
 // que entra no "-d" do certbot e no "server_name" do nginx.
@@ -13,7 +18,6 @@ const DOMAIN_PATTERN = /^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}
 export class AttachDomainUseCase {
   constructor(
     @Inject(PROJECT_REPOSITORY) private readonly projectRepository: ProjectRepository,
-    @Inject(USER_REPOSITORY) private readonly userRepository: UserRepository,
     @Inject(DOMAIN_PROVISIONER) private readonly domainProvisioner: DomainProvisioner,
   ) {}
 
@@ -56,10 +60,7 @@ export class AttachDomainUseCase {
       );
     }
 
-    const admin = await this.userRepository.findFirst();
-    const adminEmail = admin?.email ?? "admin@localhost";
-
-    await this.domainProvisioner.attach(normalizedDomain, project.assignedPort, adminEmail);
+    await this.domainProvisioner.attach(normalizedDomain, project.assignedPort, LETSENCRYPT_CONTACT_EMAIL);
 
     const updated = project.withDomain(normalizedDomain, "active");
     return this.projectRepository.save(updated);

@@ -12,9 +12,9 @@ export class OtplibTwoFactorService implements TwoFactorService {
     return otplib.generateSecret();
   }
 
-  buildOtpAuthUrl(email: string, secret: string): string {
+  buildOtpAuthUrl(username: string, secret: string): string {
     // strategy default é "totp", não precisa especificar.
-    return otplib.generateURI({ issuer: ISSUER, label: email, secret });
+    return otplib.generateURI({ issuer: ISSUER, label: username, secret });
   }
 
   async generateQrCodeDataUrl(otpAuthUrl: string): Promise<string> {

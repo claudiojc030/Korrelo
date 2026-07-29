@@ -44,7 +44,7 @@ describe("JwtAuthGuard", () => {
 
   it("libera acesso e anexa o usuário na request quando o token é válido", () => {
     const reflector = { getAllAndOverride: jest.fn().mockReturnValue(false) } as unknown as Reflector;
-    const payload = { sub: "user-1", email: "admin@korrelo.local" };
+    const payload = { sub: "user-1", username: "admin" };
     const tokenService: TokenService = { sign: jest.fn(), verify: jest.fn().mockReturnValue(payload) };
     const guard = new JwtAuthGuard(reflector, tokenService);
 

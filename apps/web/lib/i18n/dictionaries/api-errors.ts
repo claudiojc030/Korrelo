@@ -1,7 +1,7 @@
 export type ApiErrorsDict = Record<string, string>;
 
 export const apiErrorsEn: ApiErrorsDict = {
-  INVALID_CREDENTIALS: "Invalid email or password.",
+  INVALID_CREDENTIALS: "Invalid username or password.",
   INVALID_TWO_FACTOR_CODE: "Invalid verification code.",
   ACCOUNT_ALREADY_EXISTS: "There's already an account set up on this Korrelo. Use /auth/login.",
   USER_NOT_FOUND: "User not found.",
@@ -18,7 +18,7 @@ export const apiErrorsEn: ApiErrorsDict = {
 };
 
 export const apiErrorsPt: ApiErrorsDict = {
-  INVALID_CREDENTIALS: "E-mail ou senha inválidos.",
+  INVALID_CREDENTIALS: "Usuário ou senha inválidos.",
   INVALID_TWO_FACTOR_CODE: "Código de verificação inválido.",
   ACCOUNT_ALREADY_EXISTS: "Já existe uma conta configurada neste Korrelo. Use /auth/login.",
   USER_NOT_FOUND: "Usuário não encontrado.",

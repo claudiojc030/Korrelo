@@ -7,7 +7,7 @@ import type { TokenPairIssuer } from "./token-pair-issuer";
 function buildUseCase(existingUserCount: number) {
   const repository: UserRepository = {
     count: jest.fn().mockResolvedValue(existingUserCount),
-    findByEmail: jest.fn(),
+    findByUsername: jest.fn(),
     findFirst: jest.fn(),
     findById: jest.fn(),
     save: jest.fn().mockImplementation((user) => Promise.resolve(user)),
@@ -32,14 +32,14 @@ describe("RegisterFirstUserUseCase", () => {
   it("cria o primeiro usuário quando não existe nenhum ainda", async () => {
     const { useCase, repository, passwordHasher } = buildUseCase(0);
 
-    const result = await useCase.execute({ email: "admin@korrelo.local", password: "senha-forte" });
+    const result = await useCase.execute({ username: "admin", password: "senha-forte" });
 
     expect(passwordHasher.hash).toHaveBeenCalledWith("senha-forte");
     expect(repository.save).toHaveBeenCalled();
     expect(result).toEqual({
       accessToken: "signed-jwt-token",
       refreshToken: "raw-refresh-token",
-      email: "admin@korrelo.local",
+      username: "admin",
     });
   });
 
@@ -47,7 +47,7 @@ describe("RegisterFirstUserUseCase", () => {
     const { useCase, repository } = buildUseCase(1);
 
     await expect(
-      useCase.execute({ email: "outro@korrelo.local", password: "qualquer" }),
+      useCase.execute({ username: "outro", password: "qualquer" }),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(repository.save).not.toHaveBeenCalled();
   });

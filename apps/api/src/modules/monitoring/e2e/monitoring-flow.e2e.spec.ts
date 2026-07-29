@@ -99,7 +99,7 @@ describe("Monitoring flow (e2e)", () => {
 
     const register = await request(app.getHttpServer())
       .post("/auth/register")
-      .send({ email: "admin@e2e-monitoring.local", password: "senha-super-forte-123" });
+      .send({ username: "admin-e2e-monitoring", password: "senha-super-forte-123" });
     authCookie = extractCookie(register.headers["set-cookie"], "korrelo_token")!;
   });
 

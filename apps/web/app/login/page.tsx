@@ -10,8 +10,8 @@ import { translateApiError } from "../../lib/api-error";
 export default function LoginPage() {
   const router = useRouter();
   const { t } = useTranslation();
-  const [mode, setMode] = useState<"loading" | "login" | "setup">("loading");
-  const [email, setEmail] = useState("");
+  const [ready, setReady] = useState(false);
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [twoFactorCode, setTwoFactorCode] = useState("");
   const [needsTwoFactor, setNeedsTwoFactor] = useState(false);
@@ -22,9 +22,15 @@ export default function LoginPage() {
   useEffect(() => {
     apiFetch(`/auth/has-user`)
       .then((res) => res.json())
-      .then((data: { hasUser: boolean }) => setMode(data.hasUser ? "login" : "setup"))
-      .catch(() => setMode("login"));
-  }, []);
+      .then((data: { hasUser: boolean }) => {
+        if (!data.hasUser) {
+          router.replace("/setup");
+          return;
+        }
+        setReady(true);
+      })
+      .catch(() => setReady(true));
+  }, [router]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -32,11 +38,10 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const endpoint = mode === "setup" ? "/auth/register" : "/auth/login";
-      const body: Record<string, string> = { email, password };
+      const body: Record<string, string> = { username, password };
       if (needsTwoFactor) body.twoFactorCode = twoFactorCode;
 
-      const res = await apiFetch(endpoint, {
+      const res = await apiFetch("/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -72,18 +77,12 @@ export default function LoginPage() {
           <div>
             <h1 className="text-lg font-semibold text-foreground">Korrelo</h1>
             <p className="mt-1 text-[13.5px] text-muted-foreground">
-              {mode === "loading"
-                ? t.login.loadingSubtitle
-                : needsTwoFactor
-                  ? t.login.twoFactorSubtitle
-                  : mode === "setup"
-                    ? t.login.setupSubtitle
-                    : t.login.loginSubtitle}
+              {!ready ? t.login.loadingSubtitle : needsTwoFactor ? t.login.twoFactorSubtitle : t.login.loginSubtitle}
             </p>
           </div>
         </div>
 
-        {mode !== "loading" && (
+        {ready && (
           <form
             onSubmit={handleSubmit}
             className="flex flex-col gap-4 rounded-xl border border-border-subtle bg-surface p-6 shadow-panel"
@@ -109,17 +108,17 @@ export default function LoginPage() {
             ) : (
               <>
                 <div className="flex flex-col gap-1.5">
-                  <label htmlFor="email" className="text-[13px] font-medium text-muted-foreground">
-                    {t.login.emailLabel}
+                  <label htmlFor="username" className="text-[13px] font-medium text-muted-foreground">
+                    {t.login.usernameLabel}
                   </label>
                   <input
-                    id="email"
-                    type="email"
+                    id="username"
+                    type="text"
                     required
-                    autoComplete="email"
-                    placeholder={t.login.emailPlaceholder}
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
+                    autoComplete="username"
+                    placeholder={t.login.usernamePlaceholder}
+                    value={username}
+                    onChange={(event) => setUsername(event.target.value)}
                     className="rounded-md border border-border bg-background px-3 py-2 text-[14px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-accent"
                   />
                 </div>
@@ -134,7 +133,7 @@ export default function LoginPage() {
                       type={showPassword ? "text" : "password"}
                       required
                       minLength={8}
-                      autoComplete={mode === "setup" ? "new-password" : "current-password"}
+                      autoComplete="current-password"
                       placeholder={t.login.passwordPlaceholder}
                       value={password}
                       onChange={(event) => setPassword(event.target.value)}
@@ -165,7 +164,7 @@ export default function LoginPage() {
               className="mt-1 inline-flex items-center justify-center gap-2 rounded-md bg-accent px-4 py-2.5 text-[13.5px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
             >
               {submitting && <Loader2 size={15} className="animate-spin" />}
-              {needsTwoFactor ? t.login.submitVerify : mode === "setup" ? t.login.submitCreateAccount : t.login.submitLogin}
+              {needsTwoFactor ? t.login.submitVerify : t.login.submitLogin}
             </button>
 
             {needsTwoFactor && (

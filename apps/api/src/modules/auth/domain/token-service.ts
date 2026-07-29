@@ -2,7 +2,7 @@ export const TOKEN_SERVICE = Symbol("TOKEN_SERVICE");
 
 export interface AuthTokenPayload {
   sub: string;
-  email: string;
+  username: string;
 }
 
 export interface TokenService {

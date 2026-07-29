@@ -176,7 +176,7 @@ describe("Projects flow (e2e)", () => {
     // ProjectsModule) exige um token válido em quase toda rota.
     const register = await request(app.getHttpServer())
       .post("/auth/register")
-      .send({ email: "admin@e2e-projects.local", password: "senha-super-forte-123" });
+      .send({ username: "admin-e2e-projects", password: "senha-super-forte-123" });
     authCookie = extractCookie(register.headers["set-cookie"], "korrelo_token")!;
   });
 

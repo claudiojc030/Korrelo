@@ -63,7 +63,7 @@ export class AuthController {
     });
     res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
     res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
-    return { accessToken: result.accessToken, email: result.email };
+    return { accessToken: result.accessToken, username: result.username };
   }
 
   @Public()
@@ -83,7 +83,7 @@ export class AuthController {
       res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
       res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
     }
-    return { requiresTwoFactor: result.requiresTwoFactor, accessToken: result.accessToken, email: result.email };
+    return { requiresTwoFactor: result.requiresTwoFactor, accessToken: result.accessToken, username: result.username };
   }
 
   @Public()
@@ -114,8 +114,8 @@ export class AuthController {
 
   @Get("me")
   me(@Req() req: Request) {
-    const user = (req as Request & { user?: { sub: string; email: string } }).user;
-    return { email: user?.email ?? null };
+    const user = (req as Request & { user?: { sub: string; username: string } }).user;
+    return { username: user?.username ?? null };
   }
 
   @Get("sessions")

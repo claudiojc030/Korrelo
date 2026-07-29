@@ -2,6 +2,7 @@ import type { Locale } from "../locale";
 import { commonEn, commonPt } from "./common";
 import { navEn, navPt } from "./nav";
 import { loginEn, loginPt } from "./login";
+import { setupEn, setupPt } from "./setup";
 import { dashboardEn, dashboardPt } from "./dashboard";
 import { projectsEn, projectsPt } from "./projects";
 import { projectDetailEn, projectDetailPt } from "./project-detail";
@@ -23,6 +24,7 @@ const en = {
   common: commonEn,
   nav: navEn,
   login: loginEn,
+  setup: setupEn,
   dashboard: dashboardEn,
   projects: projectsEn,
   projectDetail: projectDetailEn,
@@ -42,6 +44,7 @@ const pt: typeof en = {
   common: commonPt,
   nav: navPt,
   login: loginPt,
+  setup: setupPt,
   dashboard: dashboardPt,
   projects: projectsPt,
   projectDetail: projectDetailPt,

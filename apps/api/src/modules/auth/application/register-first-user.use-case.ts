@@ -6,7 +6,7 @@ import { PASSWORD_HASHER, type PasswordHasher } from "../domain/password-hasher"
 import { TokenPairIssuer } from "./token-pair-issuer";
 
 export interface RegisterFirstUserInput {
-  email: string;
+  username: string;
   password: string;
   userAgent?: string | null;
   ipAddress?: string | null;
@@ -15,7 +15,7 @@ export interface RegisterFirstUserInput {
 export interface AuthResult {
   accessToken: string;
   refreshToken: string;
-  email: string;
+  username: string;
 }
 
 @Injectable()
@@ -35,15 +35,15 @@ export class RegisterFirstUserUseCase {
     }
 
     const passwordHash = await this.passwordHasher.hash(input.password);
-    const user = User.create(input.email, passwordHash);
+    const user = User.create(input.username, passwordHash);
     await this.repository.save(user);
 
     const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(
       user.id,
-      user.email,
+      user.username,
       input.userAgent ?? null,
       input.ipAddress ?? null,
     );
-    return { accessToken, refreshToken, email: user.email };
+    return { accessToken, refreshToken, username: user.username };
   }
 }

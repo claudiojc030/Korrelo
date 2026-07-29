@@ -5,7 +5,7 @@ import { TOKEN_COOKIE } from "./lib/auth-cookie-client";
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (pathname.startsWith("/login")) {
+  if (pathname.startsWith("/login") || pathname.startsWith("/setup")) {
     return NextResponse.next();
   }
 

@@ -25,7 +25,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { t } = useTranslation();
-  const [email, setEmail] = useState<string | null>(null);
+  const [username, setUsername] = useState<string | null>(null);
   const [isMac, setIsMac] = useState(false);
 
   const NAV_ITEMS = [
@@ -39,7 +39,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     apiFetch("/auth/me")
       .then((res) => (res.ok ? res.json() : null))
-      .then((data: { email: string | null } | null) => setEmail(data?.email ?? null))
+      .then((data: { username: string | null } | null) => setUsername(data?.username ?? null))
       .catch(() => {});
   }, []);
 
@@ -99,10 +99,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="mt-auto flex flex-col gap-3 border-t border-border-subtle pt-5">
-          {email && (
+          {username && (
             <div className="flex items-center gap-2.5 px-3.5 text-[13px] text-muted-foreground">
               <span className="h-1.5 w-1.5 flex-none rounded-full bg-accent" />
-              <span className="truncate">{email}</span>
+              <span className="truncate">{username}</span>
             </div>
           )}
           <ThemeToggle />

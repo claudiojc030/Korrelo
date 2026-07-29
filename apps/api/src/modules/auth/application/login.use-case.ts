@@ -7,7 +7,7 @@ import { TWO_FACTOR_SERVICE, type TwoFactorService } from "../domain/two-factor-
 import { TokenPairIssuer } from "./token-pair-issuer";
 
 export interface LoginInput {
-  email: string;
+  username: string;
   password: string;
   twoFactorCode?: string;
   userAgent?: string | null;
@@ -18,7 +18,7 @@ export interface LoginResult {
   requiresTwoFactor: boolean;
   accessToken?: string;
   refreshToken?: string;
-  email?: string;
+  username?: string;
 }
 
 @Injectable()
@@ -31,14 +31,14 @@ export class LoginUseCase {
   ) {}
 
   async execute(input: LoginInput): Promise<LoginResult> {
-    const user = await this.repository.findByEmail(input.email);
+    const user = await this.repository.findByUsername(input.username);
     if (!user) {
-      throw new UnauthorizedException(apiError("INVALID_CREDENTIALS", "E-mail ou senha inválidos."));
+      throw new UnauthorizedException(apiError("INVALID_CREDENTIALS", "Usuário ou senha inválidos."));
     }
 
     const passwordMatches = await this.passwordHasher.compare(input.password, user.passwordHash);
     if (!passwordMatches) {
-      throw new UnauthorizedException(apiError("INVALID_CREDENTIALS", "E-mail ou senha inválidos."));
+      throw new UnauthorizedException(apiError("INVALID_CREDENTIALS", "Usuário ou senha inválidos."));
     }
 
     if (user.twoFactorEnabled) {
@@ -59,11 +59,11 @@ export class LoginUseCase {
 
     const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(
       user.id,
-      user.email,
+      user.username,
       input.userAgent ?? null,
       input.ipAddress ?? null,
     );
-    return { requiresTwoFactor: false, accessToken, refreshToken, email: user.email };
+    return { requiresTwoFactor: false, accessToken, refreshToken, username: user.username };
   }
 
   private async tryConsumeBackupCode(user: User, code: string): Promise<boolean> {

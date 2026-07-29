@@ -17,7 +17,7 @@ export class RefreshAccessTokenUseCase {
     rawToken: string,
     userAgent: string | null = null,
     ipAddress: string | null = null,
-  ): Promise<TokenPair & { email: string }> {
+  ): Promise<TokenPair & { username: string }> {
     const stored = await this.refreshTokenRepository.findByTokenHash(hashRefreshToken(rawToken));
     if (!stored || !stored.isValid()) {
       throw new UnauthorizedException(apiError("SESSION_EXPIRED", "Sessão expirada. Faça login novamente."));
@@ -35,10 +35,10 @@ export class RefreshAccessTokenUseCase {
 
     const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(
       user.id,
-      user.email,
+      user.username,
       userAgent ?? stored.userAgent,
       ipAddress ?? stored.ipAddress,
     );
-    return { accessToken, refreshToken, email: user.email };
+    return { accessToken, refreshToken, username: user.username };
   }
 }

@@ -22,11 +22,11 @@ export class TokenPairIssuer {
 
   async issue(
     userId: string,
-    email: string,
+    username: string,
     userAgent: string | null = null,
     ipAddress: string | null = null,
   ): Promise<TokenPair> {
-    const accessToken = this.tokenService.sign({ sub: userId, email });
+    const accessToken = this.tokenService.sign({ sub: userId, username });
 
     const refreshToken = generateRefreshToken();
     const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
