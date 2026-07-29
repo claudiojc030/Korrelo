@@ -16,7 +16,21 @@ export class PrismaEnvVarRepository implements EnvVarRepository {
       where: { projectId },
       orderBy: { key: "asc" },
     });
-    return rows.map((row) => new EnvVar(row.id, row.projectId, row.key, this.cipher.decrypt(row.value), row.createdAt));
+    return Promise.all(rows.map((row) => this.decryptAndHeal(row)));
+  }
+
+  // Se o valor ainda estiver em texto puro (gravado antes do
+  // ENV_ENCRYPTION_KEY existir), cifra e persiste na primeira leitura, em vez
+  // de deixar em texto puro pra sempre só porque ninguém editou aquele valor
+  // de novo. Não precisa de uma migração à parte: a própria leitura já cura.
+  private async decryptAndHeal(row: { id: string; projectId: string; key: string; value: string; createdAt: Date }): Promise<EnvVar> {
+    const plainText = this.cipher.decrypt(row.value);
+    if (this.cipher.isEncrypted(row.value)) {
+      return new EnvVar(row.id, row.projectId, row.key, plainText, row.createdAt);
+    }
+    const reEncrypted = this.cipher.encrypt(plainText);
+    await this.prisma.envVar.update({ where: { id: row.id }, data: { value: reEncrypted } });
+    return new EnvVar(row.id, row.projectId, row.key, plainText, row.createdAt);
   }
 
   async replaceAll(projectId: string, vars: EnvVarInput[]): Promise<EnvVar[]> {

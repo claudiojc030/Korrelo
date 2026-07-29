@@ -5,6 +5,9 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import * as express from "express";
 import { AppModule } from "./app.module";
+import { ensureRequiredSecrets } from "./infrastructure/ensure-required-secrets";
+
+ensureRequiredSecrets();
 
 function getAllowedOrigins(): string[] {
   const configured = process.env.CORS_ORIGINS;

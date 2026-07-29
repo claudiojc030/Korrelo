@@ -77,6 +77,9 @@ want. Nothing to copy by hand.
    - **GitHub App name**: any unique name (e.g. `korrelo-your-username`).
    - **Homepage URL**: your Korrelo's URL (`https://YOUR_DOMAIN` or `http://YOUR_IP:3000`).
    - **Callback URL**: same URL as above.
+   - **Setup URL (optional)**: check "Redirect on update" and set it to
+     `https://YOUR_DOMAIN/api/github/callback` (or `http://YOUR_IP:3001/github/callback` without a domain) —
+     without this, GitHub won't send you back to Korrelo after installing the App.
    - **Webhook → Active**: check it, and under **Webhook URL** put
      `https://YOUR_DOMAIN/api/github/webhook` (or `http://YOUR_IP:3001/github/webhook` without a domain).
    - **Webhook secret**: generate any random value and note it down, it'll become `GITHUB_APP_WEBHOOK_SECRET`.
@@ -110,7 +113,7 @@ At the end of the script, it shows the access URL:
 - **Without a domain**: `http://YOUR_IP:3000`
 
 Open that URL in your browser. Since no account exists yet, you land
-directly on the admin account creation screen (email + password). This is
+directly on the admin account creation screen (username + password). This is
 the **only account** that exists in Korrelo today (single-admin), so keep
 that password safe.
 
@@ -126,6 +129,12 @@ From there:
 
 ## Updating Korrelo
 
+**Easy way**: when an update is available, a banner shows up on the
+dashboard with an **"Update now"** button that runs the whole thing by
+itself (with a progress bar and live log) and restarts the panel at the end.
+
+**Manual way** (via SSH, e.g. to run once before the button exists on your install):
+
 ```bash
 cd korrelo
 git pull
@@ -137,6 +146,22 @@ cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
 (cd apps/api && npx prisma migrate deploy)
 pm2 restart ecosystem.config.js
 ```
+
+## Security
+
+- **Two-factor login (2FA)**: turn it on under Security → Two-factor
+  authentication. Recommended right after creating your account.
+- **Project environment variables** are encrypted at rest in the database
+  (AES-256-GCM, a key of its own per install). If a variable was written
+  before encryption existed, Korrelo encrypts it by itself the next time it's read.
+- **JWT_SECRET and ENV_ENCRYPTION_KEY** are generated automatically on first
+  install (`setup-vps.sh`), and as an extra safety net, the API itself
+  generates a fresh value on its own if either is missing when it starts —
+  you can never end up without these keys by accident.
+- **Connecting GitHub** (manual or automatic) is protected against forged
+  links: Korrelo only completes that flow if it was started by your own
+  logged-in session, so nobody can trick you into hijacking your GitHub
+  integration by clicking a link.
 
 ## Backup
 

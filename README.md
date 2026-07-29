@@ -75,6 +75,9 @@ de instalar o App nos repositórios que quiser. Sem copiar nada na mão.
    - **GitHub App name**: qualquer nome único (ex: `korrelo-seu-usuario`).
    - **Homepage URL**: a URL do seu Korrelo (`https://SEU_DOMINIO` ou `http://SEU_IP:3000`).
    - **Callback URL**: mesma URL acima.
+   - **Setup URL (optional)**: marque "Redirect on update" e coloque
+     `https://SEU_DOMINIO/api/github/callback` (ou `http://SEU_IP:3001/github/callback` sem domínio) —
+     sem isso o GitHub não te manda de volta pro Korrelo depois de instalar o App.
    - **Webhook → Active**: marque, e em **Webhook URL** coloque
      `https://SEU_DOMINIO/api/github/webhook` (ou `http://SEU_IP:3001/github/webhook` sem domínio).
    - **Webhook secret**: gere um valor aleatório qualquer e anote, vai virar `GITHUB_APP_WEBHOOK_SECRET`.
@@ -108,7 +111,7 @@ Ao final do script, ele mostra a URL de acesso:
 - **Sem domínio**: `http://SEU_IP:3000`
 
 Abra essa URL no navegador. Como ainda não existe nenhuma conta, você cai
-direto na tela de criação da conta de administrador (e-mail + senha). Essa é
+direto na tela de criação da conta de administrador (usuário + senha). Essa é
 a **única conta** que existe no Korrelo hoje (single-admin), então guarde bem
 essa senha.
 
@@ -123,6 +126,12 @@ A partir daí:
 
 ## Atualizando o Korrelo
 
+**Jeito fácil**: quando houver uma atualização disponível, aparece um aviso
+no dashboard com o botão **"Atualizar agora"**, que roda tudo sozinho (com
+barra de progresso e log em tempo real) e reinicia o painel no final.
+
+**Jeito manual** (via SSH, ex. pra rodar antes de o botão existir na sua instalação):
+
 ```bash
 cd korrelo
 git pull
@@ -134,6 +143,22 @@ cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
 (cd apps/api && npx prisma migrate deploy)
 pm2 restart ecosystem.config.js
 ```
+
+## Segurança
+
+- **Login em duas etapas (2FA)**: ative em Segurança → Autenticação em duas
+  etapas. Recomendado ligar assim que criar a conta.
+- **Variáveis de ambiente de projeto** ficam cifradas em repouso no banco
+  (AES-256-GCM, chave própria por instalação). Se alguma variável foi gravada
+  antes de existir cifra, o Korrelo cifra ela sozinho na próxima vez que for lida.
+- **JWT_SECRET e ENV_ENCRYPTION_KEY** são gerados automaticamente na primeira
+  instalação (`setup-vps.sh`) e, como rede de segurança extra, a própria API
+  gera um valor novo sozinha se algum dos dois estiver faltando quando ela
+  inicia — nunca fica sem essas chaves por esquecimento.
+- **Conectar o GitHub** (manual ou automático) é protegido contra links
+  forjados: o Korrelo só completa esse fluxo se ele foi iniciado pela sua
+  própria sessão logada, então não dá pra alguém te enganar clicando num link
+  pra sequestrar sua integração com o GitHub.
 
 ## Backup
 

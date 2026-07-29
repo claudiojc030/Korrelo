@@ -26,6 +26,10 @@ export class EnvVarCipher {
     return key;
   }
 
+  isEncrypted(storedValue: string): boolean {
+    return storedValue.startsWith(PREFIX);
+  }
+
   encrypt(plainText: string): string {
     const iv = crypto.randomBytes(12);
     const cipher = crypto.createCipheriv(ALGORITHM, this.key, iv);
