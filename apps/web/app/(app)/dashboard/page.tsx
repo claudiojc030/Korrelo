@@ -94,7 +94,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-10">
-      <AutoRefresh intervalMs={4000} />
+      <AutoRefresh intervalMs={12000} />
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
@@ -103,7 +103,7 @@ export default async function DashboardPage() {
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
             </span>
-            Atualiza a cada 4s
+            Atualiza a cada 12s
           </p>
         </div>
         {metrics && (
