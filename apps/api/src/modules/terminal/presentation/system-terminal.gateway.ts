@@ -9,31 +9,27 @@ import {
 } from "@nestjs/websockets";
 import cookie from "cookie";
 import type { Socket } from "socket.io";
-import { PROJECT_REPOSITORY, type ProjectRepository } from "../../projects/domain/project.repository";
-import { SHELL_SESSION_FACTORY, type ShellSessionFactory, type ShellSession } from "../domain/shell-session";
+import type { ShellSession } from "../domain/shell-session";
+import { HostShellSessionFactory } from "../infrastructure/host-shell-session";
 import { TOKEN_SERVICE, type TokenService } from "../../auth/domain/token-service";
 import { TOKEN_COOKIE } from "../../auth/presentation/token-cookie";
 import { getAllowedOrigins } from "../infrastructure/allowed-origins";
 
-interface StartPayload {
-  projectId: string;
-}
-
-@WebSocketGateway({ namespace: "/terminal", cors: { origin: getAllowedOrigins(), credentials: true } })
-export class TerminalGateway implements OnGatewayConnection, OnGatewayDisconnect {
-  private readonly logger = new Logger(TerminalGateway.name);
+// Terminal da VPS inteira (o host onde o Core roda), diferente do terminal
+// por projeto (que roda via `docker exec` isolado no container). Um shell
+// aqui tem o mesmo alcance do processo Core: todos os projetos, backups,
+// configs de nginx etc, só que ainda sem privilégio de root.
+@WebSocketGateway({ namespace: "/system-terminal", cors: { origin: getAllowedOrigins(), credentials: true } })
+export class SystemTerminalGateway implements OnGatewayConnection, OnGatewayDisconnect {
+  private readonly logger = new Logger(SystemTerminalGateway.name);
   private readonly sessions = new Map<string, ShellSession>();
 
   constructor(
-    @Inject(PROJECT_REPOSITORY) private readonly projectRepository: ProjectRepository,
-    @Inject(SHELL_SESSION_FACTORY) private readonly shellSessionFactory: ShellSessionFactory,
+    private readonly hostShellSessionFactory: HostShellSessionFactory,
     @Inject(TOKEN_SERVICE) private readonly tokenService: TokenService,
   ) {}
 
   handleConnection(client: Socket): void {
-    // O guard global de HTTP não cobre WebSocket, então validamos aqui manualmente,
-    // lendo o cookie httpOnly que o navegador manda junto do handshake
-    // (socket.io client precisa de withCredentials: true pra isso).
     const cookieHeader = client.handshake.headers.cookie;
     const token = cookieHeader ? cookie.parse(cookieHeader)[TOKEN_COOKIE] : undefined;
     const payload = token ? this.tokenService.verify(token) : null;
@@ -45,15 +41,9 @@ export class TerminalGateway implements OnGatewayConnection, OnGatewayDisconnect
   }
 
   @SubscribeMessage("start")
-  async handleStart(@ConnectedSocket() client: Socket, @MessageBody() payload: StartPayload): Promise<void> {
-    const project = await this.projectRepository.findById(payload.projectId);
-    if (!project || !project.containerName || project.status !== "running") {
-      client.emit("error", "Projeto não encontrado ou não está rodando.");
-      client.disconnect();
-      return;
-    }
-
-    const session = this.shellSessionFactory.spawn(project.containerName);
+  handleStart(@ConnectedSocket() client: Socket): void {
+    this.logger.log(`Sessão de terminal da VPS iniciada: ${client.id}`);
+    const session = this.hostShellSessionFactory.spawn();
     this.sessions.set(client.id, session);
 
     session.onData((data) => client.emit("output", data));
@@ -71,6 +61,6 @@ export class TerminalGateway implements OnGatewayConnection, OnGatewayDisconnect
   handleDisconnect(client: Socket): void {
     this.sessions.get(client.id)?.kill();
     this.sessions.delete(client.id);
-    this.logger.log(`Sessão de terminal encerrada: ${client.id}`);
+    this.logger.log(`Sessão de terminal da VPS encerrada: ${client.id}`);
   }
 }
