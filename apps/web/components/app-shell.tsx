@@ -21,7 +21,7 @@ function Logo() {
       <div className="flex h-8 w-8 flex-none items-center justify-center rounded-md bg-accent font-mono text-[14px] font-semibold text-accent-foreground">
         &gt;_
       </div>
-      <span className="text-[16px] font-semibold tracking-tight text-foreground">ForgeDesk</span>
+      <span className="text-[16px] font-semibold tracking-tight text-foreground">Korrelo</span>
     </div>
   );
 }

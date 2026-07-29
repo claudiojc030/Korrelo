@@ -104,9 +104,9 @@ export class DockerExecDatabaseQueryRunner implements DatabaseQueryRunner {
       [
         "psql",
         "-U",
-        database.username ?? "forgedesk",
+        database.username ?? "korrelo",
         "-d",
-        database.databaseName ?? "forgedesk",
+        database.databaseName ?? "korrelo",
         "-v",
         "ON_ERROR_STOP=1",
         "--csv",

@@ -6,7 +6,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import cookieParser from "cookie-parser";
 import request from "supertest";
-import type { SystemMetrics } from "@forgedesk/shared-types";
+import type { SystemMetrics } from "@korrelo/shared-types";
 
 // Mesmo padrão dos outros e2e (auth, projects): SQLite temporário e
 // descartável, nunca o dev.db real. O SYSTEM_METRICS_COLLECTOR de verdade
@@ -100,7 +100,7 @@ describe("Monitoring flow (e2e)", () => {
     const register = await request(app.getHttpServer())
       .post("/auth/register")
       .send({ email: "admin@e2e-monitoring.local", password: "senha-super-forte-123" });
-    authCookie = extractCookie(register.headers["set-cookie"], "forgedesk_token")!;
+    authCookie = extractCookie(register.headers["set-cookie"], "korrelo_token")!;
   });
 
   afterAll(async () => {
@@ -110,7 +110,7 @@ describe("Monitoring flow (e2e)", () => {
   });
 
   function authCookieHeader(): string {
-    return `forgedesk_token=${authCookie}`;
+    return `korrelo_token=${authCookie}`;
   }
 
   it("rejeita /monitoring/system sem autenticação", async () => {

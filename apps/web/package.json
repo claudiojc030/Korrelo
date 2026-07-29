@@ -1,5 +1,5 @@
 {
-  "name": "@forgedesk/web",
+  "name": "@korrelo/web",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@forgedesk/shared-types": "0.1.0",
+    "@korrelo/shared-types": "0.1.0",
     "@monaco-editor/react": "^4.7.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",

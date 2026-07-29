@@ -1,10 +1,10 @@
 import { BadRequestException } from "@nestjs/common";
 import * as path from "node:path";
 
-// Arquivos que o ForgeDesk gera e que guardam segredo ou config interna.
+// Arquivos que o Korrelo gera e que guardam segredo ou config interna.
 // Nunca ficam navegáveis/editáveis por aqui, mesmo que o usuário peça o
 // caminho exato.
-const BLOCKED_SEGMENTS = [".git", ".env.forgedesk", "docker-compose.forgedesk.yml"];
+const BLOCKED_SEGMENTS = [".git", ".env.korrelo", "docker-compose.korrelo.yml"];
 
 // Resolve um caminho relativo pedido pelo cliente contra a raiz do workspace
 // do projeto, garantindo que o resultado nunca escapa dessa raiz (proteção

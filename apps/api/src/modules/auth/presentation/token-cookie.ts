@@ -1,8 +1,8 @@
 import type { CookieOptions } from "express";
 import { REFRESH_TOKEN_TTL_DAYS } from "../infrastructure/refresh-token-crypto";
 
-export const TOKEN_COOKIE = "forgedesk_token";
-export const REFRESH_TOKEN_COOKIE = "forgedesk_refresh_token";
+export const TOKEN_COOKIE = "korrelo_token";
+export const REFRESH_TOKEN_COOKIE = "korrelo_refresh_token";
 const ACCESS_TOKEN_MAX_AGE_MS = 15 * 60 * 1000;
 const REFRESH_TOKEN_MAX_AGE_MS = REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000;
 

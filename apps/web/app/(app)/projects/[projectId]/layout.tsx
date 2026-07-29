@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import type { Project } from "@forgedesk/shared-types";
+import type { Project } from "@korrelo/shared-types";
 import { ProjectTabs } from "./project-tabs";
 import { authHeaderServer } from "../../../../lib/auth-cookie-server";
 

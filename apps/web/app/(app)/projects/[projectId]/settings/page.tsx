@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import type { Project } from "@forgedesk/shared-types";
+import type { Project } from "@korrelo/shared-types";
 import { apiFetch } from "../../../../../lib/api-client";
 
 function FeatureToggleRow({

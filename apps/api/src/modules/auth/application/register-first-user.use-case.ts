@@ -29,7 +29,7 @@ export class RegisterFirstUserUseCase {
     const existingCount = await this.repository.count();
     if (existingCount > 0) {
       throw new ConflictException(
-        "Já existe uma conta configurada neste ForgeDesk. Use /auth/login.",
+        "Já existe uma conta configurada neste Korrelo. Use /auth/login.",
       );
     }
 

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { SystemMetrics } from "@forgedesk/shared-types";
+import type { SystemMetrics } from "@korrelo/shared-types";
 import {
   SYSTEM_METRICS_COLLECTOR,
   type SystemMetricsCollector,

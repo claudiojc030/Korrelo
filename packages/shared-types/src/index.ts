@@ -60,7 +60,7 @@ export function classifyResourceTier(totalMemMb: number): ResourceTier {
   return match ? match.tier : "large";
 }
 
-// Teto de memória por container de projeto implantado pelo ForgeDesk, por tier de VPS.
+// Teto de memória por container de projeto implantado pelo Korrelo, por tier de VPS.
 // Conservador de propósito: numa VPS de 1-2GB, vários projetos rodando ao mesmo tempo
 // não podem, juntos, estourar a RAM da máquina.
 export const CONTAINER_MEMORY_LIMIT_MB: Record<ResourceTier, number> = {

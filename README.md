@@ -1,4 +1,4 @@
-# ForgeDesk
+# Korrelo
 
 Web OS pra gerenciar uma VPS sem precisar de SSH/CLI. Importe repositórios do
 GitHub, implante com um clique, gerencie bancos de dados, cron jobs, domínios
@@ -12,14 +12,14 @@ e monitore tudo pelo navegador.
 
 - Uma VPS Ubuntu 22.04+ limpa, com acesso SSH por chave (não por senha).
 - Pelo menos **1 GB de RAM** (2 GB+ recomendado se for hospedar mais de 1-2 projetos, já que cada container consome memória própria, além do Core).
-- Um domínio (opcional). Dá pra acessar só pelo IP, mas com domínio o ForgeDesk consegue emitir HTTPS automático (Let's Encrypt) pra si mesmo e pra cada projeto implantado.
+- Um domínio (opcional). Dá pra acessar só pelo IP, mas com domínio o Korrelo consegue emitir HTTPS automático (Let's Encrypt) pra si mesmo e pra cada projeto implantado.
 
 ## 1. Suba o repositório na VPS
 
 ```bash
 ssh seu-usuario@SEU_IP
-git clone https://github.com/SEU_USUARIO/ForgeDesk.git forgedesk
-cd forgedesk
+git clone https://github.com/SEU_USUARIO/Korrelo.git korrelo
+cd korrelo
 bash scripts/setup-vps.sh
 ```
 
@@ -37,15 +37,15 @@ Em dois momentos ele **para e pede informação sua**:
 
 ## 2. Cadastrando o GitHub App
 
-O GitHub App é o que permite o ForgeDesk listar seus repositórios e receber
+O GitHub App é o que permite o Korrelo listar seus repositórios e receber
 webhook de push (deploy automático). Sem ele, dá pra usar tudo o resto do
-ForgeDesk normalmente, só a importação/auto-deploy via GitHub fica indisponível.
+Korrelo normalmente, só a importação/auto-deploy via GitHub fica indisponível.
 
 1. Acesse **github.com/settings/apps/new** (conta pessoal) ou
    `github.com/organizations/SUA_ORG/settings/apps/new` (organização).
 2. Preencha:
-   - **GitHub App name**: qualquer nome único (ex: `forgedesk-seu-usuario`).
-   - **Homepage URL**: a URL do seu ForgeDesk (`https://SEU_DOMINIO` ou `http://SEU_IP:3000`).
+   - **GitHub App name**: qualquer nome único (ex: `korrelo-seu-usuario`).
+   - **Homepage URL**: a URL do seu Korrelo (`https://SEU_DOMINIO` ou `http://SEU_IP:3000`).
    - **Callback URL**: mesma URL acima.
    - **Webhook → Active**: marque, e em **Webhook URL** coloque
      `https://SEU_DOMINIO/api/github/webhook` (ou `http://SEU_IP:3001/github/webhook` sem domínio).
@@ -55,12 +55,12 @@ ForgeDesk normalmente, só a importação/auto-deploy via GitHub fica indisponí
    - **Where can this GitHub App be installed?**: "Only on this account" é suficiente.
 3. Crie o App. Na página dele:
    - Anote o **App ID** (topo da página) → `GITHUB_APP_ID`.
-   - Anote o **slug** (aparece na URL, ex: `forgedesk-seu-usuario`) → `GITHUB_APP_SLUG`.
+   - Anote o **slug** (aparece na URL, ex: `korrelo-seu-usuario`) → `GITHUB_APP_SLUG`.
    - Em **Private keys**, clique **Generate a private key**. Isso baixa um arquivo `.pem`.
-4. Instale o App na sua conta/organização (botão **Install App**), autorizando os repositórios que quiser gerenciar pelo ForgeDesk (ou todos).
+4. Instale o App na sua conta/organização (botão **Install App**), autorizando os repositórios que quiser gerenciar pelo Korrelo (ou todos).
 5. No `apps/api/.env` que o script deixou aberto, preencha:
    ```
-   GITHUB_APP_SLUG=forgedesk-seu-usuario
+   GITHUB_APP_SLUG=korrelo-seu-usuario
    GITHUB_APP_ID=123456
    GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMII...\n-----END RSA PRIVATE KEY-----"
    GITHUB_APP_WEBHOOK_SECRET=o-segredo-que-voce-gerou
@@ -72,7 +72,7 @@ ForgeDesk normalmente, só a importação/auto-deploy via GitHub fica indisponí
    ```
 6. Salve o arquivo e volte pro terminal onde `setup-vps.sh` está esperando, e aperte ENTER pra continuar.
 
-## 3. Acessando o ForgeDesk
+## 3. Acessando o Korrelo
 
 Ao final do script, ele mostra a URL de acesso:
 
@@ -81,7 +81,7 @@ Ao final do script, ele mostra a URL de acesso:
 
 Abra essa URL no navegador. Como ainda não existe nenhuma conta, você cai
 direto na tela de criação da conta de administrador (e-mail + senha). Essa é
-a **única conta** que existe no ForgeDesk hoje (single-admin), então guarde bem
+a **única conta** que existe no Korrelo hoje (single-admin), então guarde bem
 essa senha.
 
 **Recomendado logo de cara**: entre em **Segurança** e ative o 2FA (TOTP).
@@ -93,10 +93,10 @@ A partir daí:
 - **Dashboard** mostra CPU/memória/disco do servidor (com histórico) e consumo por projeto.
 - `Ctrl+K` (ou `Cmd+K` no Mac) abre uma busca rápida pra navegar entre páginas e projetos.
 
-## Atualizando o ForgeDesk
+## Atualizando o Korrelo
 
 ```bash
-cd forgedesk
+cd korrelo
 git pull
 npm install
 npm run build --workspace=packages/shared-types
@@ -111,7 +111,7 @@ pm2 restart ecosystem.config.js
 
 Configurado automaticamente pelo `setup-vps.sh`: todo dia às 3h, roda
 `scripts/backup.sh` (banco do Core + bancos gerenciados por projeto) e guarda
-os últimos 7 dias em `~/forgedesk-backups`. Pra rodar na mão:
+os últimos 7 dias em `~/korrelo-backups`. Pra rodar na mão:
 
 ```bash
 bash scripts/backup.sh
@@ -124,9 +124,9 @@ Configurável via `apps/api/.env` (`BACKUP_DIR`, `BACKUP_RETENTION_DAYS`,
 ## Solução de problemas
 
 ```bash
-pm2 status                    # os dois processos (forgedesk-api, forgedesk-web) devem estar "online"
-pm2 logs forgedesk-api        # logs da API em tempo real
-pm2 logs forgedesk-web        # logs do frontend
+pm2 status                    # os dois processos (korrelo-api, korrelo-web) devem estar "online"
+pm2 logs korrelo-api        # logs da API em tempo real
+pm2 logs korrelo-web        # logs do frontend
 pm2 restart ecosystem.config.js
 ```
 

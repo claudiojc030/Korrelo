@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ExternalLink, SquareTerminal, FolderGit2 } from "lucide-react";
-import type { DetectedStack, Project } from "@forgedesk/shared-types";
+import type { DetectedStack, Project } from "@korrelo/shared-types";
 import { ImportFromGithub } from "./import-from-github";
 import { DeployButton } from "./deploy-button";
 import { DeleteProjectButton } from "./delete-project-button";

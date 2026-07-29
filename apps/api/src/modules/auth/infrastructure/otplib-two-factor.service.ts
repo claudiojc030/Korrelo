@@ -4,7 +4,7 @@ import * as otplib from "otplib";
 import * as QRCode from "qrcode";
 import type { TwoFactorService } from "../domain/two-factor-service";
 
-const ISSUER = "ForgeDesk";
+const ISSUER = "Korrelo";
 
 @Injectable()
 export class OtplibTwoFactorService implements TwoFactorService {

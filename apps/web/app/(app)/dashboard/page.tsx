@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Cpu, MemoryStick, HardDrive, Clock, Box, Server, ExternalLink, SquareTerminal } from "lucide-react";
-import { CONTAINER_MEMORY_LIMIT_MB, type ContainerSummary, type Project, type SystemMetrics } from "@forgedesk/shared-types";
+import { CONTAINER_MEMORY_LIMIT_MB, type ContainerSummary, type Project, type SystemMetrics } from "@korrelo/shared-types";
 import { MetricTile } from "./metric-tile";
 import { MetricsHistoryChart } from "./metrics-history-chart";
 import { OnboardingChecklist } from "./onboarding-checklist";

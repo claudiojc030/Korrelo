@@ -8,7 +8,7 @@ import {
 } from "@nestjs/common";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
-import type { DetectedStack } from "@forgedesk/shared-types";
+import type { DetectedStack } from "@korrelo/shared-types";
 import type { Project } from "../domain/project.entity";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { DOCKERFILE_GENERATOR, type DockerfileGenerator } from "../domain/dockerfile-generator";
@@ -36,7 +36,7 @@ const HEALTH_CHECK_TIMEOUT_MS = 30_000;
 
 function sanitizeContainerName(projectId: string, projectName: string): string {
   const slug = projectName.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
-  return `forgedesk-${slug || "project"}-${projectId.slice(0, 8)}`;
+  return `korrelo-${slug || "project"}-${projectId.slice(0, 8)}`;
 }
 
 @Injectable()
@@ -83,7 +83,7 @@ export class DeployProjectUseCase {
 
     const managedDatabase = await this.managedDatabaseRepository.findByProjectId(project.id);
     // Bancos "custom" são externos (o usuário cola a própria connection string),
-    // então o ForgeDesk nunca sobe container pra eles, só injeta a env var.
+    // então o Korrelo nunca sobe container pra eles, só injeta a env var.
     const managedContainerDatabase =
       managedDatabase && managedDatabase.type !== "custom" ? managedDatabase : null;
 

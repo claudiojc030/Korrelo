@@ -1,5 +1,5 @@
 {
-  "name": "@forgedesk/agent",
+  "name": "@korrelo/agent",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -8,7 +8,7 @@
     "dev": "ts-node src/index.ts"
   },
   "dependencies": {
-    "@forgedesk/shared-types": "0.1.0"
+    "@korrelo/shared-types": "0.1.0"
   },
   "devDependencies": {
     "typescript": "^5.5.4",

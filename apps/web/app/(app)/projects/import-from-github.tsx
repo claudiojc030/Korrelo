@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Github, Lock, Loader2 } from "lucide-react";
-import type { GithubRepositorySummary } from "@forgedesk/shared-types";
+import type { GithubRepositorySummary } from "@korrelo/shared-types";
 import { apiFetch } from "../../../lib/api-client";
 
 export function ImportFromGithub() {

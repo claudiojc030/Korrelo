@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { DetectedStack } from "@forgedesk/shared-types";
+import type { DetectedStack } from "@korrelo/shared-types";
 import type { DockerfileGenerator, GeneratedDockerfile } from "../domain/dockerfile-generator";
 import { COMPOSE_FILENAME, ENV_FILENAME } from "../domain/container-orchestrator";
 

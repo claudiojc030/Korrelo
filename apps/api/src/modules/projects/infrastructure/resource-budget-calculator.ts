@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import * as os from "node:os";
-import { CONTAINER_MEMORY_LIMIT_MB, classifyResourceTier } from "@forgedesk/shared-types";
+import { CONTAINER_MEMORY_LIMIT_MB, classifyResourceTier } from "@korrelo/shared-types";
 
 @Injectable()
 export class ResourceBudgetCalculator {

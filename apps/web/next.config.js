@@ -4,7 +4,7 @@ const nextConfig = {
   // Empacota só as dependências realmente usadas em .next/standalone. Roda
   // com um `node server.js` bem mais leve em RAM e disco do que carregar
   // node_modules inteiro via `next start`. Importante numa VPS pequena onde
-  // o ForgeDesk não pode competir por recursos com os projetos hospedados.
+  // o Korrelo não pode competir por recursos com os projetos hospedados.
   output: "standalone",
 };
 

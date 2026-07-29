@@ -2,7 +2,7 @@ import { Injectable } from "@nestjs/common";
 import * as os from "node:os";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import { classifyResourceTier, type ContainerSummary, type SystemMetrics } from "@forgedesk/shared-types";
+import { classifyResourceTier, type ContainerSummary, type SystemMetrics } from "@korrelo/shared-types";
 import type { SystemMetricsCollector } from "../domain/system-metrics-collector";
 
 const execFile = promisify(execFileCallback);

@@ -15,7 +15,7 @@ import request from "supertest";
 // TODAS essas bordas são substituídas por fakes via overrideProvider(), então
 // nenhum container, repositório git ou configuração de nginx de verdade é
 // tocado. O workspace de arquivos (Dockerfile, compose, .env) usa uma pasta
-// temporária isolada (FORGEDESK_WORKSPACE_DIR), então essa parte É testada
+// temporária isolada (KORRELO_WORKSPACE_DIR), então essa parte É testada
 // de verdade (é só leitura/escrita em disco, sem risco).
 jest.setTimeout(30_000);
 
@@ -23,7 +23,7 @@ const PRISMA_DIR = path.join(__dirname, "../../../../prisma");
 const dbFileName = `.e2e-projects-${crypto.randomUUID()}.db`;
 const dbPath = path.join(PRISMA_DIR, dbFileName);
 const databaseUrl = `file:./${dbFileName}`;
-const tempWorkspaceDir = path.join(os.tmpdir(), `forgedesk-e2e-workspace-${crypto.randomUUID()}`);
+const tempWorkspaceDir = path.join(os.tmpdir(), `korrelo-e2e-workspace-${crypto.randomUUID()}`);
 
 interface DeployConfigLike {
   projectPath: string;
@@ -124,7 +124,7 @@ describe("Projects flow (e2e)", () => {
     process.env.JWT_SECRET = "e2e-test-secret-not-for-production-use";
     process.env.JWT_EXPIRES_IN = "15m";
     process.env.ENV_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
-    process.env.FORGEDESK_WORKSPACE_DIR = tempWorkspaceDir;
+    process.env.KORRELO_WORKSPACE_DIR = tempWorkspaceDir;
     fs.mkdirSync(tempWorkspaceDir, { recursive: true });
 
     const prismaCli = require.resolve("prisma/build/index.js");
@@ -134,7 +134,7 @@ describe("Projects flow (e2e)", () => {
       stdio: "pipe",
     });
 
-    // require() dinâmico DEPOIS de setar FORGEDESK_WORKSPACE_DIR: o caminho do
+    // require() dinâmico DEPOIS de setar KORRELO_WORKSPACE_DIR: o caminho do
     // workspace (infrastructure/workspace-paths.ts) é uma constante de módulo
     // resolvida na primeira vez que o arquivo é importado. Um `import`
     // estático no topo deste arquivo rodaria antes do beforeAll (imports são
@@ -177,7 +177,7 @@ describe("Projects flow (e2e)", () => {
     const register = await request(app.getHttpServer())
       .post("/auth/register")
       .send({ email: "admin@e2e-projects.local", password: "senha-super-forte-123" });
-    authCookie = extractCookie(register.headers["set-cookie"], "forgedesk_token")!;
+    authCookie = extractCookie(register.headers["set-cookie"], "korrelo_token")!;
   });
 
   afterAll(async () => {
@@ -188,7 +188,7 @@ describe("Projects flow (e2e)", () => {
   });
 
   function authCookieHeader(): string {
-    return `forgedesk_token=${authCookie}`;
+    return `korrelo_token=${authCookie}`;
   }
 
   describe("CRUD básico de projetos", () => {
@@ -404,8 +404,8 @@ describe("Projects flow (e2e)", () => {
 
       const projectWorkspace = path.join(tempWorkspaceDir, projectId);
       expect(fs.existsSync(path.join(projectWorkspace, "Dockerfile"))).toBe(true);
-      expect(fs.existsSync(path.join(projectWorkspace, "docker-compose.forgedesk.yml"))).toBe(true);
-      expect(fs.existsSync(path.join(projectWorkspace, ".env.forgedesk"))).toBe(true);
+      expect(fs.existsSync(path.join(projectWorkspace, "docker-compose.korrelo.yml"))).toBe(true);
+      expect(fs.existsSync(path.join(projectWorkspace, ".env.korrelo"))).toBe(true);
 
       const deploys = await request(app.getHttpServer())
         .get(`/projects/${projectId}/deploys`)

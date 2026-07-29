@@ -32,14 +32,14 @@ describe("RegisterFirstUserUseCase", () => {
   it("cria o primeiro usuário quando não existe nenhum ainda", async () => {
     const { useCase, repository, passwordHasher } = buildUseCase(0);
 
-    const result = await useCase.execute({ email: "admin@forgedesk.local", password: "senha-forte" });
+    const result = await useCase.execute({ email: "admin@korrelo.local", password: "senha-forte" });
 
     expect(passwordHasher.hash).toHaveBeenCalledWith("senha-forte");
     expect(repository.save).toHaveBeenCalled();
     expect(result).toEqual({
       accessToken: "signed-jwt-token",
       refreshToken: "raw-refresh-token",
-      email: "admin@forgedesk.local",
+      email: "admin@korrelo.local",
     });
   });
 
@@ -47,7 +47,7 @@ describe("RegisterFirstUserUseCase", () => {
     const { useCase, repository } = buildUseCase(1);
 
     await expect(
-      useCase.execute({ email: "outro@forgedesk.local", password: "qualquer" }),
+      useCase.execute({ email: "outro@korrelo.local", password: "qualquer" }),
     ).rejects.toBeInstanceOf(ConflictException);
     expect(repository.save).not.toHaveBeenCalled();
   });

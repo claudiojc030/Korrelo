@@ -11,7 +11,7 @@ interface UpdateStatus {
   updateAvailable: boolean;
 }
 
-const UPDATE_COMMAND = `cd forgedesk && git pull && npm install && \\
+const UPDATE_COMMAND = `cd korrelo && git pull && npm install && \\
 npm run build --workspace=packages/shared-types && \\
 npm run build --workspace=apps/api && \\
 npm run build --workspace=apps/web && \\

@@ -67,7 +67,7 @@ export default function LoginPage() {
             &gt;_
           </div>
           <div>
-            <h1 className="text-lg font-semibold text-foreground">ForgeDesk</h1>
+            <h1 className="text-lg font-semibold text-foreground">Korrelo</h1>
             <p className="mt-1 text-[13.5px] text-muted-foreground">
               {mode === "loading"
                 ? "Carregando..."

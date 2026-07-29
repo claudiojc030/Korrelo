@@ -1,6 +1,6 @@
 export const CONTAINER_ORCHESTRATOR = Symbol("CONTAINER_ORCHESTRATOR");
-export const COMPOSE_FILENAME = "docker-compose.forgedesk.yml";
-export const ENV_FILENAME = ".env.forgedesk";
+export const COMPOSE_FILENAME = "docker-compose.korrelo.yml";
+export const ENV_FILENAME = ".env.korrelo";
 
 export interface DatabaseServiceConfig {
   type: "postgres" | "redis" | "mongodb";

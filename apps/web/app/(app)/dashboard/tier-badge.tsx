@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { ResourceTier } from "@forgedesk/shared-types";
+import type { ResourceTier } from "@korrelo/shared-types";
 
 const TIER_ROWS: { tier: ResourceTier; label: string; ram: string; containerLimit: string }[] = [
   { tier: "nano", label: "Nano", ram: "até 1 GB", containerLimit: "256 MB" },

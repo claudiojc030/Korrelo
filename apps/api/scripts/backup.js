@@ -7,7 +7,7 @@
 // Uso: node scripts/backup.js   (roda a partir de apps/api, ou via scripts/backup.sh)
 //
 // Env opcionais:
-//   BACKUP_DIR                (padrão ~/forgedesk-backups)
+//   BACKUP_DIR                (padrão ~/korrelo-backups)
 //   BACKUP_RETENTION_DAYS     (padrão 7)
 //   BACKUP_ALERT_NTFY_TOPIC   se definido, manda um push via ntfy.sh quando o backup falha
 //   BACKUP_RCLONE_REMOTE      se definido (ex: "gdrive"), copia o backup do dia pra esse
@@ -25,7 +25,7 @@ const path = require("node:path");
 const run = promisify(execFile);
 const MAX_BUFFER = 500 * 1024 * 1024;
 
-const BACKUP_ROOT = process.env.BACKUP_DIR || path.join(os.homedir(), "forgedesk-backups");
+const BACKUP_ROOT = process.env.BACKUP_DIR || path.join(os.homedir(), "korrelo-backups");
 const RETENTION_DAYS = Number(process.env.BACKUP_RETENTION_DAYS || 7);
 
 async function backupCoreDatabase(destDir) {
@@ -140,11 +140,11 @@ async function syncOffsite(destDir, stamp) {
   if (!remote) return;
 
   try {
-    await run("rclone", ["copy", destDir, `${remote}:forgedesk-backups/${stamp}`], {
+    await run("rclone", ["copy", destDir, `${remote}:korrelo-backups/${stamp}`], {
       maxBuffer: MAX_BUFFER,
       timeout: 10 * 60 * 1000,
     });
-    console.log(`Enviado pra ${remote}:forgedesk-backups/${stamp}`);
+    console.log(`Enviado pra ${remote}:korrelo-backups/${stamp}`);
   } catch (error) {
     throw new Error(`Falha ao enviar backup pro remote "${remote}": ${error.message}`);
   }
@@ -157,7 +157,7 @@ async function notifyFailure(message) {
   try {
     await fetch(`https://ntfy.sh/${topic}`, {
       method: "POST",
-      headers: { Title: "ForgeDesk: backup falhou" },
+      headers: { Title: "Korrelo: backup falhou" },
       body: message.slice(0, 1000),
     });
   } catch (error) {

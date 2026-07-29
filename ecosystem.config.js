@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: "forgedesk-api",
+      name: "korrelo-api",
       cwd: "./apps/api",
       script: "dist/main.js",
       env: { NODE_ENV: "production" },
@@ -14,7 +14,7 @@ module.exports = {
       // "next start" (que roda em cima do node_modules inteiro do monorepo).
       // scripts/setup-vps.sh copia .next/static e public/ pra dentro dessa
       // pasta depois do build (o standalone não inclui isso sozinho).
-      name: "forgedesk-web",
+      name: "korrelo-web",
       cwd: "./apps/web/.next/standalone/apps/web",
       script: "server.js",
       env: { NODE_ENV: "production", PORT: 3000 },

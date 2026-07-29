@@ -176,7 +176,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
             </div>
             <p className="mt-1 text-[12px] text-muted-foreground">
               Já usa outra coisa (MongoDB Atlas, Supabase, um Postgres seu, etc.)? Cole a connection string
-              aqui. O ForgeDesk não sobe container nenhum, só injeta como variável de ambiente.
+              aqui. O Korrelo não sobe container nenhum, só injeta como variável de ambiente.
             </p>
 
             {!customOpen ? (
@@ -294,7 +294,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
       <p className="mt-3 text-[12.5px] text-muted-foreground">
         {isCustom ? (
           <>
-            Banco externo. O ForgeDesk não sobe container pra ele, só injeta{" "}
+            Banco externo. O Korrelo não sobe container pra ele, só injeta{" "}
             <span className="font-mono text-foreground">{db.envVarKey}</span> como variável de ambiente.
           </>
         ) : (

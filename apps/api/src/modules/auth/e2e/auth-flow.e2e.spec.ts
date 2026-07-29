@@ -107,8 +107,8 @@ describe("Auth flow (e2e)", () => {
     expect(res.body.accessToken).toEqual(expect.any(String));
     expect(res.body.refreshToken).toBeUndefined();
 
-    const accessCookie = extractCookie(res.headers["set-cookie"], "forgedesk_token");
-    const refreshCookie = extractCookie(res.headers["set-cookie"], "forgedesk_refresh_token");
+    const accessCookie = extractCookie(res.headers["set-cookie"], "korrelo_token");
+    const refreshCookie = extractCookie(res.headers["set-cookie"], "korrelo_refresh_token");
     expect(accessCookie).toBeTruthy();
     expect(refreshCookie).toBeTruthy();
   });
@@ -141,8 +141,8 @@ describe("Auth flow (e2e)", () => {
       expect(res.status).toBe(201);
       expect(res.body.requiresTwoFactor).toBe(false);
 
-      accessCookie = extractCookie(res.headers["set-cookie"], "forgedesk_token")!;
-      refreshCookie = extractCookie(res.headers["set-cookie"], "forgedesk_refresh_token")!;
+      accessCookie = extractCookie(res.headers["set-cookie"], "korrelo_token")!;
+      refreshCookie = extractCookie(res.headers["set-cookie"], "korrelo_refresh_token")!;
       expect(accessCookie).toBeTruthy();
       expect(refreshCookie).toBeTruthy();
     });
@@ -150,7 +150,7 @@ describe("Auth flow (e2e)", () => {
     it("/auth/me funciona com o access token", async () => {
       const res = await request(app.getHttpServer())
         .get("/auth/me")
-        .set("Cookie", [`forgedesk_token=${accessCookie}`]);
+        .set("Cookie", [`korrelo_token=${accessCookie}`]);
       expect(res.status).toBe(200);
       expect(res.body.email).toBe(email);
     });
@@ -160,11 +160,11 @@ describe("Auth flow (e2e)", () => {
 
       const res = await request(app.getHttpServer())
         .post("/auth/refresh")
-        .set("Cookie", [`forgedesk_refresh_token=${oldRefreshCookie}`]);
+        .set("Cookie", [`korrelo_refresh_token=${oldRefreshCookie}`]);
 
       expect(res.status).toBe(201);
-      const newAccessCookie = extractCookie(res.headers["set-cookie"], "forgedesk_token");
-      const newRefreshCookie = extractCookie(res.headers["set-cookie"], "forgedesk_refresh_token");
+      const newAccessCookie = extractCookie(res.headers["set-cookie"], "korrelo_token");
+      const newRefreshCookie = extractCookie(res.headers["set-cookie"], "korrelo_refresh_token");
       expect(newAccessCookie).toBeTruthy();
       expect(newRefreshCookie).toBeTruthy();
       expect(newRefreshCookie).not.toBe(oldRefreshCookie);
@@ -172,7 +172,7 @@ describe("Auth flow (e2e)", () => {
       // reuso do refresh token antigo (já rotacionado) deve ser rejeitado
       const reuse = await request(app.getHttpServer())
         .post("/auth/refresh")
-        .set("Cookie", [`forgedesk_refresh_token=${oldRefreshCookie}`]);
+        .set("Cookie", [`korrelo_refresh_token=${oldRefreshCookie}`]);
       expect(reuse.status).toBe(401);
 
       refreshCookie = newRefreshCookie!;
@@ -182,12 +182,12 @@ describe("Auth flow (e2e)", () => {
     it("logout revoga o refresh token no servidor", async () => {
       const logout = await request(app.getHttpServer())
         .post("/auth/logout")
-        .set("Cookie", [`forgedesk_refresh_token=${refreshCookie}`]);
+        .set("Cookie", [`korrelo_refresh_token=${refreshCookie}`]);
       expect(logout.status).toBe(201);
 
       const refreshAfterLogout = await request(app.getHttpServer())
         .post("/auth/refresh")
-        .set("Cookie", [`forgedesk_refresh_token=${refreshCookie}`]);
+        .set("Cookie", [`korrelo_refresh_token=${refreshCookie}`]);
       expect(refreshAfterLogout.status).toBe(401);
     });
   });
@@ -199,20 +199,20 @@ describe("Auth flow (e2e)", () => {
 
     beforeAll(async () => {
       const login = await request(app.getHttpServer()).post("/auth/login").send({ email, password });
-      accessCookie = extractCookie(login.headers["set-cookie"], "forgedesk_token")!;
+      accessCookie = extractCookie(login.headers["set-cookie"], "korrelo_token")!;
     });
 
     it("status inicial é desativado", async () => {
       const res = await request(app.getHttpServer())
         .get("/auth/2fa/status")
-        .set("Cookie", [`forgedesk_token=${accessCookie}`]);
+        .set("Cookie", [`korrelo_token=${accessCookie}`]);
       expect(res.body).toEqual({ enabled: false });
     });
 
     it("setup retorna secret + qrCodeDataUrl", async () => {
       const res = await request(app.getHttpServer())
         .post("/auth/2fa/setup")
-        .set("Cookie", [`forgedesk_token=${accessCookie}`]);
+        .set("Cookie", [`korrelo_token=${accessCookie}`]);
       expect(res.status).toBe(201);
       expect(res.body.secret).toEqual(expect.any(String));
       expect(res.body.qrCodeDataUrl).toMatch(/^data:image\/png;base64,/);
@@ -223,7 +223,7 @@ describe("Auth flow (e2e)", () => {
       const code = generateTotp(totpSecret);
       const res = await request(app.getHttpServer())
         .post("/auth/2fa/enable")
-        .set("Cookie", [`forgedesk_token=${accessCookie}`])
+        .set("Cookie", [`korrelo_token=${accessCookie}`])
         .send({ code });
 
       expect(res.status).toBe(201);
@@ -247,7 +247,7 @@ describe("Auth flow (e2e)", () => {
         .send({ email, password, twoFactorCode: code });
       expect(res.status).toBe(201);
       expect(res.body.requiresTwoFactor).toBe(false);
-      expect(extractCookie(res.headers["set-cookie"], "forgedesk_token")).toBeTruthy();
+      expect(extractCookie(res.headers["set-cookie"], "korrelo_token")).toBeTruthy();
     });
 
     it("login com um backup code funciona (uso único)", async () => {
@@ -270,13 +270,13 @@ describe("Auth flow (e2e)", () => {
     it("desativa o 2FA com a senha", async () => {
       const res = await request(app.getHttpServer())
         .post("/auth/2fa/disable")
-        .set("Cookie", [`forgedesk_token=${accessCookie}`])
+        .set("Cookie", [`korrelo_token=${accessCookie}`])
         .send({ password });
       expect(res.status).toBe(201);
 
       const status = await request(app.getHttpServer())
         .get("/auth/2fa/status")
-        .set("Cookie", [`forgedesk_token=${accessCookie}`]);
+        .set("Cookie", [`korrelo_token=${accessCookie}`]);
       expect(status.body).toEqual({ enabled: false });
     });
   });
@@ -291,8 +291,8 @@ describe("Auth flow (e2e)", () => {
         .post("/auth/login")
         .set("User-Agent", "chrome-e2e-test")
         .send({ email, password });
-      userACookie = extractCookie(login1.headers["set-cookie"], "forgedesk_token")!;
-      userARefreshCookie = extractCookie(login1.headers["set-cookie"], "forgedesk_refresh_token")!;
+      userACookie = extractCookie(login1.headers["set-cookie"], "korrelo_token")!;
+      userARefreshCookie = extractCookie(login1.headers["set-cookie"], "korrelo_refresh_token")!;
 
       await request(app.getHttpServer())
         .post("/auth/login")
@@ -312,13 +312,13 @@ describe("Auth flow (e2e)", () => {
       const login2 = await request(app.getHttpServer())
         .post("/auth/login")
         .send({ email: "outro-usuario@e2e-test.local", password: "outra-senha-123" });
-      otherUserCookie = extractCookie(login2.headers["set-cookie"], "forgedesk_token")!;
+      otherUserCookie = extractCookie(login2.headers["set-cookie"], "korrelo_token")!;
     });
 
     it("lista as sessões do usuário A (incluindo chrome e safari), marcando a atual", async () => {
       const res = await request(app.getHttpServer())
         .get("/auth/sessions")
-        .set("Cookie", [`forgedesk_token=${userACookie}`, `forgedesk_refresh_token=${userARefreshCookie}`]);
+        .set("Cookie", [`korrelo_token=${userACookie}`, `korrelo_refresh_token=${userARefreshCookie}`]);
 
       expect(res.status).toBe(200);
       // O mesmo usuário já acumulou sessões de testes anteriores neste arquivo
@@ -336,37 +336,37 @@ describe("Auth flow (e2e)", () => {
     it("usuário A não consegue revogar sessão do usuário outro (403)", async () => {
       const otherSessions = await request(app.getHttpServer())
         .get("/auth/sessions")
-        .set("Cookie", [`forgedesk_token=${otherUserCookie}`]);
+        .set("Cookie", [`korrelo_token=${otherUserCookie}`]);
       const otherSessionId = otherSessions.body[0].id;
 
       const res = await request(app.getHttpServer())
         .delete(`/auth/sessions/${otherSessionId}`)
-        .set("Cookie", [`forgedesk_token=${userACookie}`]);
+        .set("Cookie", [`korrelo_token=${userACookie}`]);
       expect(res.status).toBe(403);
     });
 
     it("revogar uma sessão inexistente dá 404", async () => {
       const res = await request(app.getHttpServer())
         .delete(`/auth/sessions/00000000-0000-0000-0000-000000000000`)
-        .set("Cookie", [`forgedesk_token=${userACookie}`]);
+        .set("Cookie", [`korrelo_token=${userACookie}`]);
       expect(res.status).toBe(404);
     });
 
     it("usuário A revoga a sessão do safari e ela some da lista", async () => {
       const before = await request(app.getHttpServer())
         .get("/auth/sessions")
-        .set("Cookie", [`forgedesk_token=${userACookie}`]);
+        .set("Cookie", [`korrelo_token=${userACookie}`]);
       const safariSession = before.body.find((s: { userAgent: string }) => s.userAgent === "safari-e2e-test");
       expect(safariSession).toBeTruthy();
 
       const del = await request(app.getHttpServer())
         .delete(`/auth/sessions/${safariSession.id}`)
-        .set("Cookie", [`forgedesk_token=${userACookie}`]);
+        .set("Cookie", [`korrelo_token=${userACookie}`]);
       expect(del.status).toBe(200);
 
       const after = await request(app.getHttpServer())
         .get("/auth/sessions")
-        .set("Cookie", [`forgedesk_token=${userACookie}`]);
+        .set("Cookie", [`korrelo_token=${userACookie}`]);
       expect(after.body.find((s: { userAgent: string }) => s.userAgent === "safari-e2e-test")).toBeUndefined();
     });
   });

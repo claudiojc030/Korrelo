@@ -1,4 +1,4 @@
-export const THEME_STORAGE_KEY = "forgedesk-theme";
+export const THEME_STORAGE_KEY = "korrelo-theme";
 
 export type Theme = "light" | "dark";
 

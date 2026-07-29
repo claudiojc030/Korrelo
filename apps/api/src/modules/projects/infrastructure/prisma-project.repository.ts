@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { ProjectStatus } from "@forgedesk/shared-types";
+import type { ProjectStatus } from "@korrelo/shared-types";
 import { PrismaService } from "../../../infrastructure/prisma/prisma.service";
 import { Project, type DomainSslStatus } from "../domain/project.entity";
 import type { ProjectRepository } from "../domain/project.repository";

@@ -11,7 +11,7 @@ function getAllowedOrigins(): string[] {
   if (configured) {
     return configured.split(",").map((origin) => origin.trim());
   }
-  const webUrl = process.env.FORGEDESK_WEB_URL ?? "http://localhost:3000";
+  const webUrl = process.env.KORRELO_WEB_URL ?? "http://localhost:3000";
   return [webUrl];
 }
 
@@ -44,7 +44,7 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3001;
   await app.listen(port);
-  console.log(`[forgedesk-api] listening on port ${port}`);
+  console.log(`[korrelo-api] listening on port ${port}`);
 }
 
 bootstrap();

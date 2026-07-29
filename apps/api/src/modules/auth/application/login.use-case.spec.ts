@@ -11,7 +11,7 @@ function buildUseCase(overrides?: {
   passwordMatches?: boolean;
   twoFactorValid?: boolean;
 }) {
-  const user = overrides?.user !== undefined ? overrides.user : User.create("admin@forgedesk.local", "hashed");
+  const user = overrides?.user !== undefined ? overrides.user : User.create("admin@korrelo.local", "hashed");
 
   const repository: UserRepository = {
     count: jest.fn(),
@@ -49,22 +49,22 @@ describe("LoginUseCase", () => {
   it("retorna um access token quando as credenciais são válidas", async () => {
     const { useCase, tokenPairIssuer } = buildUseCase({ passwordMatches: true });
 
-    const result = await useCase.execute({ email: "admin@forgedesk.local", password: "correta" });
+    const result = await useCase.execute({ email: "admin@korrelo.local", password: "correta" });
 
     expect(result).toEqual({
       requiresTwoFactor: false,
       accessToken: "signed-jwt-token",
       refreshToken: "raw-refresh-token",
-      email: "admin@forgedesk.local",
+      email: "admin@korrelo.local",
     });
-    expect(tokenPairIssuer.issue).toHaveBeenCalledWith(expect.any(String), "admin@forgedesk.local", null, null);
+    expect(tokenPairIssuer.issue).toHaveBeenCalledWith(expect.any(String), "admin@korrelo.local", null, null);
   });
 
   it("rejeita quando o usuário não existe", async () => {
     const { useCase } = buildUseCase({ user: null });
 
     await expect(
-      useCase.execute({ email: "inexistente@forgedesk.local", password: "qualquer" }),
+      useCase.execute({ email: "inexistente@korrelo.local", password: "qualquer" }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
@@ -72,38 +72,38 @@ describe("LoginUseCase", () => {
     const { useCase } = buildUseCase({ passwordMatches: false });
 
     await expect(
-      useCase.execute({ email: "admin@forgedesk.local", password: "errada" }),
+      useCase.execute({ email: "admin@korrelo.local", password: "errada" }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   it("pede o segundo fator quando 2FA está ativado e nenhum código foi enviado", async () => {
-    const userWith2fa = User.create("admin@forgedesk.local", "hashed").withTwoFactorEnabled(["hash1"]);
+    const userWith2fa = User.create("admin@korrelo.local", "hashed").withTwoFactorEnabled(["hash1"]);
     const { useCase } = buildUseCase({ user: userWith2fa });
 
-    const result = await useCase.execute({ email: "admin@forgedesk.local", password: "correta" });
+    const result = await useCase.execute({ email: "admin@korrelo.local", password: "correta" });
 
     expect(result).toEqual({ requiresTwoFactor: true });
   });
 
   it("aceita login com 2FA quando o código TOTP é válido", async () => {
-    const userWith2fa = User.create("admin@forgedesk.local", "hashed").withTwoFactorEnabled(["hash1"]);
+    const userWith2fa = User.create("admin@korrelo.local", "hashed").withTwoFactorEnabled(["hash1"]);
     const { useCase } = buildUseCase({ user: userWith2fa, twoFactorValid: true });
 
-    const result = await useCase.execute({ email: "admin@forgedesk.local", password: "correta", twoFactorCode: "123456" });
+    const result = await useCase.execute({ email: "admin@korrelo.local", password: "correta", twoFactorCode: "123456" });
 
     expect(result.accessToken).toBe("signed-jwt-token");
     expect(result.requiresTwoFactor).toBe(false);
   });
 
   it("rejeita login com 2FA quando o código é inválido e não bate com nenhum backup code", async () => {
-    const userWith2fa = User.create("admin@forgedesk.local", "hashed").withTwoFactorEnabled(["hash1"]);
+    const userWith2fa = User.create("admin@korrelo.local", "hashed").withTwoFactorEnabled(["hash1"]);
     const { useCase, passwordHasher } = buildUseCase({ user: userWith2fa, twoFactorValid: false });
     (passwordHasher.compare as jest.Mock).mockImplementation((plainText: string, hash: string) =>
       Promise.resolve(plainText === "correta" && hash === "hashed"),
     );
 
     await expect(
-      useCase.execute({ email: "admin@forgedesk.local", password: "correta", twoFactorCode: "000000" }),
+      useCase.execute({ email: "admin@korrelo.local", password: "correta", twoFactorCode: "000000" }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

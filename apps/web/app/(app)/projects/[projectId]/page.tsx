@@ -1,5 +1,5 @@
 import { ExternalLink, GitBranch, Cpu, MemoryStick, HardDrive, History, Webhook, MousePointerClick } from "lucide-react";
-import { CONTAINER_MEMORY_LIMIT_MB, type DetectedStack, type Project, type SystemMetrics } from "@forgedesk/shared-types";
+import { CONTAINER_MEMORY_LIMIT_MB, type DetectedStack, type Project, type SystemMetrics } from "@korrelo/shared-types";
 import { authHeaderServer } from "../../../../lib/auth-cookie-server";
 import { DomainCard } from "./domain-card";
 

@@ -33,7 +33,7 @@ export class GithubController {
   @Get("callback")
   async callback(@Query("installation_id") installationId: string, @Res() res: Response) {
     await this.completeInstallation.execute(Number(installationId));
-    const webUrl = process.env.FORGEDESK_WEB_URL ?? "http://localhost:3000";
+    const webUrl = process.env.KORRELO_WEB_URL ?? "http://localhost:3000";
     res.redirect(`${webUrl}/?github=connected`);
   }
 }

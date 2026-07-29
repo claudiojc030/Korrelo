@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "../lib/api-client";
 
-export const COMMAND_PALETTE_OPEN_EVENT = "forgedesk:open-command-palette";
+export const COMMAND_PALETTE_OPEN_EVENT = "korrelo:open-command-palette";
 
 interface PaletteItem {
   id: string;

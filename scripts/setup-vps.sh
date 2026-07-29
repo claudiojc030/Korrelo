@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Bootstrap de uma VPS Ubuntu limpa para rodar o ForgeDesk (Core via PM2 nativo,
+# Bootstrap de uma VPS Ubuntu limpa para rodar o Korrelo (Core via PM2 nativo,
 # projetos gerenciados via Docker). Rode a partir da raiz do repo já clonado na VPS:
-#   git clone <seu-fork-ou-repo> forgedesk && cd forgedesk && bash scripts/setup-vps.sh
+#   git clone <seu-fork-ou-repo> korrelo && cd korrelo && bash scripts/setup-vps.sh
 set -euo pipefail
 
 log() { echo -e "\n\033[1;32m==> $1\033[0m"; }
@@ -56,10 +56,10 @@ else
   echo "PM2 já instalado."
 fi
 
-# --- nginx + certbot (sempre, mesmo sem domínio pro ForgeDesk em si) --------
+# --- nginx + certbot (sempre, mesmo sem domínio pro Korrelo em si) --------
 # Isso é o motor de reverse-proxy + TLS que os PROJETOS implantados pelo
-# ForgeDesk vão usar quando você anexar um domínio a cada um deles (aba
-# Resumo → Domínio personalizado). O ForgeDesk continua acessível pelo IP
+# Korrelo vão usar quando você anexar um domínio a cada um deles (aba
+# Resumo → Domínio personalizado). O Korrelo continua acessível pelo IP
 # puro nas portas 3000/3001 independente disso.
 log "Instalando nginx + certbot"
 sudo apt-get install -y nginx certbot python3-certbot-nginx
@@ -68,23 +68,23 @@ log "Instalando sqlite3 (usado no backup do banco Core)"
 sudo apt-get install -y sqlite3
 
 log "Preparando diretório de sites por projeto"
-FORGEDESK_SITES_DIR=/etc/nginx/forgedesk-sites
-sudo mkdir -p "$FORGEDESK_SITES_DIR"
-sudo chown "$USER":"$USER" "$FORGEDESK_SITES_DIR"
-if ! grep -q "forgedesk-sites" /etc/nginx/nginx.conf; then
-  sudo sed -i "/include \/etc\/nginx\/conf.d\/\*.conf;/a\\	include ${FORGEDESK_SITES_DIR}/*.conf;" /etc/nginx/nginx.conf
+KORRELO_SITES_DIR=/etc/nginx/korrelo-sites
+sudo mkdir -p "$KORRELO_SITES_DIR"
+sudo chown "$USER":"$USER" "$KORRELO_SITES_DIR"
+if ! grep -q "korrelo-sites" /etc/nginx/nginx.conf; then
+  sudo sed -i "/include \/etc\/nginx\/conf.d\/\*.conf;/a\\	include ${KORRELO_SITES_DIR}/*.conf;" /etc/nginx/nginx.conf
   sudo nginx -t
   sudo systemctl reload nginx
-  echo "nginx.conf atualizado pra incluir ${FORGEDESK_SITES_DIR}/*.conf"
+  echo "nginx.conf atualizado pra incluir ${KORRELO_SITES_DIR}/*.conf"
 else
-  echo "nginx.conf já inclui forgedesk-sites, pulando."
+  echo "nginx.conf já inclui korrelo-sites, pulando."
 fi
 
 log "Configurando sudo restrito (nginx, certbot, enable/disable de serviço)"
 # O Core roda como usuário sem privilégio de propósito. Essas linhas são a
 # ÚNICA elevação que ele ganha: recarregar o nginx, rodar o certbot (domínio
 # de projeto), e ligar/desligar serviços do SO (aba "Serviços do sistema" no
-# ForgeDesk). O certbot precisa de argumentos livres (*) porque cada emissão
+# Korrelo). O certbot precisa de argumentos livres (*) porque cada emissão
 # passa domínio/e-mail diferentes; "enable/disable --now *" também aceita
 # qualquer nome de serviço no sudoers. Quem realmente restringe QUAL serviço
 # pode ser tocado é a lista fechada em
@@ -95,8 +95,8 @@ CERTBOT_BIN=$(command -v certbot)
 SUDOERS_TMP=$(mktemp)
 echo "$USER ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} reload nginx, ${CERTBOT_BIN} *, ${SYSTEMCTL_BIN} enable --now *, ${SYSTEMCTL_BIN} disable --now *" > "$SUDOERS_TMP"
 if sudo visudo -c -f "$SUDOERS_TMP" > /dev/null 2>&1; then
-  sudo install -m 440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/forgedesk
-  echo "Regra criada em /etc/sudoers.d/forgedesk."
+  sudo install -m 440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/korrelo
+  echo "Regra criada em /etc/sudoers.d/korrelo."
 else
   echo "Regra de sudoers gerada é inválida, abortando sem tocar em /etc/sudoers.d." >&2
   rm -f "$SUDOERS_TMP"
@@ -111,15 +111,15 @@ log "Buildando pacotes compartilhados e a API"
 npm run build --workspace=packages/shared-types
 npm run build --workspace=apps/api
 
-# --- Domínio do ForgeDesk em si (opcional) ---------------------------------
-# Isso é só pra você acessar o painel do ForgeDesk por um domínio em vez do
+# --- Domínio do Korrelo em si (opcional) ---------------------------------
+# Isso é só pra você acessar o painel do Korrelo por um domínio em vez do
 # IP puro. Totalmente opcional, o resto do script funciona sem isso.
 DOMAIN=""
 LETSENCRYPT_EMAIL=""
 PUBLIC_IP=$(curl -s ifconfig.me || echo "SEU_IP")
 
-log "Domínio do próprio ForgeDesk (opcional)"
-read -rp "Domínio pra acessar o painel do ForgeDesk? (deixe em branco pra usar só http://${PUBLIC_IP}:3000): " DOMAIN
+log "Domínio do próprio Korrelo (opcional)"
+read -rp "Domínio pra acessar o painel do Korrelo? (deixe em branco pra usar só http://${PUBLIC_IP}:3000): " DOMAIN
 if [ -n "$DOMAIN" ]; then
   read -rp "E-mail pra avisos de renovação do Let's Encrypt: " LETSENCRYPT_EMAIL
   BASE_WEB_URL="https://${DOMAIN}"
@@ -136,9 +136,9 @@ if [ ! -f apps/api/.env ]; then
   ENV_ENCRYPTION_KEY=$(node -e "console.log(require('crypto').randomBytes(32).toString('hex'))")
   sed -i "s#^JWT_SECRET=.*#JWT_SECRET=${JWT_SECRET}#" apps/api/.env
   sed -i "s#^ENV_ENCRYPTION_KEY=.*#ENV_ENCRYPTION_KEY=${ENV_ENCRYPTION_KEY}#" apps/api/.env
-  sed -i "s#^FORGEDESK_WEB_URL=.*#FORGEDESK_WEB_URL=${BASE_WEB_URL}#" apps/api/.env
+  sed -i "s#^KORRELO_WEB_URL=.*#KORRELO_WEB_URL=${BASE_WEB_URL}#" apps/api/.env
   sed -i "s#^CORS_ORIGINS=.*#CORS_ORIGINS=${BASE_WEB_URL}#" apps/api/.env
-  echo "apps/api/.env criado. JWT_SECRET, ENV_ENCRYPTION_KEY, FORGEDESK_WEB_URL e CORS_ORIGINS preenchidos automaticamente."
+  echo "apps/api/.env criado. JWT_SECRET, ENV_ENCRYPTION_KEY, KORRELO_WEB_URL e CORS_ORIGINS preenchidos automaticamente."
   echo "IMPORTANTE: falta preencher GITHUB_APP_SLUG, GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY e"
   echo "GITHUB_APP_WEBHOOK_SECRET em apps/api/.env (veja as instruções de cadastro do GitHub App"
   echo "no README). O GITHUB_APP_WEBHOOK_SECRET precisa bater com o 'Webhook secret' configurado"
@@ -177,9 +177,9 @@ log "Rodando migrations do banco (produção, não-interativo)"
 
 log "Configurando firewall (ufw)"
 sudo ufw allow OpenSSH
-sudo ufw allow "Nginx Full"  # 80/443, pros domínios dos projetos e/ou do ForgeDesk
-sudo ufw allow 3000/tcp      # Web do ForgeDesk direto pelo IP
-sudo ufw allow 3001/tcp      # API do ForgeDesk direto pelo IP
+sudo ufw allow "Nginx Full"  # 80/443, pros domínios dos projetos e/ou do Korrelo
+sudo ufw allow 3000/tcp      # Web do Korrelo direto pelo IP
+sudo ufw allow 3001/tcp      # API do Korrelo direto pelo IP
 sudo ufw --force enable
 
 log "Hardening de acesso SSH"
@@ -223,7 +223,7 @@ else
   warn "Adicione sua chave pública lá e rode este script de novo (ou só essa etapa manualmente)."
 fi
 
-log "Desativando serviços de SO desnecessários pra uma VPS rodando só o ForgeDesk"
+log "Desativando serviços de SO desnecessários pra uma VPS rodando só o Korrelo"
 # Nada aqui é desinstalado (reversível, sem risco de quebrar dependência de
 # pacote), só parado e desabilitado. snapd fica de fora de propósito: mexer
 # nele tem risco de efeito colateral desproporcional ao pouco de RAM que
@@ -250,17 +250,17 @@ pm2 startup systemd -u "$USER" --hp "$HOME" | tail -1 | sudo bash || true
 log "Configurando backup automático diário"
 # Backup do banco Core + bancos gerenciados por projeto (Postgres/MongoDB
 # sempre; Redis só se marcado como persistente). Guarda os últimos 7 dias por
-# padrão em ~/forgedesk-backups (BACKUP_RETENTION_DAYS e BACKUP_DIR
+# padrão em ~/korrelo-backups (BACKUP_RETENTION_DAYS e BACKUP_DIR
 # configuráveis via apps/api/.env se quiser mudar).
 REPO_DIR="$(pwd)"
-BACKUP_LOG="$HOME/forgedesk-backups/backup.log"
+BACKUP_LOG="$HOME/korrelo-backups/backup.log"
 mkdir -p "$(dirname "$BACKUP_LOG")"
 BACKUP_CRON_LINE="0 3 * * * cd ${REPO_DIR} && bash scripts/backup.sh >> ${BACKUP_LOG} 2>&1"
 (crontab -l 2>/dev/null | grep -v "scripts/backup.sh"; echo "$BACKUP_CRON_LINE") | crontab -
 echo "Backup agendado todo dia às 3h. Rode manualmente com: bash scripts/backup.sh"
 
 log "Alerta de falha de backup (opcional)"
-read -rp "Tópico do ntfy.sh pra avisar se o backup falhar? (deixe em branco pra pular, ex: forgedesk-backup-$(whoami)-$(hostname)): " NTFY_TOPIC
+read -rp "Tópico do ntfy.sh pra avisar se o backup falhar? (deixe em branco pra pular, ex: korrelo-backup-$(whoami)-$(hostname)): " NTFY_TOPIC
 if [ -n "$NTFY_TOPIC" ]; then
   if ! grep -q "^BACKUP_ALERT_NTFY_TOPIC=" apps/api/.env 2>/dev/null; then
     echo "BACKUP_ALERT_NTFY_TOPIC=${NTFY_TOPIC}" >> apps/api/.env
@@ -289,15 +289,15 @@ if [[ "$SETUP_RCLONE" =~ ^[sS] ]]; then
   else
     sed -i "s#^BACKUP_RCLONE_REMOTE=.*#BACKUP_RCLONE_REMOTE=gdrive#" apps/api/.env
   fi
-  echo "Backups agora também são copiados pra uma pasta 'forgedesk-backups' no seu Google Drive."
+  echo "Backups agora também são copiados pra uma pasta 'korrelo-backups' no seu Google Drive."
 else
   echo "Pulado. Pra ligar depois: instale o rclone, rode 'rclone config' criando um remote"
   echo "chamado 'gdrive' (ou outro nome), e adicione BACKUP_RCLONE_REMOTE=<nome> em apps/api/.env."
 fi
 
 if [ -n "$DOMAIN" ]; then
-  log "Configurando site + TLS do ForgeDesk (${DOMAIN})"
-  NGINX_SITE=/etc/nginx/sites-available/forgedesk
+  log "Configurando site + TLS do Korrelo (${DOMAIN})"
+  NGINX_SITE=/etc/nginx/sites-available/korrelo
   sudo tee "$NGINX_SITE" > /dev/null <<NGINXCONF
 server {
   listen 80;
@@ -329,12 +329,12 @@ server {
 }
 NGINXCONF
 
-  sudo ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/forgedesk
+  sudo ln -sf "$NGINX_SITE" /etc/nginx/sites-enabled/korrelo
   [ -f /etc/nginx/sites-enabled/default ] && sudo rm /etc/nginx/sites-enabled/default
   sudo nginx -t
   sudo systemctl reload nginx
 
-  log "Emitindo certificado TLS do ForgeDesk (Let's Encrypt)"
+  log "Emitindo certificado TLS do Korrelo (Let's Encrypt)"
   # --nginx edita o server block acima pra 443 + redirect automaticamente.
   # certbot já instala o timer de renovação automática (systemd), não precisa de cron.
   sudo certbot --nginx -d "$DOMAIN" -m "$LETSENCRYPT_EMAIL" --agree-tos --redirect -n
@@ -343,7 +343,7 @@ NGINXCONF
 else
   log "Pronto! Acesse http://${PUBLIC_IP}:3000 pra criar a conta de admin."
 fi
-echo "Pra domínio de PROJETOS implantados: use a aba Resumo → Domínio personalizado, dentro do próprio ForgeDesk."
+echo "Pra domínio de PROJETOS implantados: use a aba Resumo → Domínio personalizado, dentro do próprio Korrelo."
 if [ -n "$DOMAIN" ]; then
   echo "Lembre-se de atualizar as URLs do GitHub App (Homepage/Callback) pra apontar pra ${BASE_WEB_URL}."
 fi

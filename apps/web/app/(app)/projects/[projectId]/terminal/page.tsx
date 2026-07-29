@@ -1,6 +1,6 @@
 import dynamic from "next/dynamic";
 import { SquareSlash } from "lucide-react";
-import type { Project } from "@forgedesk/shared-types";
+import type { Project } from "@korrelo/shared-types";
 import { authHeaderServer } from "../../../../../lib/auth-cookie-server";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";

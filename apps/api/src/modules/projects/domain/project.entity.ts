@@ -1,4 +1,4 @@
-import type { ProjectStatus } from "@forgedesk/shared-types";
+import type { ProjectStatus } from "@korrelo/shared-types";
 
 export type DomainSslStatus = "none" | "pending" | "active" | "failed";
 

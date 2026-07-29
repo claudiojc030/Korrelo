@@ -3,13 +3,13 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: forgedesk
-      POSTGRES_PASSWORD: forgedesk
-      POSTGRES_DB: forgedesk
+      POSTGRES_USER: korrelo
+      POSTGRES_PASSWORD: korrelo
+      POSTGRES_DB: korrelo
     ports:
       - "5432:5432"
     volumes:
-      - forgedesk_pgdata:/var/lib/postgresql/data
+      - korrelo_pgdata:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
@@ -19,4 +19,4 @@ services:
       - "6379:6379"
 
 volumes:
-  forgedesk_pgdata:
+  korrelo_pgdata:

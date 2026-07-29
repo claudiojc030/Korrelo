@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Globe, Loader2 } from "lucide-react";
-import type { DomainSslStatus } from "@forgedesk/shared-types";
+import type { DomainSslStatus } from "@korrelo/shared-types";
 import { apiFetch } from "../../../../lib/api-client";
 
 const STATUS_LABEL: Record<DomainSslStatus, { label: string; className: string }> = {

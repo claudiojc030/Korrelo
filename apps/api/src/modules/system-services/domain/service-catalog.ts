@@ -22,7 +22,7 @@ export const SERVICE_CATALOG: SystemServiceDefinition[] = [
     category: "Rede",
     description: "Anuncia e descobre dispositivos na rede local (tipo o Bonjour da Apple). Sem uso numa VPS.",
     riskLevel: "baixo",
-    riskNote: "Nenhum impacto esperado, nada no ForgeDesk ou no deploy de projetos depende disso.",
+    riskNote: "Nenhum impacto esperado, nada no Korrelo ou no deploy de projetos depende disso.",
   },
   {
     id: "cups",
@@ -67,7 +67,7 @@ export const SERVICE_CATALOG: SystemServiceDefinition[] = [
     category: "Diagnóstico",
     description: "Envia relatórios de erro do sistema pra Canonical.",
     riskLevel: "baixo",
-    riskNote: "Só reduz a telemetria enviada pra Canonical, não afeta nada do ForgeDesk.",
+    riskNote: "Só reduz a telemetria enviada pra Canonical, não afeta nada do Korrelo.",
   },
   {
     id: "apport",
@@ -76,7 +76,7 @@ export const SERVICE_CATALOG: SystemServiceDefinition[] = [
     category: "Diagnóstico",
     description: "Coleta detalhes quando um programa do sistema trava, pra gerar relatório de erro.",
     riskLevel: "baixo",
-    riskNote: "Você perde o relatório automático de crash de programas do sistema operacional (não do ForgeDesk).",
+    riskNote: "Você perde o relatório automático de crash de programas do sistema operacional (não do Korrelo).",
   },
   {
     id: "multipathd",

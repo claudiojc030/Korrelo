@@ -128,7 +128,7 @@ export default function SystemServicesPage() {
         <h1 className="text-[15px] font-semibold text-foreground">Serviços do servidor</h1>
       </div>
       <p className="mb-5 text-[12.5px] text-muted-foreground">
-        Serviços do sistema operacional que uma VPS rodando só o ForgeDesk normalmente não precisa. Lista fechada
+        Serviços do sistema operacional que uma VPS rodando só o Korrelo normalmente não precisa. Lista fechada
         e revisada, nunca dá pra mexer em serviços essenciais (SSH, Docker, nginx, etc.) por aqui.
       </p>
 

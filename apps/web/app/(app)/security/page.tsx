@@ -183,7 +183,7 @@ export default function SecurityPage() {
       </div>
       <p className="mb-5 text-[12.5px] text-muted-foreground">
         Autenticação em duas etapas (2FA) exige um código do seu app autenticador (Google Authenticator, Authy,
-        etc) além da senha pra entrar no ForgeDesk.
+        etc) além da senha pra entrar no Korrelo.
       </p>
 
       {error && <p className="mb-3 text-[13px] text-destructive">{error}</p>}

@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { FileBasedStackDetector } from "./file-based-stack-detector";
 
 async function makeFixture(files: Record<string, string>): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "forgedesk-detect-"));
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "korrelo-detect-"));
   for (const [name, content] of Object.entries(files)) {
     await fs.writeFile(path.join(dir, name), content, "utf-8");
   }

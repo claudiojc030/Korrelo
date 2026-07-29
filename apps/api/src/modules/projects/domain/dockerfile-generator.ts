@@ -1,4 +1,4 @@
-import type { DetectedStack } from "@forgedesk/shared-types";
+import type { DetectedStack } from "@korrelo/shared-types";
 
 export const DOCKERFILE_GENERATOR = Symbol("DOCKERFILE_GENERATOR");
 

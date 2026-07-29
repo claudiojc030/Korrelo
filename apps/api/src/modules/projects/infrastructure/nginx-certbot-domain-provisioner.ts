@@ -8,10 +8,10 @@ import type { DomainProvisioner } from "../domain/domain-provisioner";
 const execFile = promisify(execFileCallback);
 
 // Diretório dedicado (não /etc/nginx/sites-available inteiro). O setup-vps.sh
-// faz esse diretório pertencer ao usuário do ForgeDesk, então a API escreve os
+// faz esse diretório pertencer ao usuário do Korrelo, então a API escreve os
 // arquivos direto, sem sudo. Só reload do nginx e o certbot em si precisam de
-// sudo (regra restrita em /etc/sudoers.d/forgedesk, ver scripts/setup-vps.sh).
-const SITES_DIR = process.env.NGINX_SITES_DIR ?? "/etc/nginx/forgedesk-sites";
+// sudo (regra restrita em /etc/sudoers.d/korrelo, ver scripts/setup-vps.sh).
+const SITES_DIR = process.env.NGINX_SITES_DIR ?? "/etc/nginx/korrelo-sites";
 
 function siteFilePath(domain: string): string {
   return path.join(SITES_DIR, `${domain}.conf`);

@@ -1,5 +1,5 @@
 import { Injectable, UnprocessableEntityException } from "@nestjs/common";
-import type { DetectedStack } from "@forgedesk/shared-types";
+import type { DetectedStack } from "@korrelo/shared-types";
 import type { DockerfileGenerator, GeneratedDockerfile } from "../domain/dockerfile-generator";
 import { NodeDockerfileGenerator } from "./node-dockerfile-generator";
 import { PhpDockerfileGenerator } from "./php-dockerfile-generator";
