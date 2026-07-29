@@ -55,6 +55,16 @@ export interface DashboardDict {
   historyError: string;
   historyLoading: string;
   historyNotEnoughData: string;
+  updateNowButton: string;
+  updateAlreadyRunning: string;
+  updateStartFailed: string;
+  updateRestartingTitle: string;
+  updateRestartingSubtitle: string;
+  updateDoneTitle: string;
+  updateDoneSubtitle: string;
+  updateFailedTitle: string;
+  updateLogLabel: string;
+  updateCloseButton: string;
 }
 
 export const dashboardEn: DashboardDict = {
@@ -114,6 +124,16 @@ export const dashboardEn: DashboardDict = {
   historyError: "Couldn't load the history.",
   historyLoading: "Loading...",
   historyNotEnoughData: "Not enough data yet for this period. Collection runs every minute.",
+  updateNowButton: "Update now",
+  updateAlreadyRunning: "An update is already running.",
+  updateStartFailed: "Couldn't start the update.",
+  updateRestartingTitle: "Restarting the server...",
+  updateRestartingSubtitle: "This can take a few seconds. The page will reload automatically.",
+  updateDoneTitle: "Update complete!",
+  updateDoneSubtitle: "Reloading the page...",
+  updateFailedTitle: "Update failed",
+  updateLogLabel: "Process log",
+  updateCloseButton: "Close",
 };
 
 export const dashboardPt: DashboardDict = {
@@ -173,4 +193,14 @@ export const dashboardPt: DashboardDict = {
   historyError: "Não foi possível carregar o histórico.",
   historyLoading: "Carregando...",
   historyNotEnoughData: "Ainda não há dados suficientes pra esse período. A coleta roda a cada minuto.",
+  updateNowButton: "Atualizar agora",
+  updateAlreadyRunning: "Uma atualização já está em andamento.",
+  updateStartFailed: "Não foi possível iniciar a atualização.",
+  updateRestartingTitle: "Reiniciando o servidor...",
+  updateRestartingSubtitle: "Isso pode levar alguns segundos. A página vai recarregar sozinha.",
+  updateDoneTitle: "Atualização concluída!",
+  updateDoneSubtitle: "Recarregando a página...",
+  updateFailedTitle: "Falha na atualização",
+  updateLogLabel: "Log do processo",
+  updateCloseButton: "Fechar",
 };

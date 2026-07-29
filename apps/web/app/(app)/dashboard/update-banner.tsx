@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import { ArrowUpCircle, Check, Copy } from "lucide-react";
+import { apiFetch } from "../../../lib/api-client";
 import { useTranslation } from "../../../lib/i18n/locale-provider";
+import { UpdateProgressModal } from "./update-progress-modal";
 
 interface UpdateStatus {
   checked: boolean;
@@ -24,6 +26,8 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [updating, setUpdating] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   if (!status.updateAvailable) {
     return null;
@@ -41,6 +45,26 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
     }
   }
 
+  async function handleUpdateNow() {
+    setStartError(null);
+    try {
+      const res = await apiFetch("/monitoring/update/start", { method: "POST" });
+      if (!res.ok) {
+        setStartError(t.dashboard.updateStartFailed);
+        return;
+      }
+      const data: { alreadyRunning: boolean } = await res.json();
+      if (data.alreadyRunning) {
+        setStartError(t.dashboard.updateAlreadyRunning);
+      }
+      // Mesmo se já estava rodando, abre o modal pra acompanhar o progresso
+      // em vez de deixar o usuário sem feedback nenhum.
+      setUpdating(true);
+    } catch {
+      setStartError(t.dashboard.updateStartFailed);
+    }
+  }
+
   return (
     <div className="mb-6 rounded-xl border border-accent/30 bg-accent/10 p-4">
       <div className="flex items-center justify-between gap-4">
@@ -53,13 +77,23 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
             </span>
           </p>
         </div>
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          className="flex-none text-[12.5px] font-medium text-accent hover:opacity-85"
-        >
-          {expanded ? t.dashboard.hideCommand : t.dashboard.showCommand}
-        </button>
+        <div className="flex flex-none items-center gap-3">
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            className="text-[12.5px] font-medium text-accent hover:opacity-85"
+          >
+            {expanded ? t.dashboard.hideCommand : t.dashboard.showCommand}
+          </button>
+          <button
+            onClick={handleUpdateNow}
+            className="rounded-md bg-accent px-3 py-1.5 text-[12.5px] font-semibold text-accent-foreground hover:opacity-90"
+          >
+            {t.dashboard.updateNowButton}
+          </button>
+        </div>
       </div>
+
+      {startError && <p className="mt-2 text-[12.5px] text-destructive">{startError}</p>}
 
       {expanded && (
         <div className="mt-3">
@@ -79,6 +113,8 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
           </div>
         </div>
       )}
+
+      {updating && <UpdateProgressModal onClose={() => setUpdating(false)} />}
     </div>
   );
 }
