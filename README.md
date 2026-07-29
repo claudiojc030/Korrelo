@@ -152,3 +152,10 @@ Rodar os testes:
 ```bash
 npm run test --workspace=apps/api
 ```
+
+## Licença
+
+[PolyForm Internal Use License 1.0.0](LICENSE) — pode usar, modificar e rodar
+livremente na sua própria VPS ou dentro da sua empresa. O que não pode é
+distribuir o software ou oferecer um produto/serviço pra terceiros cujo valor
+vem dele (ex: revender, ou hospedar como serviço pago).
