@@ -4,6 +4,7 @@ import { CONTAINER_MEMORY_LIMIT_MB, type ContainerSummary, type Project, type Sy
 import { MetricTile } from "./metric-tile";
 import { MetricsHistoryChart } from "./metrics-history-chart";
 import { OnboardingChecklist } from "./onboarding-checklist";
+import { UpdateBanner } from "./update-banner";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
 import { AutoRefresh } from "../../../components/auto-refresh";
 
@@ -58,6 +59,27 @@ async function getTwoFactorStatus(): Promise<{ enabled: boolean } | null> {
   }
 }
 
+interface UpdateStatus {
+  checked: boolean;
+  currentCommit: string | null;
+  remoteCommit: string | null;
+  commitsBehind: number;
+  updateAvailable: boolean;
+}
+
+async function getUpdateStatus(): Promise<UpdateStatus | null> {
+  try {
+    const res = await fetch(`${API_URL}/monitoring/update-status`, {
+      cache: "no-store",
+      headers: authHeaderServer(),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
 function formatUptime(seconds: number): string {
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
@@ -76,11 +98,12 @@ const TIER_LABEL: Record<SystemMetrics["tier"], string> = {
 };
 
 export default async function DashboardPage() {
-  const [metrics, projects, githubStatus, twoFactorStatus] = await Promise.all([
+  const [metrics, projects, githubStatus, twoFactorStatus, updateStatus] = await Promise.all([
     getSystemMetrics(),
     getProjects(),
     getGithubStatus(),
     getTwoFactorStatus(),
+    getUpdateStatus(),
   ]);
 
   const runningProjects = projects.filter((p) => p.status === "running" && p.containerName);
@@ -112,6 +135,8 @@ export default async function DashboardPage() {
           </span>
         )}
       </div>
+
+      {updateStatus && <UpdateBanner status={updateStatus} />}
 
       <OnboardingChecklist
         githubConnected={githubStatus?.connected ?? false}

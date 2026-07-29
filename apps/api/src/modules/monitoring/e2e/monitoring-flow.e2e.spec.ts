@@ -40,6 +40,20 @@ class FakeSystemMetricsCollector {
   }
 }
 
+const FAKE_UPDATE_STATUS = {
+  checked: true,
+  currentCommit: "aaaaaaa",
+  remoteCommit: "bbbbbbb",
+  commitsBehind: 3,
+  updateAvailable: true,
+};
+
+class FakeUpdateChecker {
+  async check() {
+    return FAKE_UPDATE_STATUS;
+  }
+}
+
 function extractCookie(setCookieHeader: string | string[] | undefined, name: string): string | null {
   const headers = Array.isArray(setCookieHeader) ? setCookieHeader : setCookieHeader ? [setCookieHeader] : [];
   const line = headers.find((c) => c.startsWith(`${name}=`));
@@ -66,6 +80,7 @@ describe("Monitoring flow (e2e)", () => {
     const { MonitoringModule } = require("../monitoring.module");
     const { AuthModule } = require("../../auth/auth.module");
     const { SYSTEM_METRICS_COLLECTOR } = require("../domain/system-metrics-collector");
+    const { UPDATE_CHECKER } = require("../domain/update-checker");
 
     // Precisa do AuthModule na árvore igual ao app real (app.module.ts): o
     // guard global (APP_GUARD) é registrado dentro do AuthModule, não do
@@ -74,6 +89,8 @@ describe("Monitoring flow (e2e)", () => {
     const moduleFixture = await Test.createTestingModule({ imports: [AuthModule, MonitoringModule] })
       .overrideProvider(SYSTEM_METRICS_COLLECTOR)
       .useValue(new FakeSystemMetricsCollector())
+      .overrideProvider(UPDATE_CHECKER)
+      .useValue(new FakeUpdateChecker())
       .compile();
 
     app = moduleFixture.createNestApplication();
@@ -174,5 +191,13 @@ describe("Monitoring flow (e2e)", () => {
     expect(res.body.length).toBeGreaterThanOrEqual(6);
     const latest = res.body[res.body.length - 1];
     expect(latest.cpuPercent).toBe(FAKE_METRICS.cpuPercent);
+  });
+
+  it("retorna o status de atualização (via UPDATE_CHECKER fake)", async () => {
+    const res = await request(app.getHttpServer())
+      .get("/monitoring/update-status")
+      .set("Cookie", [authCookieHeader()]);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(FAKE_UPDATE_STATUS);
   });
 });
