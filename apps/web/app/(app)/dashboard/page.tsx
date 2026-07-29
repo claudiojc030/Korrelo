@@ -5,6 +5,7 @@ import { MetricTile } from "./metric-tile";
 import { MetricsHistoryChart } from "./metrics-history-chart";
 import { OnboardingChecklist } from "./onboarding-checklist";
 import { UpdateBanner } from "./update-banner";
+import { TierBadge } from "./tier-badge";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
 import { AutoRefresh } from "../../../components/auto-refresh";
 
@@ -129,11 +130,7 @@ export default async function DashboardPage() {
             Atualiza a cada 12s
           </p>
         </div>
-        {metrics && (
-          <span className="rounded-full border border-border-subtle bg-surface px-3 py-1 text-[12px] font-medium text-muted-foreground">
-            Porte {TIER_LABEL[metrics.tier]}
-          </span>
-        )}
+        {metrics && <TierBadge tier={metrics.tier} label={TIER_LABEL[metrics.tier]} />}
       </div>
 
       {updateStatus && <UpdateBanner status={updateStatus} />}
