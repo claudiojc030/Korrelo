@@ -30,19 +30,34 @@ export function GithubConnectButton() {
     window.location.href = url;
   }
 
-  function handleCreateAppClick() {
+  async function handleCreateAppClick() {
     // Fluxo de "manifest" do GitHub: preenche nome/permissões/webhook de
     // antemão e submete um form de verdade pro github.com (não dá pra fazer
     // via fetch/CORS). O GitHub cria o App, redireciona de volta com um
     // "code" de uso único, e o backend troca isso pelas credenciais reais
     // (ver /github/manifest-callback) — sem copiar App ID/chave na mão.
+    //
+    // O "state" vem de uma rota autenticada (só quem está logado consegue
+    // gerar um válido) e viaja dentro do redirect_url. Sem ele, qualquer um
+    // que descobrisse a URL pública do Korrelo poderia criar o PRÓPRIO GitHub
+    // App e apontar o redirect_url pra cá, fazendo o backend trocar as
+    // credenciais legítimas pelas dele assim que alguém logado clicasse num
+    // link malicioso (o cookie de sessão sozinho não impede isso).
+    const stateRes = await apiFetch("/github/manifest-state");
+    const { state } = (await stateRes.json()) as { state: string };
+
     const suffix = Math.random().toString(36).slice(2, 6);
     const webUrl = window.location.origin;
     const manifest = {
       name: `korrelo-${suffix}`,
       url: webUrl,
       hook_attributes: { url: `${API_URL}/github/webhook` },
-      redirect_url: `${API_URL}/github/manifest-callback`,
+      redirect_url: `${API_URL}/github/manifest-callback?state=${encodeURIComponent(state)}`,
+      // Sem isso o GitHub não sabe pra onde mandar o navegador depois que a
+      // pessoa escolhe os repositórios na tela de instalação, e o
+      // /github/callback (que registra a instalação no Korrelo) nunca seria
+      // chamado de verdade.
+      setup_url: `${API_URL}/github/callback`,
       callback_urls: [webUrl],
       public: false,
       default_permissions: { contents: "read", metadata: "read" },
