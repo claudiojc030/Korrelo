@@ -1,3 +1,5 @@
+[🇺🇸 English](README.en.md) | 🇧🇷 Português
+
 # Korrelo
 
 Web OS pra gerenciar uma VPS sem precisar de SSH/CLI. Importe repositórios do
@@ -14,16 +16,32 @@ e monitore tudo pelo navegador.
 - Pelo menos **1 GB de RAM** (2 GB+ recomendado se for hospedar mais de 1-2 projetos, já que cada container consome memória própria, além do Core).
 - Um domínio (opcional). Dá pra acessar só pelo IP, mas com domínio o Korrelo consegue emitir HTTPS automático (Let's Encrypt) pra si mesmo e pra cada projeto implantado.
 
-## 1. Suba o repositório na VPS
+## 1. Instale na VPS
 
 ```bash
 ssh seu-usuario@SEU_IP
-git clone https://github.com/SEU_USUARIO/Korrelo.git korrelo
+curl -fsSL https://raw.githubusercontent.com/claudiojc030/Korrelo/main/scripts/install.sh | bash
+```
+
+Prefere revisar o script antes de rodar (recomendado se você não confia cegamente
+em `curl | bash`)? Baixe e leia primeiro:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/claudiojc030/Korrelo/main/scripts/install.sh -o install.sh
+less install.sh
+bash install.sh
+```
+
+Ou clone na mão, sem o instalador:
+
+```bash
+git clone https://github.com/claudiojc030/Korrelo.git korrelo
 cd korrelo
 bash scripts/setup-vps.sh
 ```
 
-O script `setup-vps.sh` faz tudo sozinho: atualiza o sistema, cria swap (se a
+Qualquer um dos três caminhos acima termina rodando o `setup-vps.sh`, que faz
+tudo sozinho: atualiza o sistema, cria swap (se a
 RAM for pequena), instala Node 20, Docker, PM2, nginx, certbot, configura
 firewall (ufw), hardening de SSH (fail2ban + desativa login por senha, **só**
 se detectar uma chave já cadastrada), desativa serviços de SO desnecessários,
@@ -134,18 +152,60 @@ pm2 restart ecosystem.config.js
 - **Deploy automático via push não funciona**: confira se o `GITHUB_APP_WEBHOOK_SECRET` no `apps/api/.env` bate exatamente com o das settings do GitHub App, e se a Webhook URL lá aponta pro seu domínio/IP correto.
 - **Erro de banco após atualizar**: rode `cd apps/api && npx prisma migrate deploy` de novo.
 
-## Desenvolvimento local
+## Testar localmente (sem VPS)
 
-```bash
-npm install
-npm run build --workspace=packages/shared-types
-npm run dev:api    # apps/api em modo watch (porta 3001)
-npm run dev:web    # apps/web em modo dev (porta 3000)
-```
+O jeito "de verdade" de usar o Korrelo é numa VPS (seção 1 acima), mas dá pra
+rodar tudo na sua própria máquina (**Windows, Mac ou Linux**) em modo de
+desenvolvimento, só pra conhecer a interface antes de decidir hospedar numa
+VPS.
 
-Copie `apps/api/.env.example` → `apps/api/.env` e `apps/web/.env.example` →
-`apps/web/.env` antes de rodar (SQLite local, sem precisar de Docker pro banco
-do Core, só os projetos gerenciados usam Docker).
+**Pré-requisitos:**
+- [Node.js 20+](https://nodejs.org)
+- Git
+- Docker Desktop (opcional, só necessário se você quiser testar o deploy de
+  um projeto de verdade; pra só navegar pela interface do Korrelo não
+  precisa)
+
+**Passo a passo:**
+
+1. Clone o repositório:
+   ```bash
+   git clone https://github.com/SEU_USUARIO/Korrelo.git korrelo
+   cd korrelo
+   ```
+2. Instale as dependências:
+   ```bash
+   npm install
+   ```
+3. Copie os arquivos de ambiente:
+   ```bash
+   cp apps/api/.env.example apps/api/.env
+   cp apps/web/.env.example apps/web/.env
+   ```
+   Abra `apps/api/.env` e preencha `JWT_SECRET` e `ENV_ENCRYPTION_KEY` com
+   valores aleatórios (funciona igual no Windows, Mac ou Linux, é só rodar no
+   terminal onde o Node.js estiver disponível):
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"   # JWT_SECRET
+   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"   # ENV_ENCRYPTION_KEY
+   ```
+4. Rode as migrations (SQLite local, não precisa instalar Postgres nem Docker
+   pro banco do Core):
+   ```bash
+   npm run build --workspace=packages/shared-types
+   cd apps/api && npx prisma migrate dev && cd ../..
+   ```
+5. Suba os dois processos, cada um no seu terminal:
+   ```bash
+   npm run dev:api    # apps/api em modo watch (porta 3001)
+   npm run dev:web    # apps/web em modo dev (porta 3000)
+   ```
+6. Acesse **http://localhost:3000** e crie a conta de administrador.
+
+Nesse modo o GitHub App e o backup automático não ficam configurados (isso é
+coisa do `setup-vps.sh`), mas dá pra navegar por tudo, criar projetos
+manualmente com a URL de um repositório, e ver o dashboard funcionando. Pra
+testar o deploy de um projeto de verdade, o Docker precisa estar rodando.
 
 Rodar os testes:
 
@@ -155,7 +215,7 @@ npm run test --workspace=apps/api
 
 ## Licença
 
-[PolyForm Internal Use License 1.0.0](LICENSE) — pode usar, modificar e rodar
+[PolyForm Internal Use License 1.0.0](LICENSE): pode usar, modificar e rodar
 livremente na sua própria VPS ou dentro da sua empresa. O que não pode é
 distribuir o software ou oferecer um produto/serviço pra terceiros cujo valor
 vem dele (ex: revender, ou hospedar como serviço pago).
