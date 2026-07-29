@@ -1,4 +1,5 @@
 import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import { USER_REPOSITORY, type UserRepository } from "../domain/user.repository";
 import { REFRESH_TOKEN_REPOSITORY, type RefreshTokenRepository } from "../domain/refresh-token.repository";
 import { hashRefreshToken } from "../infrastructure/refresh-token-crypto";
@@ -19,12 +20,12 @@ export class RefreshAccessTokenUseCase {
   ): Promise<TokenPair & { email: string }> {
     const stored = await this.refreshTokenRepository.findByTokenHash(hashRefreshToken(rawToken));
     if (!stored || !stored.isValid()) {
-      throw new UnauthorizedException("Sessão expirada. Faça login novamente.");
+      throw new UnauthorizedException(apiError("SESSION_EXPIRED", "Sessão expirada. Faça login novamente."));
     }
 
     const user = await this.userRepository.findById(stored.userId);
     if (!user) {
-      throw new UnauthorizedException("Sessão expirada. Faça login novamente.");
+      throw new UnauthorizedException(apiError("SESSION_EXPIRED", "Sessão expirada. Faça login novamente."));
     }
 
     // Rotação: o token usado é revogado antes de emitir o novo par, então

@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import type { Project } from "../domain/project.entity";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { STACK_DETECTOR, type StackDetector } from "../domain/stack-detector";
@@ -18,7 +19,7 @@ export class DetectProjectStackUseCase {
   async execute(input: DetectProjectStackInput): Promise<Project> {
     const project = await this.repository.findById(input.projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${input.projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${input.projectId} não encontrado`));
     }
 
     const detectedStack = await this.detector.detect(input.projectPath);

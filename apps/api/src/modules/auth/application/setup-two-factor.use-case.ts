@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import { USER_REPOSITORY, type UserRepository } from "../domain/user.repository";
 import { TWO_FACTOR_SERVICE, type TwoFactorService } from "../domain/two-factor-service";
 
@@ -18,10 +19,12 @@ export class SetupTwoFactorUseCase {
   async execute(userId: string): Promise<TwoFactorSetupResult> {
     const user = await this.userRepository.findById(userId);
     if (!user) {
-      throw new NotFoundException("Usuário não encontrado.");
+      throw new NotFoundException(apiError("USER_NOT_FOUND", "Usuário não encontrado."));
     }
     if (user.twoFactorEnabled) {
-      throw new BadRequestException("2FA já está ativado nesta conta. Desative antes de reconfigurar.");
+      throw new BadRequestException(
+        apiError("TWO_FACTOR_ALREADY_ENABLED", "2FA já está ativado nesta conta. Desative antes de reconfigurar."),
+      );
     }
 
     const secret = this.twoFactorService.generateSecret();

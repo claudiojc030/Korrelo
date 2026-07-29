@@ -1,4 +1,5 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import { REFRESH_TOKEN_REPOSITORY, type RefreshTokenRepository } from "../domain/refresh-token.repository";
 
 @Injectable()
@@ -10,10 +11,10 @@ export class RevokeSessionUseCase {
   async execute(userId: string, sessionId: string): Promise<void> {
     const session = await this.refreshTokenRepository.findById(sessionId);
     if (!session) {
-      throw new NotFoundException("Sessão não encontrada.");
+      throw new NotFoundException(apiError("SESSION_NOT_FOUND", "Sessão não encontrada."));
     }
     if (session.userId !== userId) {
-      throw new ForbiddenException("Essa sessão não pertence a esta conta.");
+      throw new ForbiddenException(apiError("SESSION_NOT_OWNED", "Essa sessão não pertence a esta conta."));
     }
 
     if (session.revokedAt === null) {

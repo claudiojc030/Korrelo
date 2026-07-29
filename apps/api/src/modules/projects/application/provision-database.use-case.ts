@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import * as crypto from "node:crypto";
+import { apiError } from "../../../infrastructure/api-error";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import {
   MANAGED_DATABASE_REPOSITORY,
@@ -47,13 +48,13 @@ export class ProvisionDatabaseUseCase {
   async execute(projectId: string, type: DatabaseType, options: ProvisionDatabaseOptions = {}): Promise<ManagedDatabase> {
     const project = await this.projectRepository.findById(projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
 
     const existing = await this.databaseRepository.findByProjectId(projectId);
     if (existing) {
       throw new ConflictException(
-        "Este projeto já tem um banco de dados provisionado. Remova antes de criar outro.",
+        apiError("DATABASE_ALREADY_PROVISIONED", "Este projeto já tem um banco de dados provisionado. Remova antes de criar outro."),
       );
     }
 
@@ -61,12 +62,15 @@ export class ProvisionDatabaseUseCase {
     if (type === "custom") {
       const connectionString = options.connectionString?.trim();
       if (!connectionString) {
-        throw new BadRequestException("Informe a connection string do banco externo.");
+        throw new BadRequestException(apiError("CONNECTION_STRING_REQUIRED", "Informe a connection string do banco externo."));
       }
       const envVarKey = options.envVarKey?.trim() || DEFAULT_CUSTOM_ENV_VAR_KEY;
       if (!ENV_VAR_KEY_PATTERN.test(envVarKey)) {
         throw new BadRequestException(
-          `Nome de variável inválido: "${envVarKey}". Use apenas letras, números e _ (sem começar com número).`,
+          apiError(
+            "ENV_VAR_KEY_INVALID",
+            `Nome de variável inválido: "${envVarKey}". Use apenas letras, números e _ (sem começar com número).`,
+          ),
         );
       }
       database = ManagedDatabase.createCustom(projectId, connectionString, envVarKey);

@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import { CRON_JOB_REPOSITORY, type CronJobRepository } from "../domain/cron-job.repository";
 import { CronJob } from "../domain/cron-job.entity";
 import { CronSchedulerService } from "../infrastructure/cron-scheduler.service";
@@ -21,7 +22,7 @@ export class UpdateCronJobUseCase {
   async execute(jobId: string, input: UpdateCronJobInput): Promise<CronJob> {
     const job = await this.cronJobRepository.findById(jobId);
     if (!job) {
-      throw new NotFoundException(`Cron job ${jobId} não encontrado`);
+      throw new NotFoundException(apiError("CRON_JOB_NOT_FOUND", `Cron job ${jobId} não encontrado`));
     }
 
     const name = input.name?.trim() ?? job.name;
@@ -30,7 +31,7 @@ export class UpdateCronJobUseCase {
     const enabled = input.enabled ?? job.enabled;
 
     if (!name || !command) {
-      throw new BadRequestException("Nome e comando são obrigatórios.");
+      throw new BadRequestException(apiError("CRON_JOB_NAME_COMMAND_REQUIRED", "Nome e comando são obrigatórios."));
     }
     assertValidSchedule(schedule);
 

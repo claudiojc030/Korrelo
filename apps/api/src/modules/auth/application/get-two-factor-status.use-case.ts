@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import { USER_REPOSITORY, type UserRepository } from "../domain/user.repository";
 
 @Injectable()
@@ -8,7 +9,7 @@ export class GetTwoFactorStatusUseCase {
   async execute(userId: string): Promise<{ enabled: boolean }> {
     const user = await this.userRepository.findById(userId);
     if (!user) {
-      throw new NotFoundException("Usuário não encontrado.");
+      throw new NotFoundException(apiError("USER_NOT_FOUND", "Usuário não encontrado."));
     }
     return { enabled: user.twoFactorEnabled };
   }

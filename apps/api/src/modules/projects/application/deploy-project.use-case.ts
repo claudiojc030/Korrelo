@@ -9,6 +9,7 @@ import {
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import type { DetectedStack } from "@korrelo/shared-types";
+import { apiError } from "../../../infrastructure/api-error";
 import type { Project } from "../domain/project.entity";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { DOCKERFILE_GENERATOR, type DockerfileGenerator } from "../domain/dockerfile-generator";
@@ -59,11 +60,14 @@ export class DeployProjectUseCase {
   async execute(projectId: string, triggeredBy: DeployTrigger = "manual"): Promise<Project> {
     const project = await this.repository.findById(projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
     if (!project.detectedStack) {
       throw new BadRequestException(
-        "Este projeto ainda não tem stack detectada. Rode /import ou /detect-stack antes do deploy.",
+        apiError(
+          "PROJECT_STACK_NOT_DETECTED",
+          "Este projeto ainda não tem stack detectada. Rode /import ou /detect-stack antes do deploy.",
+        ),
       );
     }
 
@@ -132,7 +136,9 @@ export class DeployProjectUseCase {
       await this.repository.save(project.withFailedDeployment());
       const message = `Container subiu mas não respondeu na porta ${hostPort} em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. Rollback automático executado.`;
       await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
-      throw new InternalServerErrorException(`Deploy cancelado: ${message}`);
+      throw new InternalServerErrorException(
+        apiError("DEPLOY_HEALTH_CHECK_FAILED", `Deploy cancelado: ${message}`),
+      );
     }
 
     await this.deployRecordRepository.save(deployRecord.withResult("success", null));

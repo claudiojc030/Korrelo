@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
 import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
+import { apiError } from "../../../infrastructure/api-error";
 import { RegisterFirstUserUseCase } from "../application/register-first-user.use-case";
 import { LoginUseCase } from "../application/login.use-case";
 import { HasUserUseCase } from "../application/has-user.use-case";
@@ -92,7 +93,7 @@ export class AuthController {
     if (!rawToken) {
       res.clearCookie(TOKEN_COOKIE, { path: "/" });
       res.clearCookie(REFRESH_TOKEN_COOKIE, { path: "/auth" });
-      throw new UnauthorizedException("Sessão expirada. Faça login novamente.");
+      throw new UnauthorizedException(apiError("SESSION_EXPIRED", "Sessão expirada. Faça login novamente."));
     }
 
     const result = await this.refreshAccessToken.execute(rawToken, req.get("user-agent") ?? null, req.ip ?? null);

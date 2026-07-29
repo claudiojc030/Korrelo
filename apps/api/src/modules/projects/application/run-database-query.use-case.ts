@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import {
   MANAGED_DATABASE_REPOSITORY,
@@ -21,15 +22,17 @@ export class RunDatabaseQueryUseCase {
   async execute(projectId: string, query: string): Promise<DatabaseQueryResult> {
     const project = await this.projectRepository.findById(projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
     if (!project.containerName) {
-      throw new BadRequestException("Este projeto ainda não foi implantado, não há container de banco pra consultar.");
+      throw new BadRequestException(
+        apiError("DATABASE_CONTAINER_NOT_DEPLOYED", "Este projeto ainda não foi implantado, não há container de banco pra consultar."),
+      );
     }
 
     const database = await this.databaseRepository.findByProjectId(projectId);
     if (!database || database.type === "custom") {
-      throw new BadRequestException("Este projeto não tem um banco de dados gerenciado com container.");
+      throw new BadRequestException(apiError("NO_MANAGED_DATABASE", "Este projeto não tem um banco de dados gerenciado com container."));
     }
 
     const containerName = `${project.containerName}-db-1`;

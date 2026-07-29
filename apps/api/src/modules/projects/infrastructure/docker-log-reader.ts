@@ -1,6 +1,7 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { apiError } from "../../../infrastructure/api-error";
 import type { LogReader } from "../domain/log-reader";
 
 const execFile = promisify(execFileCallback);
@@ -26,7 +27,7 @@ export class DockerLogReader implements LogReader {
       return mergeByTimestamp(stdout, stderr);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new InternalServerErrorException(`Falha ao ler logs de "${containerName}": ${message}`);
+      throw new InternalServerErrorException(apiError("LOG_READ_FAILED", `Falha ao ler logs de "${containerName}": ${message}`));
     }
   }
 }

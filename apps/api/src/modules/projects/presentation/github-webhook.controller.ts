@@ -1,5 +1,6 @@
 import { BadRequestException, Controller, Headers, HttpCode, Post, Req } from "@nestjs/common";
 import type { Request } from "express";
+import { apiError } from "../../../infrastructure/api-error";
 import { Public } from "../../auth/presentation/public.decorator";
 import { HandleGithubPushWebhookUseCase } from "../application/handle-github-push-webhook.use-case";
 import { verifyGithubSignature } from "../infrastructure/github-webhook-signature";
@@ -23,10 +24,12 @@ export class GithubWebhookController {
   ) {
     const secret = process.env.GITHUB_APP_WEBHOOK_SECRET;
     if (!secret) {
-      throw new BadRequestException("GITHUB_APP_WEBHOOK_SECRET não configurado nesta VPS.");
+      throw new BadRequestException(
+        apiError("GITHUB_WEBHOOK_SECRET_MISSING", "GITHUB_APP_WEBHOOK_SECRET não configurado nesta VPS."),
+      );
     }
     if (!req.rawBody || !verifyGithubSignature(secret, req.rawBody, signature)) {
-      throw new BadRequestException("Assinatura do webhook inválida.");
+      throw new BadRequestException(apiError("GITHUB_WEBHOOK_INVALID_SIGNATURE", "Assinatura do webhook inválida."));
     }
 
     if (event !== "push") {

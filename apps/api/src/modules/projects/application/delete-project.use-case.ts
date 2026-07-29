@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { promises as fs } from "node:fs";
+import { apiError } from "../../../infrastructure/api-error";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { CONTAINER_ORCHESTRATOR, type ContainerOrchestrator } from "../domain/container-orchestrator";
 import { getProjectWorkspacePath } from "../infrastructure/workspace-paths";
@@ -16,7 +17,7 @@ export class DeleteProjectUseCase {
   async execute(projectId: string): Promise<void> {
     const project = await this.repository.findById(projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
 
     const projectPath = getProjectWorkspacePath(project.id);

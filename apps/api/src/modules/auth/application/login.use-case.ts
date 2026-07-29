@@ -1,4 +1,5 @@
 import { Inject, Injectable, UnauthorizedException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import type { User } from "../domain/user.entity";
 import { USER_REPOSITORY, type UserRepository } from "../domain/user.repository";
 import { PASSWORD_HASHER, type PasswordHasher } from "../domain/password-hasher";
@@ -32,12 +33,12 @@ export class LoginUseCase {
   async execute(input: LoginInput): Promise<LoginResult> {
     const user = await this.repository.findByEmail(input.email);
     if (!user) {
-      throw new UnauthorizedException("E-mail ou senha inválidos.");
+      throw new UnauthorizedException(apiError("INVALID_CREDENTIALS", "E-mail ou senha inválidos."));
     }
 
     const passwordMatches = await this.passwordHasher.compare(input.password, user.passwordHash);
     if (!passwordMatches) {
-      throw new UnauthorizedException("E-mail ou senha inválidos.");
+      throw new UnauthorizedException(apiError("INVALID_CREDENTIALS", "E-mail ou senha inválidos."));
     }
 
     if (user.twoFactorEnabled) {
@@ -51,7 +52,7 @@ export class LoginUseCase {
       if (!validTotp) {
         const backupMatch = await this.tryConsumeBackupCode(user, input.twoFactorCode);
         if (!backupMatch) {
-          throw new UnauthorizedException("Código de verificação inválido.");
+          throw new UnauthorizedException(apiError("INVALID_TWO_FACTOR_CODE", "Código de verificação inválido."));
         }
       }
     }

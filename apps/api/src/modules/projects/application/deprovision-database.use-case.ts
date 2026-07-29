@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import {
   MANAGED_DATABASE_REPOSITORY,
   type ManagedDatabaseRepository,
@@ -13,7 +14,7 @@ export class DeprovisionDatabaseUseCase {
   async execute(projectId: string): Promise<void> {
     const existing = await this.databaseRepository.findByProjectId(projectId);
     if (!existing) {
-      throw new NotFoundException("Este projeto não tem banco de dados provisionado.");
+      throw new NotFoundException(apiError("DATABASE_NOT_PROVISIONED", "Este projeto não tem banco de dados provisionado."));
     }
     await this.databaseRepository.delete(projectId);
     // A variável de ambiente (DATABASE_URL/REDIS_URL) fica órfã de propósito.

@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import { GITHUB_APP_CLIENT, type GithubAppClient } from "../domain/github-app-client";
 import {
   GITHUB_INSTALLATION_REPOSITORY,
@@ -16,7 +17,7 @@ export class ListGithubRepositoriesUseCase {
   async execute(): Promise<GithubRepositorySummary[]> {
     const installation = await this.repository.findLatest();
     if (!installation) {
-      throw new NotFoundException("Nenhuma conta GitHub conectada ainda");
+      throw new NotFoundException(apiError("GITHUB_APP_NOT_CONNECTED", "Nenhuma conta GitHub conectada ainda"));
     }
     return this.client.listInstallationRepositories(installation.installationId);
   }

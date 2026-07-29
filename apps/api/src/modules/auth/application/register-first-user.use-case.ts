@@ -1,4 +1,5 @@
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import { User } from "../domain/user.entity";
 import { USER_REPOSITORY, type UserRepository } from "../domain/user.repository";
 import { PASSWORD_HASHER, type PasswordHasher } from "../domain/password-hasher";
@@ -29,7 +30,7 @@ export class RegisterFirstUserUseCase {
     const existingCount = await this.repository.count();
     if (existingCount > 0) {
       throw new ConflictException(
-        "Já existe uma conta configurada neste Korrelo. Use /auth/login.",
+        apiError("ACCOUNT_ALREADY_EXISTS", "Já existe uma conta configurada neste Korrelo. Use /auth/login."),
       );
     }
 

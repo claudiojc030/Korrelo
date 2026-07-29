@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { promises as fs } from "node:fs";
+import { apiError } from "../../../infrastructure/api-error";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { getProjectWorkspacePath } from "../infrastructure/workspace-paths";
 import { resolveSafeProjectPath } from "../infrastructure/project-file-path";
@@ -18,7 +19,7 @@ export class ListProjectFilesUseCase {
   async execute(projectId: string, relativePath: string): Promise<ProjectFileEntry[]> {
     const project = await this.projectRepository.findById(projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
 
     const workspaceRoot = getProjectWorkspacePath(projectId);

@@ -3,6 +3,7 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
+import { apiError } from "../../../infrastructure/api-error";
 import type { DomainProvisioner } from "../domain/domain-provisioner";
 
 const execFile = promisify(execFileCallback);
@@ -48,7 +49,9 @@ export class NginxCertbotDomainProvisioner implements DomainProvisioner {
     } catch (error) {
       await this.removeSiteFile(domain);
       const message = error instanceof Error ? error.message : String(error);
-      throw new InternalServerErrorException(`nginx recusou a config do domínio: ${message}`);
+      throw new InternalServerErrorException(
+        apiError("NGINX_RELOAD_FAILED", `nginx recusou a config do domínio: ${message}`),
+      );
     }
 
     try {
@@ -64,7 +67,10 @@ export class NginxCertbotDomainProvisioner implements DomainProvisioner {
       await this.reloadNginxIgnoringErrors();
       const message = error instanceof Error ? error.message : String(error);
       throw new InternalServerErrorException(
-        `Falha ao emitir certificado TLS pro domínio "${domain}": ${message}`,
+        apiError(
+          "TLS_CERTIFICATE_ISSUANCE_FAILED",
+          `Falha ao emitir certificado TLS pro domínio "${domain}": ${message}`,
+        ),
       );
     }
   }

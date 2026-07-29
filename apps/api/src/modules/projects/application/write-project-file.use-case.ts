@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { promises as fs } from "node:fs";
+import { apiError } from "../../../infrastructure/api-error";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { getProjectWorkspacePath } from "../infrastructure/workspace-paths";
 import { resolveSafeProjectPath } from "../infrastructure/project-file-path";
@@ -13,10 +14,10 @@ export class WriteProjectFileUseCase {
   async execute(projectId: string, relativePath: string, content: string): Promise<void> {
     const project = await this.projectRepository.findById(projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
     if (Buffer.byteLength(content, "utf-8") > MAX_FILE_SIZE_BYTES) {
-      throw new BadRequestException("Conteúdo grande demais pra salvar aqui (limite 2MB).");
+      throw new BadRequestException(apiError("CONTENT_TOO_LARGE", "Conteúdo grande demais pra salvar aqui (limite 2MB)."));
     }
 
     const workspaceRoot = getProjectWorkspacePath(projectId);
@@ -27,7 +28,7 @@ export class WriteProjectFileUseCase {
     // caminhos com pastas intermediárias inexistentes sem querer).
     const stat = await fs.stat(targetPath).catch(() => null);
     if (!stat || stat.isDirectory()) {
-      throw new BadRequestException("Arquivo não encontrado.");
+      throw new BadRequestException(apiError("FILE_NOT_FOUND", "Arquivo não encontrado."));
     }
 
     await fs.writeFile(targetPath, content, "utf-8");

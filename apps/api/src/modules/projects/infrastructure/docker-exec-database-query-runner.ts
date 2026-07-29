@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { apiError } from "../../../infrastructure/api-error";
 import type { DatabaseQueryResult, DatabaseQueryRunner } from "../domain/database-query-runner";
 import type { ManagedDatabase } from "../domain/managed-database.entity";
 import { parseCsv } from "./csv-parser";
@@ -54,13 +55,15 @@ export class DockerExecDatabaseQueryRunner implements DatabaseQueryRunner {
         .slice(0, 200);
     }
 
-    throw new BadRequestException("Bancos externos (custom) não têm navegador, conecte com sua própria ferramenta.");
+    throw new BadRequestException(
+      apiError("CUSTOM_DATABASE_NO_BROWSER", "Bancos externos (custom) não têm navegador, conecte com sua própria ferramenta."),
+    );
   }
 
   async runQuery(containerName: string, database: ManagedDatabase, query: string): Promise<DatabaseQueryResult> {
     const trimmed = query.trim();
     if (!trimmed) {
-      throw new BadRequestException("Informe uma query.");
+      throw new BadRequestException(apiError("QUERY_REQUIRED", "Informe uma query."));
     }
 
     if (database.type === "postgres") {
@@ -73,7 +76,9 @@ export class DockerExecDatabaseQueryRunner implements DatabaseQueryRunner {
       return this.runRedisCommand(containerName, database, trimmed);
     }
 
-    throw new BadRequestException("Bancos externos (custom) não têm console de query, conecte com sua própria ferramenta.");
+    throw new BadRequestException(
+      apiError("CUSTOM_DATABASE_NO_QUERY_CONSOLE", "Bancos externos (custom) não têm console de query, conecte com sua própria ferramenta."),
+    );
   }
 
   private async execDocker(
@@ -90,7 +95,7 @@ export class DockerExecDatabaseQueryRunner implements DatabaseQueryRunner {
     } catch (error) {
       const err = error as { stdout?: string; stderr?: string; message: string };
       const detail = [err.stderr, err.stdout].filter(Boolean).join("\n").trim() || err.message;
-      throw new BadRequestException(detail.slice(0, 4000));
+      throw new BadRequestException(apiError("DATABASE_QUERY_FAILED", detail.slice(0, 4000)));
     }
   }
 
@@ -205,7 +210,7 @@ export class DockerExecDatabaseQueryRunner implements DatabaseQueryRunner {
   ): Promise<DatabaseQueryResult> {
     const args = tokenizeShellLike(command);
     if (args.length === 0) {
-      throw new BadRequestException("Comando Redis vazio.");
+      throw new BadRequestException(apiError("REDIS_COMMAND_EMPTY", "Comando Redis vazio."));
     }
 
     const { stdout } = await this.execDocker(containerName, [

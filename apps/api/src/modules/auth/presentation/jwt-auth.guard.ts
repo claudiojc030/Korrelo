@@ -1,5 +1,6 @@
 import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
+import { apiError } from "../../../infrastructure/api-error";
 import { TOKEN_SERVICE, type TokenService } from "../domain/token-service";
 import { IS_PUBLIC_KEY } from "./public.decorator";
 import { TOKEN_COOKIE } from "./token-cookie";
@@ -26,12 +27,12 @@ export class JwtAuthGuard implements CanActivate {
     const token = bearerToken ?? request.cookies?.[TOKEN_COOKIE] ?? null;
 
     if (!token) {
-      throw new UnauthorizedException("Token de acesso ausente.");
+      throw new UnauthorizedException(apiError("ACCESS_TOKEN_MISSING", "Token de acesso ausente."));
     }
 
     const payload = this.tokenService.verify(token);
     if (!payload) {
-      throw new UnauthorizedException("Token de acesso inválido ou expirado.");
+      throw new UnauthorizedException(apiError("ACCESS_TOKEN_INVALID", "Token de acesso inválido ou expirado."));
     }
 
     request.user = payload;

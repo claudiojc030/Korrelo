@@ -1,5 +1,6 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import jwt from "jsonwebtoken";
+import { apiError } from "../../../infrastructure/api-error";
 import type { GithubAppClient, InstallationToken } from "../domain/github-app-client";
 import type { GithubRepositorySummary } from "../domain/github-repository-summary";
 
@@ -23,13 +24,13 @@ interface GithubApiRepository {
 export class JwtGithubAppClient implements GithubAppClient {
   private get appId(): string {
     const value = process.env.GITHUB_APP_ID;
-    if (!value) throw new InternalServerErrorException("GITHUB_APP_ID não configurado");
+    if (!value) throw new InternalServerErrorException(apiError("GITHUB_APP_ID_MISSING", "GITHUB_APP_ID não configurado"));
     return value;
   }
 
   private get privateKey(): string {
     const value = process.env.GITHUB_APP_PRIVATE_KEY;
-    if (!value) throw new InternalServerErrorException("GITHUB_APP_PRIVATE_KEY não configurado");
+    if (!value) throw new InternalServerErrorException(apiError("GITHUB_APP_PRIVATE_KEY_MISSING", "GITHUB_APP_PRIVATE_KEY não configurado"));
     return value.replace(/\\n/g, "\n");
   }
 
@@ -88,7 +89,7 @@ export class JwtGithubAppClient implements GithubAppClient {
 
     if (!res.ok) {
       const body = await res.text();
-      throw new InternalServerErrorException(`Erro na API do GitHub (${res.status}): ${body}`);
+      throw new InternalServerErrorException(apiError("GITHUB_API_ERROR", `Erro na API do GitHub (${res.status}): ${body}`));
     }
 
     return res.json() as Promise<T>;

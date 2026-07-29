@@ -1,6 +1,7 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { apiError } from "../../../infrastructure/api-error";
 import type { OsServiceController, ServiceState } from "../domain/os-service-controller";
 
 const execFile = promisify(execFileCallback);
@@ -22,7 +23,9 @@ export class SystemctlServiceController implements OsServiceController {
       await execFile("sudo", ["systemctl", action, "--now", unitName], { timeout: 15_000 });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new InternalServerErrorException(`Falha ao ${action === "enable" ? "ativar" : "desativar"} "${unitName}": ${message}`);
+      throw new InternalServerErrorException(
+        apiError("SERVICE_TOGGLE_FAILED", `Falha ao ${action === "enable" ? "ativar" : "desativar"} "${unitName}": ${message}`),
+      );
     }
   }
 

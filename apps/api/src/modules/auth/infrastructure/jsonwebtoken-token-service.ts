@@ -1,12 +1,13 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import jwt from "jsonwebtoken";
+import { apiError } from "../../../infrastructure/api-error";
 import type { AuthTokenPayload, TokenService } from "../domain/token-service";
 
 @Injectable()
 export class JsonWebTokenService implements TokenService {
   private get secret(): string {
     const value = process.env.JWT_SECRET;
-    if (!value) throw new InternalServerErrorException("JWT_SECRET não configurado");
+    if (!value) throw new InternalServerErrorException(apiError("JWT_SECRET_MISSING", "JWT_SECRET não configurado"));
     return value;
   }
 

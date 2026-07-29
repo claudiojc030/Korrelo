@@ -1,4 +1,5 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import type { Project } from "../domain/project.entity";
 
@@ -18,12 +19,14 @@ export class UpdateProjectSettingsUseCase {
   async execute(projectId: string, input: UpdateProjectSettingsInput): Promise<Project> {
     const project = await this.repository.findById(projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
 
     const deployBranch = input.deployBranch?.trim() || project.deployBranch;
     if (!BRANCH_NAME_PATTERN.test(deployBranch)) {
-      throw new BadRequestException(`Nome de branch inválido: "${deployBranch}".`);
+      throw new BadRequestException(
+        apiError("INVALID_BRANCH_NAME", `Nome de branch inválido: "${deployBranch}".`),
+      );
     }
 
     let updated = project.withSettings(

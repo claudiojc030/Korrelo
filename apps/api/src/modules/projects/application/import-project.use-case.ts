@@ -1,4 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
+import { apiError } from "../../../infrastructure/api-error";
 import type { Project } from "../domain/project.entity";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { REPOSITORY_CLONER, type RepositoryCloner } from "../domain/repository-cloner";
@@ -24,7 +25,7 @@ export class ImportProjectUseCase {
   async execute(projectId: string): Promise<Project> {
     const project = await this.repository.findById(projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
 
     const destPath = getProjectWorkspacePath(project.id);

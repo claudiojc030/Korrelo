@@ -1,5 +1,6 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import * as crypto from "node:crypto";
+import { apiError } from "../api-error";
 
 const ALGORITHM = "aes-256-gcm";
 const PREFIX = "enc:v1:";
@@ -14,11 +15,13 @@ export class EnvVarCipher {
   private get key(): Buffer {
     const hex = process.env.ENV_ENCRYPTION_KEY;
     if (!hex) {
-      throw new InternalServerErrorException("ENV_ENCRYPTION_KEY não configurado");
+      throw new InternalServerErrorException(apiError("ENV_ENCRYPTION_KEY_MISSING", "ENV_ENCRYPTION_KEY não configurado"));
     }
     const key = Buffer.from(hex, "hex");
     if (key.length !== 32) {
-      throw new InternalServerErrorException("ENV_ENCRYPTION_KEY precisa ter 32 bytes (64 caracteres hex)");
+      throw new InternalServerErrorException(
+        apiError("ENV_ENCRYPTION_KEY_INVALID_LENGTH", "ENV_ENCRYPTION_KEY precisa ter 32 bytes (64 caracteres hex)"),
+      );
     }
     return key;
   }
@@ -47,7 +50,10 @@ export class EnvVarCipher {
       return plaintext.toString("utf-8");
     } catch {
       throw new InternalServerErrorException(
-        "Falha ao decifrar variável de ambiente. ENV_ENCRYPTION_KEY pode estar errado.",
+        apiError(
+          "ENV_VAR_DECRYPT_FAILED",
+          "Falha ao decifrar variável de ambiente. ENV_ENCRYPTION_KEY pode estar errado.",
+        ),
       );
     }
   }

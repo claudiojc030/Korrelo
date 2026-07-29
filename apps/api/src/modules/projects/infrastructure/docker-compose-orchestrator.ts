@@ -1,6 +1,7 @@
 import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { apiError } from "../../../infrastructure/api-error";
 import type {
   ContainerOrchestrator,
   DeployConfig,
@@ -34,7 +35,9 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new InternalServerErrorException(`Falha ao subir o container: ${message}`);
+      throw new InternalServerErrorException(
+        apiError("CONTAINER_START_FAILED", `Falha ao subir o container: ${message}`),
+      );
     }
   }
 

@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { CronExpressionParser } from "cron-parser";
+import { apiError } from "../../../infrastructure/api-error";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { CRON_JOB_REPOSITORY, type CronJobRepository } from "../domain/cron-job.repository";
 import { CronJob } from "../domain/cron-job.entity";
@@ -10,7 +11,10 @@ export function assertValidSchedule(schedule: string): void {
     CronExpressionParser.parse(schedule);
   } catch {
     throw new BadRequestException(
-      `Expressão cron inválida: "${schedule}". Use o formato padrão de 5 campos (ex: "0 3 * * *" = todo dia às 3h).`,
+      apiError(
+        "CRON_JOB_INVALID_SCHEDULE",
+        `Expressão cron inválida: "${schedule}". Use o formato padrão de 5 campos (ex: "0 3 * * *" = todo dia às 3h).`,
+      ),
     );
   }
 }
@@ -26,10 +30,10 @@ export class CreateCronJobUseCase {
   async execute(projectId: string, name: string, command: string, schedule: string): Promise<CronJob> {
     const project = await this.projectRepository.findById(projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
     if (!name.trim() || !command.trim()) {
-      throw new BadRequestException("Nome e comando são obrigatórios.");
+      throw new BadRequestException(apiError("CRON_JOB_NAME_COMMAND_REQUIRED", "Nome e comando são obrigatórios."));
     }
     assertValidSchedule(schedule);
 

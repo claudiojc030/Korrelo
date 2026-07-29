@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { promises as fs } from "node:fs";
+import { apiError } from "../../../infrastructure/api-error";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { getProjectWorkspacePath } from "../infrastructure/workspace-paths";
 import { resolveSafeProjectPath } from "../infrastructure/project-file-path";
@@ -21,7 +22,7 @@ export class ReadProjectFileUseCase {
   async execute(projectId: string, relativePath: string): Promise<{ content: string }> {
     const project = await this.projectRepository.findById(projectId);
     if (!project) {
-      throw new NotFoundException(`Projeto ${projectId} não encontrado`);
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
 
     const workspaceRoot = getProjectWorkspacePath(projectId);
@@ -29,17 +30,17 @@ export class ReadProjectFileUseCase {
 
     const stat = await fs.stat(targetPath);
     if (stat.isDirectory()) {
-      throw new BadRequestException("Esse caminho é uma pasta, não um arquivo.");
+      throw new BadRequestException(apiError("PATH_IS_DIRECTORY", "Esse caminho é uma pasta, não um arquivo."));
     }
     if (stat.size > MAX_FILE_SIZE_BYTES) {
       throw new BadRequestException(
-        `Arquivo grande demais pra abrir aqui (${Math.round(stat.size / 1024)}KB, limite 2MB).`,
+        apiError("FILE_TOO_LARGE", `Arquivo grande demais pra abrir aqui (${Math.round(stat.size / 1024)}KB, limite 2MB).`),
       );
     }
 
     const buffer = await fs.readFile(targetPath);
     if (looksLikeBinary(buffer)) {
-      throw new BadRequestException("Esse arquivo parece binário, não dá pra abrir como texto.");
+      throw new BadRequestException(apiError("FILE_IS_BINARY", "Esse arquivo parece binário, não dá pra abrir como texto."));
     }
 
     return { content: buffer.toString("utf-8") };

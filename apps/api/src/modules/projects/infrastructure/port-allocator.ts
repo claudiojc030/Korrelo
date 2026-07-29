@@ -2,6 +2,7 @@ import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import * as net from "node:net";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
+import { apiError } from "../../../infrastructure/api-error";
 
 const execFile = promisify(execFileCallback);
 const MAX_ATTEMPTS = 30;
@@ -67,7 +68,10 @@ export class PortAllocator {
       }
     }
     throw new InternalServerErrorException(
-      `Nenhuma porta livre encontrada a partir de ${preferredPort} (${MAX_ATTEMPTS} tentativas).`,
+      apiError(
+        "PORT_ALLOCATION_FAILED",
+        `Nenhuma porta livre encontrada a partir de ${preferredPort} (${MAX_ATTEMPTS} tentativas).`,
+      ),
     );
   }
 }

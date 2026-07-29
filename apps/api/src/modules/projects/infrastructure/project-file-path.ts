@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import * as path from "node:path";
+import { apiError } from "../../../infrastructure/api-error";
 
 // Arquivos que o Korrelo gera e que guardam segredo ou config interna.
 // Nunca ficam navegáveis/editáveis por aqui, mesmo que o usuário peça o
@@ -15,12 +16,12 @@ export function resolveSafeProjectPath(workspaceRoot: string, relativePath: stri
   const rootWithSep = workspaceRoot.endsWith(path.sep) ? workspaceRoot : workspaceRoot + path.sep;
 
   if (resolved !== workspaceRoot && !resolved.startsWith(rootWithSep)) {
-    throw new BadRequestException("Caminho inválido.");
+    throw new BadRequestException(apiError("INVALID_PATH", "Caminho inválido."));
   }
 
   const segments = normalizedRelative.split(/[\\/]/);
   if (segments.some((segment) => BLOCKED_SEGMENTS.includes(segment))) {
-    throw new BadRequestException("Esse arquivo não pode ser acessado por aqui.");
+    throw new BadRequestException(apiError("FILE_PATH_BLOCKED", "Esse arquivo não pode ser acessado por aqui."));
   }
 
   return resolved;
