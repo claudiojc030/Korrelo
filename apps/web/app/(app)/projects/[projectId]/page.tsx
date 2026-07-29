@@ -182,7 +182,7 @@ export default async function ProjectSummaryPage({ params }: { params: { project
             {container?.memUsageMb != null ? `${container.memUsageMb} MB` : "—"}
           </p>
           <p className="mt-1 text-[12px] text-muted-foreground">
-            limite de {metrics ? CONTAINER_MEMORY_LIMIT_MB[metrics.tier] : "—"} MB nesse tier
+            limite de {metrics ? CONTAINER_MEMORY_LIMIT_MB[metrics.tier] : "—"} MB nesse porte de servidor
           </p>
         </div>
 

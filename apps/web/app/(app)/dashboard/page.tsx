@@ -92,9 +92,9 @@ function formatUptime(seconds: number): string {
 const TIER_LABEL: Record<SystemMetrics["tier"], string> = {
   nano: "Nano",
   micro: "Micro",
-  small: "Small",
-  medium: "Medium",
-  large: "Large",
+  small: "Pequeno",
+  medium: "Médio",
+  large: "Grande",
 };
 
 export default async function DashboardPage() {
@@ -131,7 +131,7 @@ export default async function DashboardPage() {
         </div>
         {metrics && (
           <span className="rounded-full border border-border-subtle bg-surface px-3 py-1 text-[12px] font-medium text-muted-foreground">
-            Tier {TIER_LABEL[metrics.tier]}
+            Porte {TIER_LABEL[metrics.tier]}
           </span>
         )}
       </div>
