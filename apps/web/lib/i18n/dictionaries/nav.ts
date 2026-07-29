@@ -11,6 +11,7 @@ export interface NavDict {
   commandPaletteNoResults: string;
   commandPaletteProjectSublabel: string;
   connectGithub: string;
+  createGithubApp: string;
   darkTheme: string;
   lightTheme: string;
   systemTerminal: string;
@@ -30,6 +31,7 @@ export const navEn: NavDict = {
   commandPaletteNoResults: "Nothing found.",
   commandPaletteProjectSublabel: "Project",
   connectGithub: "Connect GitHub",
+  createGithubApp: "Create GitHub App automatically",
   darkTheme: "Dark theme",
   lightTheme: "Light theme",
   systemTerminal: "VPS Terminal",
@@ -50,6 +52,7 @@ export const navPt: NavDict = {
   commandPaletteNoResults: "Nada encontrado.",
   commandPaletteProjectSublabel: "Projeto",
   connectGithub: "Conectar GitHub",
+  createGithubApp: "Criar GitHub App automaticamente",
   darkTheme: "Tema escuro",
   lightTheme: "Tema claro",
   systemTerminal: "Terminal da VPS",

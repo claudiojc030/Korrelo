@@ -50,14 +50,24 @@ builda o Core, roda as migrations, sobe tudo via PM2 e agenda backup diário.
 Em dois momentos ele **para e pede informação sua**:
 
 1. **Domínio (opcional)**: deixe em branco pra acessar só pelo IP.
-2. **GitHub App**: abre o `apps/api/.env` pra você preencher e pausa
-   esperando você terminar. Veja como cadastrar abaixo.
+2. **GitHub App**: pode deixar pra depois, sem problema — veja abaixo.
 
-## 2. Cadastrando o GitHub App
+## 2. Conectando o GitHub
 
 O GitHub App é o que permite o Korrelo listar seus repositórios e receber
 webhook de push (deploy automático). Sem ele, dá pra usar tudo o resto do
 Korrelo normalmente, só a importação/auto-deploy via GitHub fica indisponível.
+Não precisa configurar isso durante o `setup-vps.sh` — só apertar ENTER pra
+seguir sem domínio e cuidar disso depois, com calma.
+
+**Jeito fácil (recomendado)**: no dashboard do Korrelo, em "Primeiros passos",
+clique em **"Criar GitHub App automaticamente"**. Isso te leva direto pro
+GitHub com nome, permissões e webhook já preenchidos (fluxo de "manifest" do
+GitHub) — você só confirma a criação, o Korrelo recebe as credenciais de
+volta sozinho (App ID, chave privada, webhook secret) e já te leva pra tela
+de instalar o App nos repositórios que quiser. Sem copiar nada na mão.
+
+**Jeito manual** (se preferir controlar cada campo):
 
 1. Acesse **github.com/settings/apps/new** (conta pessoal) ou
    `github.com/organizations/SUA_ORG/settings/apps/new` (organização).
@@ -76,7 +86,7 @@ Korrelo normalmente, só a importação/auto-deploy via GitHub fica indisponíve
    - Anote o **slug** (aparece na URL, ex: `korrelo-seu-usuario`) → `GITHUB_APP_SLUG`.
    - Em **Private keys**, clique **Generate a private key**. Isso baixa um arquivo `.pem`.
 4. Instale o App na sua conta/organização (botão **Install App**), autorizando os repositórios que quiser gerenciar pelo Korrelo (ou todos).
-5. No `apps/api/.env` que o script deixou aberto, preencha:
+5. No `apps/api/.env`, preencha:
    ```
    GITHUB_APP_SLUG=korrelo-seu-usuario
    GITHUB_APP_ID=123456
@@ -88,7 +98,7 @@ Korrelo normalmente, só a importação/auto-deploy via GitHub fica indisponíve
    ```bash
    awk 'BEGIN{ORS="\\n"} {print}' caminho/para/sua-chave.pem
    ```
-6. Salve o arquivo e volte pro terminal onde `setup-vps.sh` está esperando, e aperte ENTER pra continuar.
+6. Reinicie a API pra ela reler o arquivo: `pm2 restart korrelo-api`.
 
 ## 3. Acessando o Korrelo
 

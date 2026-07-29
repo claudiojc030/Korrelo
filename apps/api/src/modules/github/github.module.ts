@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { GithubController } from "./presentation/github.controller";
 import { CompleteGithubInstallationUseCase } from "./application/complete-github-installation.use-case";
+import { CompleteGithubAppManifestUseCase } from "./application/complete-github-app-manifest.use-case";
 import { ListGithubRepositoriesUseCase } from "./application/list-github-repositories.use-case";
 import { GetGithubStatusUseCase } from "./application/get-github-status.use-case";
 import { JwtGithubAppClient } from "./infrastructure/jwt-github-app-client";
@@ -14,6 +15,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
   providers: [
     PrismaService,
     CompleteGithubInstallationUseCase,
+    CompleteGithubAppManifestUseCase,
     ListGithubRepositoriesUseCase,
     GetGithubStatusUseCase,
     { provide: GITHUB_APP_CLIENT, useClass: JwtGithubAppClient },

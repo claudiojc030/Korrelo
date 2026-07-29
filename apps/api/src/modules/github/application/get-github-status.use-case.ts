@@ -7,6 +7,7 @@ import {
 export interface GithubStatus {
   connected: boolean;
   accountLogin: string | null;
+  appConfigured: boolean;
 }
 
 @Injectable()
@@ -20,6 +21,7 @@ export class GetGithubStatusUseCase {
     return {
       connected: installation !== null,
       accountLogin: installation?.accountLogin ?? null,
+      appConfigured: Boolean(process.env.GITHUB_APP_ID && process.env.GITHUB_APP_SLUG),
     };
   }
 }

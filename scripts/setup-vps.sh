@@ -147,15 +147,8 @@ if [ ! -f apps/api/.env ]; then
   sed -i "s#^KORRELO_WEB_URL=.*#KORRELO_WEB_URL=${BASE_WEB_URL}#" apps/api/.env
   sed -i "s#^CORS_ORIGINS=.*#CORS_ORIGINS=${BASE_WEB_URL}#" apps/api/.env
   echo "apps/api/.env criado. JWT_SECRET, ENV_ENCRYPTION_KEY, KORRELO_WEB_URL e CORS_ORIGINS preenchidos automaticamente."
-  echo "IMPORTANTE: falta preencher GITHUB_APP_SLUG, GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY e"
-  echo "GITHUB_APP_WEBHOOK_SECRET em apps/api/.env (veja as instruções de cadastro do GitHub App"
-  echo "no README). O GITHUB_APP_WEBHOOK_SECRET precisa bater com o 'Webhook secret' configurado"
-  echo "nas settings do App em github.com. E o 'Webhook URL' de lá precisa apontar pra"
-  echo "${BASE_API_URL}/github/webhook, com o evento \"Push\" habilitado. É isso que liga o"
-  echo "deploy automático ao dar push."
-  if [ -r /dev/tty ]; then
-    read -rp "Pressione ENTER depois de editar apps/api/.env para continuar..." < /dev/tty
-  fi
+  echo "GitHub ainda não conectado, e tudo bem: no dashboard do Korrelo, em \"Primeiros passos\","
+  echo "tem um botão \"Criar GitHub App automaticamente\" que cuida disso sem precisar editar nada aqui."
 else
   echo "apps/api/.env já existe, não mexi nele."
 fi
