@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Database, DatabaseZap, Eye, EyeOff, Loader2, Play, TriangleAlert } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
+import { useTranslation } from "../../../../../lib/i18n/locale-provider";
+import { translateApiError } from "../../../../../lib/api-error";
+import type { ProjectDatabaseDict } from "../../../../../lib/i18n/dictionaries/project-database";
 
 type DatabaseType = "postgres" | "redis" | "mongodb" | "custom";
 
@@ -20,12 +23,14 @@ interface ManagedDatabase {
   createdAt: string;
 }
 
-const TYPE_LABEL: Record<DatabaseType, string> = {
-  postgres: "PostgreSQL",
-  redis: "Redis",
-  mongodb: "MongoDB",
-  custom: "Externo / Custom",
-};
+function getTypeLabels(t: ProjectDatabaseDict): Record<DatabaseType, string> {
+  return {
+    postgres: t.typeLabelPostgres,
+    redis: t.typeLabelRedis,
+    mongodb: t.typeLabelMongodb,
+    custom: t.typeLabelCustom,
+  };
+}
 const TYPE_PORT: Record<"postgres" | "redis" | "mongodb", number> = {
   postgres: 5432,
   redis: 6379,
@@ -43,6 +48,8 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 
 export default function DatabasePage({ params }: { params: { projectId: string } }) {
   const router = useRouter();
+  const { t } = useTranslation();
+  const TYPE_LABEL = getTypeLabels(t.projectDatabase);
   const [db, setDb] = useState<ManagedDatabase | null | undefined>(undefined);
   const [databaseEnabled, setDatabaseEnabled] = useState(true);
   const [provisioning, setProvisioning] = useState<DatabaseType | null>(null);
@@ -81,13 +88,13 @@ export default function DatabasePage({ params }: { params: { projectId: string }
         body: JSON.stringify({ type, ...body }),
       });
       if (!res.ok) {
-        const resBody = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(resBody.message ?? "Falha ao provisionar o banco.");
+        const resBody: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, resBody, t.projectDatabase.provisionError));
       }
       setCustomOpen(false);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : t.projectDatabase.unknownError);
     } finally {
       setProvisioning(null);
     }
@@ -108,7 +115,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
   if (db === undefined) {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 py-6">
-        <p className="text-[13px] text-muted-foreground">Carregando...</p>
+        <p className="text-[13px] text-muted-foreground">{t.common.loading}</p>
       </div>
     );
   }
@@ -117,8 +124,8 @@ export default function DatabasePage({ params }: { params: { projectId: string }
     return (
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-center justify-center gap-2 px-8 py-6 text-center">
         <Database size={20} strokeWidth={1.75} className="text-muted-foreground" />
-        <p className="text-[13.5px] font-medium text-foreground">Banco de dados desativado para este projeto</p>
-        <p className="text-[12.5px] text-muted-foreground">Ative de novo na aba Configurações.</p>
+        <p className="text-[13.5px] font-medium text-foreground">{t.projectDatabase.disabledTitle}</p>
+        <p className="text-[12.5px] text-muted-foreground">{t.projectDatabase.disabledSubtitle}</p>
       </div>
     );
   }
@@ -126,9 +133,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
   if (db === null) {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 py-6">
-        <p className="mb-4 text-[13.5px] text-muted-foreground">
-          Nenhum banco de dados provisionado pra este projeto ainda.
-        </p>
+        <p className="mb-4 text-[13.5px] text-muted-foreground">{t.projectDatabase.emptyState}</p>
         {error && <p className="mb-3 text-[13px] text-destructive">{error}</p>}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {(["postgres", "redis", "mongodb"] as DatabaseType[]).map((type) => (
@@ -138,9 +143,9 @@ export default function DatabasePage({ params }: { params: { projectId: string }
                 <span className="text-[13.5px] font-medium">{TYPE_LABEL[type]}</span>
               </div>
               <p className="mt-1 text-[12px] text-muted-foreground">
-                {type === "postgres" && "Banco relacional, com volume persistente e no backup diário."}
-                {type === "redis" && "Cache/fila em memória, por padrão não sobrevive a reinício nem entra no backup."}
-                {type === "mongodb" && "Banco de documentos, com volume persistente e no backup diário."}
+                {type === "postgres" && t.projectDatabase.postgresDescription}
+                {type === "redis" && t.projectDatabase.redisDescription}
+                {type === "mongodb" && t.projectDatabase.mongodbDescription}
               </p>
 
               {type === "redis" && (
@@ -151,10 +156,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
                     onChange={(e) => setRedisPersistent(e.target.checked)}
                     className="mt-0.5 accent-accent"
                   />
-                  <span>
-                    Este Redis guarda dado importante (não sei ao certo? marque por segurança): persistir em
-                    disco e incluir no backup diário. Deixa a escrita um pouco mais lenta.
-                  </span>
+                  <span>{t.projectDatabase.redisPersistentLabel}</span>
                 </label>
               )}
 
@@ -164,7 +166,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
                 className="mt-3 inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 {provisioning === type && <Loader2 size={14} className="animate-spin" />}
-                Provisionar {TYPE_LABEL[type]}
+                {t.projectDatabase.provisionButtonTemplate.replace("{type}", TYPE_LABEL[type])}
               </button>
             </div>
           ))}
@@ -174,35 +176,36 @@ export default function DatabasePage({ params }: { params: { projectId: string }
               <DatabaseZap size={15} strokeWidth={1.75} />
               <span className="text-[13.5px] font-medium">{TYPE_LABEL.custom}</span>
             </div>
-            <p className="mt-1 text-[12px] text-muted-foreground">
-              Já usa outra coisa (MongoDB Atlas, Supabase, um Postgres seu, etc.)? Cole a connection string
-              aqui. O Korrelo não sobe container nenhum, só injeta como variável de ambiente.
-            </p>
+            <p className="mt-1 text-[12px] text-muted-foreground">{t.projectDatabase.customDescription}</p>
 
             {!customOpen ? (
               <button
                 onClick={() => setCustomOpen(true)}
                 className="mt-3 rounded-md border border-border-subtle px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted"
               >
-                Conectar banco externo
+                {t.projectDatabase.connectExternalButton}
               </button>
             ) : (
               <div className="mt-3 flex flex-col gap-3">
                 <div>
-                  <label className="mb-1 block text-[12px] text-muted-foreground">Nome da variável de ambiente</label>
+                  <label className="mb-1 block text-[12px] text-muted-foreground">
+                    {t.projectDatabase.envVarNameLabel}
+                  </label>
                   <input
                     value={customEnvVarKey}
                     onChange={(e) => setCustomEnvVarKey(e.target.value)}
-                    placeholder="DATABASE_URL"
+                    placeholder={t.projectDatabase.envVarNamePlaceholder}
                     className="w-full rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none focus:border-accent"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[12px] text-muted-foreground">Connection string</label>
+                  <label className="mb-1 block text-[12px] text-muted-foreground">
+                    {t.projectDatabase.connectionStringLabel}
+                  </label>
                   <textarea
                     value={customConnectionString}
                     onChange={(e) => setCustomConnectionString(e.target.value)}
-                    placeholder="mongodb+srv://usuario:senha@cluster.mongodb.net/meubanco"
+                    placeholder={t.projectDatabase.connectionStringPlaceholder}
                     rows={2}
                     className="w-full resize-none rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none focus:border-accent"
                   />
@@ -219,13 +222,13 @@ export default function DatabasePage({ params }: { params: { projectId: string }
                     className="inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
                   >
                     {provisioning === "custom" && <Loader2 size={14} className="animate-spin" />}
-                    Conectar
+                    {t.projectDatabase.connectButton}
                   </button>
                   <button
                     onClick={() => setCustomOpen(false)}
                     className="rounded-md px-3.5 py-2 text-[13px] font-medium text-muted-foreground hover:bg-muted"
                   >
-                    Cancelar
+                    {t.common.cancel}
                   </button>
                 </div>
               </div>
@@ -257,32 +260,32 @@ export default function DatabasePage({ params }: { params: { projectId: string }
           className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
         >
           {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
-          {reveal ? "Ocultar senha" : "Mostrar senha"}
+          {reveal ? t.projectDatabase.hidePassword : t.projectDatabase.showPassword}
         </button>
       </div>
 
       <div className="rounded-xl border border-border-subtle bg-surface p-4">
         {isCustom ? (
           <>
-            <InfoRow label="Variável de ambiente" value={db.envVarKey} />
-            <InfoRow label="Connection string" value={<span className="break-all">{connectionString}</span>} />
+            <InfoRow label={t.projectDatabase.envVarLabel} value={db.envVarKey} />
+            <InfoRow label={t.projectDatabase.connectionStringLabel} value={<span className="break-all">{connectionString}</span>} />
           </>
         ) : (
           <>
-            <InfoRow label="Host (dentro da rede do projeto)" value="db" />
-            <InfoRow label="Porta" value={TYPE_PORT[db.type as "postgres" | "redis" | "mongodb"]} />
-            {db.type !== "redis" && <InfoRow label="Usuário" value={db.username} />}
-            {db.type !== "redis" && <InfoRow label="Banco" value={db.databaseName} />}
-            <InfoRow label="Senha" value={reveal ? db.password : "••••••••"} />
-            <InfoRow label="Connection string" value={<span className="break-all">{connectionString}</span>} />
+            <InfoRow label={t.projectDatabase.hostLabel} value="db" />
+            <InfoRow label={t.projectDatabase.portLabel} value={TYPE_PORT[db.type as "postgres" | "redis" | "mongodb"]} />
+            {db.type !== "redis" && <InfoRow label={t.projectDatabase.usernameLabel} value={db.username} />}
+            {db.type !== "redis" && <InfoRow label={t.projectDatabase.databaseNameLabel} value={db.databaseName} />}
+            <InfoRow label={t.projectDatabase.passwordLabel} value={reveal ? db.password : "••••••••"} />
+            <InfoRow label={t.projectDatabase.connectionStringLabel} value={<span className="break-all">{connectionString}</span>} />
             {db.type === "redis" && (
               <InfoRow
-                label="Persistência / backup"
+                label={t.projectDatabase.persistenceLabel}
                 value={
                   db.persistent ? (
-                    <span className="text-accent">Ativada, incluído no backup diário</span>
+                    <span className="text-accent">{t.projectDatabase.persistenceEnabled}</span>
                   ) : (
-                    <span className="text-muted-foreground">Desativada, cache descartável</span>
+                    <span className="text-muted-foreground">{t.projectDatabase.persistenceDisabled}</span>
                   )
                 }
               />
@@ -294,15 +297,15 @@ export default function DatabasePage({ params }: { params: { projectId: string }
       <p className="mt-3 text-[12.5px] text-muted-foreground">
         {isCustom ? (
           <>
-            Banco externo. O Korrelo não sobe container pra ele, só injeta{" "}
-            <span className="font-mono text-foreground">{db.envVarKey}</span> como variável de ambiente.
+            {t.projectDatabase.externalInfoPrefix}{" "}
+            <span className="font-mono text-foreground">{db.envVarKey}</span> {t.projectDatabase.externalInfoSuffix}
           </>
         ) : (
           <>
-            Já configurado como variável de ambiente (
-            {db.type === "postgres" ? "DATABASE_URL" : db.type === "mongodb" ? "MONGODB_URI" : "REDIS_URL"}).
-            Rode <span className="font-mono text-foreground">Deploy</span> na aba Resumo pra subir o container do
-            banco.
+            {t.projectDatabase.configuredInfoPrefix}
+            {db.type === "postgres" ? "DATABASE_URL" : db.type === "mongodb" ? "MONGODB_URI" : "REDIS_URL"}
+            {t.projectDatabase.configuredInfoMiddle}{" "}
+            <span className="font-mono text-foreground">Deploy</span> {t.projectDatabase.configuredInfoSuffix}
           </>
         )}
       </p>
@@ -316,7 +319,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
           onClick={() => setConfirmRemove(true)}
           className="text-[13px] font-medium text-destructive hover:opacity-85"
         >
-          Remover banco de dados
+          {t.projectDatabase.removeDatabaseButton}
         </button>
       </div>
 
@@ -336,11 +339,11 @@ export default function DatabasePage({ params }: { params: { projectId: string }
                 <TriangleAlert size={16} strokeWidth={1.75} />
               </div>
               <div>
-                <p className="text-[14.5px] font-semibold text-foreground">Remover o banco de dados?</p>
+                <p className="text-[14.5px] font-semibold text-foreground">{t.projectDatabase.confirmRemoveTitle}</p>
                 <p className="mt-1 text-[13px] text-muted-foreground">
                   {isCustom
-                    ? "A variável de ambiente continua salva, mas deixa de ser gerenciada aqui."
-                    : "Os dados são perdidos no próximo deploy. Não pode ser desfeito."}
+                    ? t.projectDatabase.confirmRemoveCustomBody
+                    : t.projectDatabase.confirmRemoveBody}
                 </p>
               </div>
             </div>
@@ -350,7 +353,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
                 disabled={removing}
                 className="rounded-md px-3.5 py-2 text-[13px] font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
               >
-                Cancelar
+                {t.common.cancel}
               </button>
               <button
                 onClick={handleRemove}
@@ -358,7 +361,7 @@ export default function DatabasePage({ params }: { params: { projectId: string }
                 className="inline-flex items-center gap-2 rounded-md bg-destructive px-3.5 py-2 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {removing && <Loader2 size={14} className="animate-spin" />}
-                Remover
+                {t.projectDatabase.remove}
               </button>
             </div>
           </div>
@@ -375,13 +378,13 @@ interface QueryResult {
   notice: string | null;
 }
 
-const QUERY_PLACEHOLDER: Record<"postgres" | "redis" | "mongodb", string> = {
-  postgres: "SELECT * FROM minha_tabela LIMIT 100;",
-  mongodb: "db.minhaColecao.find().limit(20).toArray()",
-  redis: "KEYS *",
-};
-
 function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgres" | "redis" | "mongodb" }) {
+  const { t } = useTranslation();
+  const QUERY_PLACEHOLDER: Record<"postgres" | "redis" | "mongodb", string> = {
+    postgres: t.projectDatabase.postgresQueryPlaceholder,
+    mongodb: t.projectDatabase.mongodbQueryPlaceholder,
+    redis: "KEYS *",
+  };
   const [tables, setTables] = useState<string[] | null>(null);
   const [tablesError, setTablesError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -394,13 +397,13 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
     apiFetch(`/projects/${projectId}/database/tables`)
       .then(async (res) => {
         if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { message?: string };
-          throw new Error(body.message ?? "Falha ao listar tabelas.");
+          const body: unknown = await res.json().catch(() => ({}));
+          throw new Error(translateApiError(t, body, t.projectDatabase.listTablesError));
         }
         return res.json();
       })
       .then((data: { tables: string[] }) => setTables(data.tables))
-      .catch((err) => setTablesError(err instanceof Error ? err.message : "Erro desconhecido"));
+      .catch((err) => setTablesError(err instanceof Error ? err.message : t.projectDatabase.unknownError));
   }
 
   useEffect(() => {
@@ -419,13 +422,13 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query }),
       });
-      const body = await res.json().catch(() => ({}));
+      const body: unknown = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error((body as { message?: string }).message ?? "Falha ao executar a query.");
+        throw new Error(translateApiError(t, body, t.projectDatabase.queryError));
       }
       setResult(body as QueryResult);
     } catch (err) {
-      setQueryError(err instanceof Error ? err.message : "Erro desconhecido");
+      setQueryError(err instanceof Error ? err.message : t.projectDatabase.unknownError);
     } finally {
       setRunning(false);
     }
@@ -438,13 +441,18 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
     }
   }
 
-  const entityLabel = type === "mongodb" ? "Coleções" : type === "redis" ? "Chaves (amostra)" : "Tabelas";
+  const entityLabel =
+    type === "mongodb"
+      ? t.projectDatabase.entityLabelCollections
+      : type === "redis"
+        ? t.projectDatabase.entityLabelKeysSample
+        : t.projectDatabase.entityLabelTables;
 
   return (
     <div className="mt-6">
       <div className="mb-2 flex items-center gap-2">
         <Database size={15} strokeWidth={1.75} className="text-foreground" />
-        <h2 className="text-[13.5px] font-semibold text-foreground">Navegador de dados</h2>
+        <h2 className="text-[13.5px] font-semibold text-foreground">{t.projectDatabase.browserTitle}</h2>
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[220px_1fr]">
@@ -455,9 +463,9 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
           {tablesError ? (
             <p className="px-1 text-[12px] text-destructive">{tablesError}</p>
           ) : tables === null ? (
-            <p className="px-1 text-[12px] text-muted-foreground">Carregando...</p>
+            <p className="px-1 text-[12px] text-muted-foreground">{t.common.loading}</p>
           ) : tables.length === 0 ? (
-            <p className="px-1 text-[12px] text-muted-foreground">Nenhuma encontrada ainda.</p>
+            <p className="px-1 text-[12px] text-muted-foreground">{t.projectDatabase.noneFoundYet}</p>
           ) : (
             <ul className="flex max-h-72 flex-col gap-0.5 overflow-y-auto">
               {tables.map((name) => (
@@ -490,14 +498,14 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
             className="w-full resize-none rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-accent"
           />
           <div className="flex items-center justify-between">
-            <p className="text-[11.5px] text-muted-foreground">Ctrl/Cmd + Enter pra executar</p>
+            <p className="text-[11.5px] text-muted-foreground">{t.projectDatabase.ctrlEnterHint}</p>
             <button
               onClick={handleRunQuery}
               disabled={running || !query.trim()}
               className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3.5 py-1.5 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
             >
               {running ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-              Executar
+              {t.projectDatabase.runButton}
             </button>
           </div>
 
@@ -539,10 +547,12 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
                   </table>
                 </div>
               ) : (
-                !result.notice && <p className="px-3 py-2 text-[12.5px] text-muted-foreground">Sem resultado.</p>
+                !result.notice && (
+                  <p className="px-3 py-2 text-[12.5px] text-muted-foreground">{t.projectDatabase.noResult}</p>
+                )
               )}
               <p className="border-t border-border-subtle px-3 py-1.5 text-[11.5px] text-muted-foreground">
-                {result.rowCount} linha(s)
+                {t.projectDatabase.rowCountTemplate.replace("{count}", String(result.rowCount))}
               </p>
             </div>
           )}

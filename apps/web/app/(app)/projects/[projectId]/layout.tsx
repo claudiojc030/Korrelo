@@ -3,6 +3,8 @@ import { ArrowLeft } from "lucide-react";
 import type { Project } from "@korrelo/shared-types";
 import { ProjectTabs } from "./project-tabs";
 import { authHeaderServer } from "../../../../lib/auth-cookie-server";
+import { getLocaleServer } from "../../../../lib/i18n/get-locale-server";
+import { getDictionary } from "../../../../lib/i18n/dictionaries";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -19,14 +21,6 @@ async function getProject(projectId: string): Promise<Project | null> {
   }
 }
 
-const STATUS_STYLE: Record<Project["status"], { label: string; dot: string; text: string }> = {
-  detected: { label: "Detectado", dot: "bg-muted-foreground", text: "text-muted-foreground" },
-  configuring: { label: "Configurando", dot: "bg-warning", text: "text-warning" },
-  running: { label: "Rodando", dot: "bg-accent", text: "text-accent" },
-  stopped: { label: "Parado", dot: "bg-muted-foreground", text: "text-muted-foreground" },
-  failed: { label: "Falhou", dot: "bg-destructive", text: "text-destructive" },
-};
-
 export default async function ProjectLayout({
   children,
   params,
@@ -34,12 +28,21 @@ export default async function ProjectLayout({
   children: React.ReactNode;
   params: { projectId: string };
 }) {
+  const t = getDictionary(getLocaleServer());
+  const STATUS_STYLE: Record<Project["status"], { label: string; dot: string; text: string }> = {
+    detected: { label: t.projectDetail.statusDetected, dot: "bg-muted-foreground", text: "text-muted-foreground" },
+    configuring: { label: t.projectDetail.statusConfiguring, dot: "bg-warning", text: "text-warning" },
+    running: { label: t.projectDetail.statusRunning, dot: "bg-accent", text: "text-accent" },
+    stopped: { label: t.projectDetail.statusStopped, dot: "bg-muted-foreground", text: "text-muted-foreground" },
+    failed: { label: t.projectDetail.statusFailed, dot: "bg-destructive", text: "text-destructive" },
+  };
+
   const project = await getProject(params.projectId);
 
   if (!project) {
     return (
       <div className="mx-auto max-w-5xl px-8 py-10">
-        <p className="text-[13.5px] text-destructive">Projeto não encontrado.</p>
+        <p className="text-[13.5px] text-destructive">{t.projectDetail.projectNotFound}</p>
       </div>
     );
   }
@@ -54,7 +57,7 @@ export default async function ProjectLayout({
           className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft size={14} strokeWidth={1.75} />
-          Projetos
+          {t.projectDetail.backToProjects}
         </Link>
         <div className="mt-2 flex items-center gap-2.5">
           <h1 className="text-xl font-semibold text-foreground">{project.name}</h1>

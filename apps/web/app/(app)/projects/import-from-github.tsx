@@ -5,8 +5,11 @@ import { useRouter } from "next/navigation";
 import { Github, Lock, Loader2 } from "lucide-react";
 import type { GithubRepositorySummary } from "@korrelo/shared-types";
 import { apiFetch } from "../../../lib/api-client";
+import { useTranslation } from "../../../lib/i18n/locale-provider";
+import { translateApiError } from "../../../lib/api-error";
 
 export function ImportFromGithub() {
+  const { t } = useTranslation();
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -32,10 +35,13 @@ export function ImportFromGithub() {
     setError(null);
     try {
       const res = await apiFetch("/github/repositories");
-      if (!res.ok) throw new Error("Não foi possível buscar os repositórios.");
+      if (!res.ok) {
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, t.projects.fetchReposError));
+      }
       setRepos(await res.json());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : t.projects.unknownError);
     } finally {
       setLoading(false);
     }
@@ -51,16 +57,22 @@ export function ImportFromGithub() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, repoUrl: repo.cloneUrl }),
       });
-      if (!createRes.ok) throw new Error("Falha ao criar o projeto.");
+      if (!createRes.ok) {
+        const body: unknown = await createRes.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, t.projects.createProjectError));
+      }
       const project = (await createRes.json()) as { id: string };
 
       const importRes = await apiFetch(`/projects/${project.id}/import`, { method: "POST" });
-      if (!importRes.ok) throw new Error("Falha ao importar/detectar a stack.");
+      if (!importRes.ok) {
+        const body: unknown = await importRes.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, t.projects.importDetectError));
+      }
 
       setOpen(false);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : t.projects.unknownError);
     } finally {
       setImportingRepo(null);
     }
@@ -73,7 +85,7 @@ export function ImportFromGithub() {
         className="inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90"
       >
         <Github size={15} strokeWidth={2} />
-        Importar do GitHub
+        {t.projects.importButton}
       </button>
 
       {open && (
@@ -81,7 +93,7 @@ export function ImportFromGithub() {
           {loading && (
             <div className="flex items-center justify-center gap-2 py-6 text-[13px] text-muted-foreground">
               <Loader2 size={15} className="animate-spin" />
-              Buscando repositórios...
+              {t.projects.fetchingRepos}
             </div>
           )}
 
@@ -89,7 +101,7 @@ export function ImportFromGithub() {
 
           {!loading && repos && repos.length === 0 && (
             <p className="px-2 py-4 text-center text-[12.5px] text-muted-foreground">
-              Nenhum repositório disponível.
+              {t.projects.noReposAvailable}
             </p>
           )}
 

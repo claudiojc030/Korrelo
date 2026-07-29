@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslation } from "../../../../lib/i18n/locale-provider";
 
 export function ProjectTabs({
   projectId,
@@ -13,15 +14,16 @@ export function ProjectTabs({
   databaseEnabled: boolean;
 }) {
   const pathname = usePathname();
+  const { t } = useTranslation();
   const tabs = [
-    { href: `/projects/${projectId}`, label: "Resumo" },
-    { href: `/projects/${projectId}/env`, label: "Variáveis de Ambiente" },
-    ...(databaseEnabled ? [{ href: `/projects/${projectId}/database`, label: "Banco de Dados" }] : []),
-    ...(terminalEnabled ? [{ href: `/projects/${projectId}/terminal`, label: "Terminal" }] : []),
-    { href: `/projects/${projectId}/logs`, label: "Logs" },
-    { href: `/projects/${projectId}/files`, label: "Arquivos" },
-    { href: `/projects/${projectId}/cron`, label: "Cron" },
-    { href: `/projects/${projectId}/settings`, label: "Configurações" },
+    { href: `/projects/${projectId}`, label: t.projectDetail.tabSummary },
+    { href: `/projects/${projectId}/env`, label: t.projectDetail.tabEnvVars },
+    ...(databaseEnabled ? [{ href: `/projects/${projectId}/database`, label: t.projectDetail.tabDatabase }] : []),
+    ...(terminalEnabled ? [{ href: `/projects/${projectId}/terminal`, label: t.projectDetail.tabTerminal }] : []),
+    { href: `/projects/${projectId}/logs`, label: t.projectDetail.tabLogs },
+    { href: `/projects/${projectId}/files`, label: t.projectDetail.tabFiles },
+    { href: `/projects/${projectId}/cron`, label: t.projectDetail.tabCron },
+    { href: `/projects/${projectId}/settings`, label: t.projectDetail.tabSettings },
   ];
 
   return (

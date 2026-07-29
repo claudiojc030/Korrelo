@@ -3,12 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, RefreshCw, ScrollText } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
+import { useTranslation } from "../../../../../lib/i18n/locale-provider";
+import { translateApiError } from "../../../../../lib/api-error";
 
 type LogTarget = "app" | "database";
 
 const POLL_MS = 4000;
 
 export default function LogsPage({ params }: { params: { projectId: string } }) {
+  const { t } = useTranslation();
   const [target, setTarget] = useState<LogTarget>("app");
   const [hasManagedDatabase, setHasManagedDatabase] = useState(false);
   const [content, setContent] = useState<string | null>(null);
@@ -32,8 +35,8 @@ export default function LogsPage({ params }: { params: { projectId: string } }) 
       try {
         const res = await apiFetch(`/projects/${params.projectId}/logs?target=${target}&tail=300`);
         if (!res.ok) {
-          const body = (await res.json().catch(() => ({}))) as { message?: string };
-          throw new Error(body.message ?? "Falha ao carregar logs.");
+          const body: unknown = await res.json().catch(() => ({}));
+          throw new Error(translateApiError(t, body, t.projectLogs.loadLogsError));
         }
         const data = (await res.json()) as { containerName: string; content: string };
         if (!cancelled) {
@@ -41,7 +44,7 @@ export default function LogsPage({ params }: { params: { projectId: string } }) 
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Erro desconhecido");
+        if (!cancelled) setError(err instanceof Error ? err.message : t.projectLogs.unknownError);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -72,7 +75,7 @@ export default function LogsPage({ params }: { params: { projectId: string } }) 
               target === "app" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            App
+            {t.projectLogs.appTab}
           </button>
           <button
             onClick={() => setTarget("database")}
@@ -81,7 +84,7 @@ export default function LogsPage({ params }: { params: { projectId: string } }) 
               target === "database" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            Banco de Dados
+            {t.projectLogs.databaseTab}
           </button>
         </div>
 
@@ -93,7 +96,7 @@ export default function LogsPage({ params }: { params: { projectId: string } }) 
               onChange={(e) => setAutoScroll(e.target.checked)}
               className="accent-accent"
             />
-            Auto-scroll
+            {t.projectLogs.autoScroll}
           </label>
           {loading && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
         </div>
@@ -109,13 +112,13 @@ export default function LogsPage({ params }: { params: { projectId: string } }) 
           ref={scrollRef}
           className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-xl border border-border-subtle bg-surface p-4 font-mono text-[12px] leading-relaxed text-foreground"
         >
-          {content || "Sem logs ainda."}
+          {content || t.projectLogs.noLogsYet}
         </pre>
       )}
 
       <div className="mt-2 flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
         <RefreshCw size={11} />
-        Atualiza a cada {POLL_MS / 1000}s
+        {t.projectLogs.refreshEvery.replace("{seconds}", String(POLL_MS / 1000))}
       </div>
     </div>
   );

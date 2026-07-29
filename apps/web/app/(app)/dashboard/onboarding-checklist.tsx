@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { CheckCircle2, Circle, Sparkles } from "lucide-react";
 import { GithubConnectButton } from "../../github-connect-button";
+import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
+import { getDictionary } from "../../../lib/i18n/dictionaries";
 
 interface OnboardingChecklistProps {
   githubConnected: boolean;
@@ -17,39 +19,40 @@ interface Step {
 }
 
 export function OnboardingChecklist({ githubConnected, hasProjects, twoFactorEnabled }: OnboardingChecklistProps) {
+  const t = getDictionary(getLocaleServer());
   const steps: Step[] = [
     {
       key: "github",
-      label: "Conectar sua conta do GitHub",
-      description: "Necessário pra importar e implantar seus repositórios.",
+      label: t.dashboard.onboardingGithubLabel,
+      description: t.dashboard.onboardingGithubDescription,
       done: githubConnected,
       action: <GithubConnectButton />,
     },
     {
       key: "project",
-      label: "Criar ou importar seu primeiro projeto",
-      description: "Traga um repositório existente ou comece um novo.",
+      label: t.dashboard.onboardingProjectLabel,
+      description: t.dashboard.onboardingProjectDescription,
       done: hasProjects,
       action: (
         <Link
           href="/projects"
           className="inline-flex items-center gap-2 rounded-md bg-foreground px-4 py-2 text-[13.5px] font-medium text-background transition-opacity hover:opacity-90"
         >
-          Ir pra Projetos
+          {t.dashboard.onboardingProjectAction}
         </Link>
       ),
     },
     {
       key: "2fa",
-      label: "Ativar autenticação em duas etapas",
-      description: "Protege sua conta de administrador com um segundo fator.",
+      label: t.dashboard.onboarding2faLabel,
+      description: t.dashboard.onboarding2faDescription,
       done: twoFactorEnabled,
       action: (
         <Link
           href="/security"
           className="inline-flex items-center gap-2 rounded-md bg-foreground px-4 py-2 text-[13.5px] font-medium text-background transition-opacity hover:opacity-90"
         >
-          Ir pra Segurança
+          {t.dashboard.onboarding2faAction}
         </Link>
       ),
     },
@@ -64,7 +67,7 @@ export function OnboardingChecklist({ githubConnected, hasProjects, twoFactorEna
     <div className="mb-6 rounded-xl border border-border-subtle bg-surface p-4">
       <div className="mb-3 flex items-center gap-2">
         <Sparkles size={15} strokeWidth={1.75} className="text-accent" />
-        <h2 className="text-[13.5px] font-semibold text-foreground">Primeiros passos</h2>
+        <h2 className="text-[13.5px] font-semibold text-foreground">{t.dashboard.onboardingTitle}</h2>
         <span className="text-[12px] text-muted-foreground">
           {steps.length - pending.length}/{steps.length}
         </span>

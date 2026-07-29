@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { ChevronRight, ChevronDown, File, Folder, Loader2, Save } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
+import { useTranslation } from "../../../../../lib/i18n/locale-provider";
+import { translateApiError } from "../../../../../lib/api-error";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
 
@@ -123,6 +125,7 @@ function guessLanguage(path: string): string {
 }
 
 export default function FilesClient({ projectId }: { projectId: string }) {
+  const { t } = useTranslation();
   const [rootNodes, setRootNodes] = useState<TreeNode[] | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [content, setContent] = useState<string>("");
@@ -169,8 +172,8 @@ export default function FilesClient({ projectId }: { projectId: string }) {
     try {
       const res = await apiFetch(`/projects/${projectId}/files/content?path=${encodeURIComponent(node.path)}`);
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Falha ao abrir o arquivo.");
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, t.projectFiles.openFileError));
       }
       const data = (await res.json()) as { content: string };
       setContent(data.content);
@@ -178,7 +181,7 @@ export default function FilesClient({ projectId }: { projectId: string }) {
     } catch (err) {
       setContent("");
       setOriginalContent("");
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : t.projectFiles.unknownError);
     } finally {
       setLoadingFile(false);
     }
@@ -195,12 +198,12 @@ export default function FilesClient({ projectId }: { projectId: string }) {
         body: JSON.stringify({ path: selectedPath, content }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Falha ao salvar.");
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, t.projectFiles.saveError));
       }
       setOriginalContent(content);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : t.projectFiles.unknownError);
     } finally {
       setSaving(false);
     }
@@ -212,9 +215,9 @@ export default function FilesClient({ projectId }: { projectId: string }) {
     <div className="flex min-h-0 flex-1">
       <aside className="w-64 flex-none overflow-y-auto border-r border-border-subtle px-3 py-4">
         {rootNodes === null ? (
-          <p className="text-[12.5px] text-muted-foreground">Carregando...</p>
+          <p className="text-[12.5px] text-muted-foreground">{t.projectFiles.loading}</p>
         ) : rootNodes.length === 0 ? (
-          <p className="text-[12.5px] text-muted-foreground">Sem arquivos (projeto ainda não importado?).</p>
+          <p className="text-[12.5px] text-muted-foreground">{t.projectFiles.noFiles}</p>
         ) : (
           <TreeView
             nodes={rootNodes}
@@ -228,7 +231,7 @@ export default function FilesClient({ projectId }: { projectId: string }) {
 
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-border-subtle px-4 py-2">
-          <p className="truncate font-mono text-[12.5px] text-muted-foreground">{selectedPath ?? "Selecione um arquivo"}</p>
+          <p className="truncate font-mono text-[12.5px] text-muted-foreground">{selectedPath ?? t.projectFiles.selectFilePlaceholder}</p>
           <div className="flex items-center gap-3">
             {error && <p className="text-[12px] text-destructive">{error}</p>}
             {selectedPath && (
@@ -238,7 +241,7 @@ export default function FilesClient({ projectId }: { projectId: string }) {
                 className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[12.5px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-40"
               >
                 {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
-                Salvar
+                {t.projectFiles.save}
               </button>
             )}
           </div>
@@ -247,7 +250,7 @@ export default function FilesClient({ projectId }: { projectId: string }) {
         <div className="min-h-0 flex-1">
           {loadingFile ? (
             <div className="flex h-full items-center justify-center text-[13px] text-muted-foreground">
-              Carregando...
+              {t.projectFiles.loading}
             </div>
           ) : selectedPath ? (
             <MonacoEditor
@@ -261,7 +264,7 @@ export default function FilesClient({ projectId }: { projectId: string }) {
             />
           ) : (
             <div className="flex h-full items-center justify-center text-[13px] text-muted-foreground">
-              Escolha um arquivo à esquerda pra ver e editar.
+              {t.projectFiles.chooseFilePrompt}
             </div>
           )}
         </div>

@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import { Loader2, ShieldHalf } from "lucide-react";
 import { apiFetch } from "../../../lib/api-client";
+import { useTranslation } from "../../../lib/i18n/locale-provider";
+import { translateApiError } from "../../../lib/api-error";
+import type { SystemServicesDict } from "../../../lib/i18n/dictionaries/system-services";
 
 interface SystemService {
   id: string;
@@ -16,22 +19,26 @@ interface SystemService {
   enabled: boolean;
 }
 
-const RISK_STYLE: Record<SystemService["riskLevel"], { label: string; className: string }> = {
-  baixo: { label: "Risco baixo", className: "bg-accent/10 text-accent" },
-  medio: { label: "Risco médio", className: "bg-warning/10 text-warning" },
-  alto: { label: "Risco alto", className: "bg-destructive/10 text-destructive" },
-};
+function riskStyle(t: SystemServicesDict): Record<SystemService["riskLevel"], { label: string; className: string }> {
+  return {
+    baixo: { label: t.riskLow, className: "bg-accent/10 text-accent" },
+    medio: { label: t.riskMedium, className: "bg-warning/10 text-warning" },
+    alto: { label: t.riskHigh, className: "bg-destructive/10 text-destructive" },
+  };
+}
 
 function ServiceRow({
   service,
   pending,
   onToggle,
+  t,
 }: {
   service: SystemService;
   pending: boolean;
   onToggle: (enabled: boolean) => void;
+  t: SystemServicesDict;
 }) {
-  const risk = RISK_STYLE[service.riskLevel];
+  const risk = riskStyle(t)[service.riskLevel];
   const isOn = service.exists && (service.active || service.enabled);
 
   return (
@@ -42,13 +49,13 @@ function ServiceRow({
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${risk.className}`}>{risk.label}</span>
           {!service.exists && (
             <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-              Não presente nesta VPS
+              {t.notPresent}
             </span>
           )}
         </div>
         <p className="mt-0.5 text-[12.5px] text-muted-foreground">{service.description}</p>
         <p className="mt-1 text-[12px] text-muted-foreground/80">
-          <span className="font-medium">Se desativar:</span> {service.riskNote}
+          <span className="font-medium">{t.disableEffectLabel}</span> {service.riskNote}
         </p>
       </div>
 
@@ -72,6 +79,8 @@ function ServiceRow({
 }
 
 export default function SystemServicesPage() {
+  const { t } = useTranslation();
+  const systemServices = t.systemServices;
   const [services, setServices] = useState<SystemService[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
@@ -97,12 +106,12 @@ export default function SystemServicesPage() {
         body: JSON.stringify({ enabled }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Falha ao atualizar o serviço.");
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, systemServices.errorToggleFailed));
       }
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : systemServices.errorUnknown);
     } finally {
       setPendingId(null);
     }
@@ -111,7 +120,7 @@ export default function SystemServicesPage() {
   if (services === null) {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 py-6">
-        <p className="text-[13px] text-muted-foreground">Carregando...</p>
+        <p className="text-[13px] text-muted-foreground">{systemServices.loading}</p>
       </div>
     );
   }
@@ -125,12 +134,9 @@ export default function SystemServicesPage() {
     <div className="mx-auto w-full max-w-5xl px-8 py-6">
       <div className="mb-1 flex items-center gap-2">
         <ShieldHalf size={16} strokeWidth={1.75} className="text-foreground" />
-        <h1 className="text-[15px] font-semibold text-foreground">Serviços do servidor</h1>
+        <h1 className="text-[15px] font-semibold text-foreground">{systemServices.pageTitle}</h1>
       </div>
-      <p className="mb-5 text-[12.5px] text-muted-foreground">
-        Serviços do sistema operacional que uma VPS rodando só o Korrelo normalmente não precisa. Lista fechada
-        e revisada, nunca dá pra mexer em serviços essenciais (SSH, Docker, nginx, etc.) por aqui.
-      </p>
+      <p className="mb-5 text-[12.5px] text-muted-foreground">{systemServices.pageDescription}</p>
 
       {error && <p className="mb-3 text-[13px] text-destructive">{error}</p>}
 
@@ -143,6 +149,7 @@ export default function SystemServicesPage() {
               service={service}
               pending={pendingId === service.id}
               onToggle={(enabled) => handleToggle(service.id, enabled)}
+              t={systemServices}
             />
           ))}
         </div>
@@ -151,7 +158,7 @@ export default function SystemServicesPage() {
       {pendingId && (
         <p className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
           <Loader2 size={13} className="animate-spin" />
-          Aplicando...
+          {systemServices.applying}
         </p>
       )}
     </div>

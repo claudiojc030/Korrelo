@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Clock, Loader2, Play, Trash2, TriangleAlert } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
+import { useTranslation } from "../../../../../lib/i18n/locale-provider";
+import { translateApiError } from "../../../../../lib/api-error";
 
 interface CronJob {
   id: string;
@@ -17,22 +19,31 @@ interface CronJob {
   createdAt: string;
 }
 
-const SCHEDULE_EXAMPLES = [
-  { expr: "*/5 * * * *", label: "a cada 5 minutos" },
-  { expr: "0 * * * *", label: "a cada hora" },
-  { expr: "0 3 * * *", label: "todo dia às 3h" },
-  { expr: "0 0 * * 0", label: "toda semana, domingo à meia-noite" },
-];
-
 function StatusBadge({ status }: { status: CronJob["lastStatus"] }) {
-  if (!status) return <span className="text-[12px] text-muted-foreground">Nunca rodou</span>;
+  const { t } = useTranslation();
+  if (!status) return <span className="text-[12px] text-muted-foreground">{t.projectCron.statusNeverRun}</span>;
   if (status === "success") {
-    return <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent">Sucesso</span>;
+    return (
+      <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent">
+        {t.projectCron.statusSuccess}
+      </span>
+    );
   }
-  return <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">Falhou</span>;
+  return (
+    <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">
+      {t.projectCron.statusFailed}
+    </span>
+  );
 }
 
 export default function CronPage({ params }: { params: { projectId: string } }) {
+  const { t } = useTranslation();
+  const SCHEDULE_EXAMPLES = [
+    { expr: "*/5 * * * *", label: t.projectCron.scheduleExampleEvery5Min },
+    { expr: "0 * * * *", label: t.projectCron.scheduleExampleEveryHour },
+    { expr: "0 3 * * *", label: t.projectCron.scheduleExampleDaily3am },
+    { expr: "0 0 * * 0", label: t.projectCron.scheduleExampleWeeklySunday },
+  ];
   const [jobs, setJobs] = useState<CronJob[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -71,8 +82,8 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
         body: JSON.stringify({ name, command, schedule }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Falha ao criar o cron job.");
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, t.projectCron.createError));
       }
       setName("");
       setCommand("");
@@ -80,7 +91,7 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
       setFormOpen(false);
       load();
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : "Erro desconhecido");
+      setFormError(err instanceof Error ? err.message : t.projectCron.unknownError);
     } finally {
       setSubmitting(false);
     }
@@ -106,13 +117,13 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
     try {
       const res = await apiFetch(`/projects/${params.projectId}/cron/${jobId}/run`, { method: "POST" });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Falha ao rodar o cron job.");
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, t.projectCron.runError));
       }
       setExpandedId(jobId);
       load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : t.projectCron.unknownError);
     } finally {
       setPendingId(null);
     }
@@ -132,7 +143,7 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
   if (jobs === null) {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 py-6">
-        <p className="text-[13px] text-muted-foreground">Carregando...</p>
+        <p className="text-[13px] text-muted-foreground">{t.common.loading}</p>
       </div>
     );
   }
@@ -143,17 +154,15 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
         <div>
           <h1 className="flex items-center gap-2 text-[15px] font-semibold text-foreground">
             <Clock size={16} strokeWidth={1.75} />
-            Tarefas agendadas (cron)
+            {t.projectCron.title}
           </h1>
-          <p className="mt-1 text-[12.5px] text-muted-foreground">
-            Cada tarefa roda o comando dentro do container deste projeto, no horário definido.
-          </p>
+          <p className="mt-1 text-[12.5px] text-muted-foreground">{t.projectCron.subtitle}</p>
         </div>
         <button
           onClick={() => setFormOpen((v) => !v)}
           className="rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90"
         >
-          {formOpen ? "Cancelar" : "Nova tarefa"}
+          {formOpen ? t.common.cancel : t.projectCron.newTask}
         </button>
       </div>
 
@@ -165,31 +174,31 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
           className="mb-5 flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface p-4"
         >
           <div>
-            <label className="mb-1 block text-[12px] text-muted-foreground">Nome</label>
+            <label className="mb-1 block text-[12px] text-muted-foreground">{t.projectCron.nameLabel}</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="Limpar cache antigo"
+              placeholder={t.projectCron.namePlaceholder}
               required
               className="w-full rounded-md border border-border-subtle bg-transparent px-3 py-2 text-[13px] text-foreground outline-none focus:border-accent"
             />
           </div>
           <div>
-            <label className="mb-1 block text-[12px] text-muted-foreground">Comando (roda dentro do container)</label>
+            <label className="mb-1 block text-[12px] text-muted-foreground">{t.projectCron.commandLabel}</label>
             <input
               value={command}
               onChange={(e) => setCommand(e.target.value)}
-              placeholder="npm run cron:limpar-cache"
+              placeholder={t.projectCron.commandPlaceholder}
               required
               className="w-full rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none focus:border-accent"
             />
           </div>
           <div>
-            <label className="mb-1 block text-[12px] text-muted-foreground">Agendamento (expressão cron)</label>
+            <label className="mb-1 block text-[12px] text-muted-foreground">{t.projectCron.scheduleLabel}</label>
             <input
               value={schedule}
               onChange={(e) => setSchedule(e.target.value)}
-              placeholder="0 3 * * *"
+              placeholder={t.projectCron.schedulePlaceholder}
               required
               className="w-full rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none focus:border-accent"
             />
@@ -213,13 +222,13 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
             className="inline-flex w-fit items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             {submitting && <Loader2 size={14} className="animate-spin" />}
-            Criar tarefa
+            {t.projectCron.createButton}
           </button>
         </form>
       )}
 
       {jobs.length === 0 && !formOpen && (
-        <p className="text-[13px] text-muted-foreground">Nenhuma tarefa agendada pra este projeto ainda.</p>
+        <p className="text-[13px] text-muted-foreground">{t.projectCron.emptyState}</p>
       )}
 
       <div className="flex flex-col gap-3">
@@ -236,7 +245,12 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
                 </div>
                 <p className="mt-1 truncate font-mono text-[12.5px] text-muted-foreground">{job.command}</p>
                 <p className="mt-1 text-[11.5px] text-muted-foreground/80">
-                  {job.lastRunAt ? `Última execução: ${new Date(job.lastRunAt).toLocaleString("pt-BR")}` : "Nunca rodou ainda"}
+                  {job.lastRunAt
+                    ? t.projectCron.lastRanAtTemplate.replace(
+                        "{date}",
+                        new Date(job.lastRunAt).toLocaleString("pt-BR"),
+                      )
+                    : t.projectCron.neverRanYet}
                 </p>
               </div>
 
@@ -244,11 +258,11 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
                 <button
                   onClick={() => handleRunNow(job.id)}
                   disabled={pendingId === job.id}
-                  title="Rodar agora"
+                  title={t.projectCron.runNow}
                   className="inline-flex items-center gap-1.5 rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
                 >
                   {pendingId === job.id ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
-                  Rodar agora
+                  {t.projectCron.runNow}
                 </button>
                 <button
                   role="switch"
@@ -268,7 +282,7 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
                 <button
                   onClick={() => setConfirmDeleteId(job.id)}
                   className="text-muted-foreground hover:text-destructive"
-                  title="Remover"
+                  title={t.projectCron.remove}
                 >
                   <Trash2 size={15} strokeWidth={1.75} />
                 </button>
@@ -280,7 +294,7 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
                 onClick={() => setExpandedId(expandedId === job.id ? null : job.id)}
                 className="mt-2 text-[12px] text-muted-foreground hover:text-foreground"
               >
-                {expandedId === job.id ? "Ocultar saída" : "Ver saída da última execução"}
+                {expandedId === job.id ? t.projectCron.hideOutput : t.projectCron.viewOutput}
               </button>
             )}
             {expandedId === job.id && job.lastOutput && (
@@ -305,8 +319,10 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
                       <TriangleAlert size={16} strokeWidth={1.75} />
                     </div>
                     <div>
-                      <p className="text-[14.5px] font-semibold text-foreground">Remover "{job.name}"?</p>
-                      <p className="mt-1 text-[13px] text-muted-foreground">Não pode ser desfeito.</p>
+                      <p className="text-[14.5px] font-semibold text-foreground">
+                        {t.projectCron.confirmDeleteTitleTemplate.replace("{name}", job.name)}
+                      </p>
+                      <p className="mt-1 text-[13px] text-muted-foreground">{t.projectCron.cannotBeUndone}</p>
                     </div>
                   </div>
                   <div className="mt-5 flex justify-end gap-2">
@@ -314,7 +330,7 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
                       onClick={() => setConfirmDeleteId(null)}
                       className="rounded-md px-3.5 py-2 text-[13px] font-medium text-muted-foreground hover:bg-muted"
                     >
-                      Cancelar
+                      {t.common.cancel}
                     </button>
                     <button
                       onClick={() => handleDelete(job.id)}
@@ -322,7 +338,7 @@ export default function CronPage({ params }: { params: { projectId: string } }) 
                       className="inline-flex items-center gap-2 rounded-md bg-destructive px-3.5 py-2 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                     >
                       {pendingId === job.id && <Loader2 size={14} className="animate-spin" />}
-                      Remover
+                      {t.projectCron.remove}
                     </button>
                   </div>
                 </div>

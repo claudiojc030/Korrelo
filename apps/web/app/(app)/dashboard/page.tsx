@@ -8,6 +8,8 @@ import { UpdateBanner } from "./update-banner";
 import { TierBadge } from "./tier-badge";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
 import { AutoRefresh } from "../../../components/auto-refresh";
+import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
+import { getDictionary } from "../../../lib/i18n/dictionaries";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -90,15 +92,15 @@ function formatUptime(seconds: number): string {
   return `${minutes}min`;
 }
 
-const TIER_LABEL: Record<SystemMetrics["tier"], string> = {
-  nano: "Nano",
-  micro: "Micro",
-  small: "Pequeno",
-  medium: "Médio",
-  large: "Grande",
-};
-
 export default async function DashboardPage() {
+  const t = getDictionary(getLocaleServer());
+  const TIER_LABEL: Record<SystemMetrics["tier"], string> = {
+    nano: t.dashboard.tierNano,
+    micro: t.dashboard.tierMicro,
+    small: t.dashboard.tierSmall,
+    medium: t.dashboard.tierMedium,
+    large: t.dashboard.tierLarge,
+  };
   const [metrics, projects, githubStatus, twoFactorStatus, updateStatus] = await Promise.all([
     getSystemMetrics(),
     getProjects(),
@@ -121,13 +123,13 @@ export default async function DashboardPage() {
       <AutoRefresh intervalMs={12000} />
       <div className="mb-8 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Dashboard</h1>
+          <h1 className="text-xl font-semibold text-foreground">{t.dashboard.title}</h1>
           <p className="mt-0.5 flex items-center gap-1.5 text-[13.5px] text-muted-foreground">
             <span className="relative flex h-1.5 w-1.5">
               <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
               <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-accent" />
             </span>
-            Atualiza a cada 12s
+            {t.dashboard.autoRefreshNote}
           </p>
         </div>
         {metrics && <TierBadge tier={metrics.tier} label={TIER_LABEL[metrics.tier]} />}
@@ -142,43 +144,41 @@ export default async function DashboardPage() {
       />
 
       {!metrics ? (
-        <p className="text-[13.5px] text-destructive">
-          Não foi possível carregar as métricas. Verifique se a API está no ar.
-        </p>
+        <p className="text-[13.5px] text-destructive">{t.dashboard.metricsUnavailable}</p>
       ) : (
         <>
           <h2 className="mb-2.5 text-[13px] font-medium text-muted-foreground">
-            Geral <span className="text-muted-foreground/60">· total do servidor</span>
+            {t.dashboard.overview} <span className="text-muted-foreground/60">· {t.dashboard.overviewSubtitle}</span>
           </h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <MetricTile label="CPU" icon={Cpu} percent={metrics.cpuPercent} detail="uso médio agora" />
+            <MetricTile label={t.dashboard.cpu} icon={Cpu} percent={metrics.cpuPercent} detail={t.dashboard.cpuDetail} />
             <MetricTile
-              label="Memória"
+              label={t.dashboard.memory}
               icon={MemoryStick}
               percent={metrics.usedMemPercent}
-              detail={`${((metrics.totalMemMb - metrics.freeMemMb) / 1024).toFixed(1)} GB de ${(metrics.totalMemMb / 1024).toFixed(1)} GB`}
+              detail={`${((metrics.totalMemMb - metrics.freeMemMb) / 1024).toFixed(1)} GB ${t.dashboard.memoryOf} ${(metrics.totalMemMb / 1024).toFixed(1)} GB`}
             />
             {metrics.usedDiskPercent !== null ? (
               <MetricTile
-                label="Disco"
+                label={t.dashboard.disk}
                 icon={HardDrive}
                 percent={metrics.usedDiskPercent}
-                detail={`${((metrics.diskTotalGb ?? 0) - (metrics.diskFreeGb ?? 0)).toFixed(0)} GB de ${(metrics.diskTotalGb ?? 0).toFixed(0)} GB`}
+                detail={`${((metrics.diskTotalGb ?? 0) - (metrics.diskFreeGb ?? 0)).toFixed(0)} GB ${t.dashboard.memoryOf} ${(metrics.diskTotalGb ?? 0).toFixed(0)} GB`}
               />
             ) : (
               <div className="rounded-xl border border-border-subtle bg-surface p-4">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <HardDrive size={15} strokeWidth={1.75} />
-                  <span className="text-[13px] font-medium">Disco</span>
+                  <span className="text-[13px] font-medium">{t.dashboard.disk}</span>
                 </div>
-                <p className="mt-3 text-[12.5px] text-muted-foreground">indisponível nesta plataforma</p>
+                <p className="mt-3 text-[12.5px] text-muted-foreground">{t.common.unavailableOnPlatform}</p>
               </div>
             )}
           </div>
 
           <div className="mt-4 flex items-center gap-2 rounded-xl border border-border-subtle bg-surface px-4 py-3 text-[13px] text-muted-foreground">
             <Clock size={15} strokeWidth={1.75} />
-            Uptime <span className="font-mono text-foreground">{formatUptime(metrics.uptimeSeconds)}</span>
+            {t.dashboard.uptime} <span className="font-mono text-foreground">{formatUptime(metrics.uptimeSeconds)}</span>
           </div>
 
           <MetricsHistoryChart />
@@ -187,12 +187,12 @@ export default async function DashboardPage() {
             <div className="mb-2.5 flex items-center gap-2 text-muted-foreground">
               <Server size={15} strokeWidth={1.75} />
               <h2 className="text-[13px] font-medium">
-                Projetos rodando <span className="text-muted-foreground/60">· consumo individual</span>
+                {t.dashboard.runningProjects} <span className="text-muted-foreground/60">· {t.dashboard.runningProjectsSubtitle}</span>
               </h2>
             </div>
 
             {runningProjects.length === 0 ? (
-              <p className="text-[13px] text-muted-foreground">Nenhum projeto rodando no momento.</p>
+              <p className="text-[13px] text-muted-foreground">{t.dashboard.noRunningProjects}</p>
             ) : (
               <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
                 {runningProjects.map((project, i) => {
@@ -231,7 +231,7 @@ export default async function DashboardPage() {
                             className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
                           >
                             <SquareTerminal size={11} strokeWidth={1.75} />
-                            Terminal
+                            {t.dashboard.terminal}
                           </Link>
                         </div>
                       </div>
@@ -266,11 +266,11 @@ export default async function DashboardPage() {
             <div className="mb-2.5 flex items-center gap-2 text-muted-foreground">
               <Box size={15} strokeWidth={1.75} />
               <h2 className="text-[13px] font-medium">
-                Infraestrutura <span className="text-muted-foreground/60">· containers de suporte</span>
+                {t.dashboard.infrastructure} <span className="text-muted-foreground/60">· {t.dashboard.infrastructureSubtitle}</span>
               </h2>
             </div>
             {otherContainers.length === 0 ? (
-              <p className="text-[13px] text-muted-foreground">Nenhum container de infraestrutura ativo.</p>
+              <p className="text-[13px] text-muted-foreground">{t.dashboard.noInfraContainers}</p>
             ) : (
               <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
                 {otherContainers.map((container, i) => (

@@ -5,13 +5,8 @@ import { useRouter } from "next/navigation";
 import { Globe, Loader2 } from "lucide-react";
 import type { DomainSslStatus } from "@korrelo/shared-types";
 import { apiFetch } from "../../../../lib/api-client";
-
-const STATUS_LABEL: Record<DomainSslStatus, { label: string; className: string }> = {
-  none: { label: "-", className: "text-muted-foreground" },
-  pending: { label: "Emitindo certificado...", className: "text-warning" },
-  active: { label: "HTTPS ativo", className: "text-accent" },
-  failed: { label: "Falhou", className: "text-destructive" },
-};
+import { useTranslation } from "../../../../lib/i18n/locale-provider";
+import { translateApiError } from "../../../../lib/api-error";
 
 export function DomainCard({
   projectId,
@@ -25,6 +20,13 @@ export function DomainCard({
   domainSslStatus: DomainSslStatus;
 }) {
   const router = useRouter();
+  const { t } = useTranslation();
+  const STATUS_LABEL: Record<DomainSslStatus, { label: string; className: string }> = {
+    none: { label: t.projectDetail.domainStatusNone, className: "text-muted-foreground" },
+    pending: { label: t.projectDetail.domainStatusPending, className: "text-warning" },
+    active: { label: t.projectDetail.domainStatusActive, className: "text-accent" },
+    failed: { label: t.projectDetail.domainStatusFailed, className: "text-destructive" },
+  };
   const [domain, setDomain] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [removing, setRemoving] = useState(false);
@@ -41,13 +43,13 @@ export function DomainCard({
         body: JSON.stringify({ domain }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Falha ao anexar domínio.");
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, t.projectDetail.attachFailedError));
       }
       setDomain("");
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : t.projectDetail.unknownError);
     } finally {
       setSubmitting(false);
     }
@@ -69,15 +71,15 @@ export function DomainCard({
     <div className="rounded-xl border border-border-subtle bg-surface p-4">
       <h2 className="mb-1 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
         <Globe size={14} strokeWidth={1.75} />
-        Domínio personalizado
+        {t.projectDetail.customDomainTitle}
       </h2>
 
       {!isDeployed ? (
-        <p className="mt-2 text-[12.5px] text-muted-foreground">Faça o deploy do projeto antes de anexar um domínio.</p>
+        <p className="mt-2 text-[12.5px] text-muted-foreground">{t.projectDetail.deployBeforeDomain}</p>
       ) : customDomain ? (
         <>
           <div className="flex items-center justify-between border-b border-border-subtle py-2.5">
-            <span className="text-[13px] text-muted-foreground">Domínio</span>
+            <span className="text-[13px] text-muted-foreground">{t.projectDetail.domainLabel}</span>
             <a
               href={`https://${customDomain}`}
               target="_blank"
@@ -88,7 +90,7 @@ export function DomainCard({
             </a>
           </div>
           <div className="flex items-center justify-between py-2.5">
-            <span className="text-[13px] text-muted-foreground">Status</span>
+            <span className="text-[13px] text-muted-foreground">{t.projectDetail.statusLabel}</span>
             <span className={`text-[13px] font-medium ${status.className}`}>{status.label}</span>
           </div>
           <button
@@ -97,20 +99,19 @@ export function DomainCard({
             className="mt-2 inline-flex items-center gap-2 text-[13px] font-medium text-destructive hover:opacity-85 disabled:opacity-50"
           >
             {removing && <Loader2 size={14} className="animate-spin" />}
-            Remover domínio
+            {t.projectDetail.removeDomain}
           </button>
         </>
       ) : (
         <form onSubmit={handleAttach} className="mt-2 flex flex-col gap-2">
           <p className="text-[12px] text-muted-foreground">
-            Aponte o DNS do domínio pro IP desta VPS antes de anexar. O certificado TLS só é emitido se o
-            domínio já resolver pra cá.
+            {t.projectDetail.dnsInstructions}
           </p>
           <div className="flex gap-2">
             <input
               value={domain}
               onChange={(e) => setDomain(e.target.value)}
-              placeholder="meuapp.com"
+              placeholder={t.projectDetail.domainPlaceholder}
               className="min-w-0 flex-1 rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none focus:border-accent"
             />
             <button
@@ -119,7 +120,7 @@ export function DomainCard({
               className="inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
             >
               {submitting && <Loader2 size={14} className="animate-spin" />}
-              Anexar
+              {t.projectDetail.attachDomain}
             </button>
           </div>
           {error && <p className="text-[12.5px] text-destructive">{error}</p>}

@@ -4,8 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, Loader2, TriangleAlert } from "lucide-react";
 import { apiFetch } from "../../../lib/api-client";
+import { useTranslation } from "../../../lib/i18n/locale-provider";
 
 export function DeleteProjectButton({ projectId, projectName }: { projectId: string; projectName: string }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -25,8 +27,8 @@ export function DeleteProjectButton({ projectId, projectName }: { projectId: str
     <>
       <button
         onClick={() => setOpen(true)}
-        aria-label={`Remover ${projectName}`}
-        title="Remover projeto"
+        aria-label={`${t.projects.remove} ${projectName}`}
+        title={t.projects.remove}
         className="inline-flex items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
       >
         <Trash2 size={15} strokeWidth={1.75} />
@@ -48,11 +50,10 @@ export function DeleteProjectButton({ projectId, projectName }: { projectId: str
                 <TriangleAlert size={16} strokeWidth={1.75} />
               </div>
               <div>
-                <p className="text-[14.5px] font-semibold text-foreground">Remover “{projectName}”?</p>
-                <p className="mt-1 text-[13px] text-muted-foreground">
-                  Isso para o container (se estiver rodando) e apaga os arquivos clonados. Não pode ser
-                  desfeito.
+                <p className="text-[14.5px] font-semibold text-foreground">
+                  {t.projects.remove} "{projectName}"?
                 </p>
+                <p className="mt-1 text-[13px] text-muted-foreground">{t.projects.deleteConfirmBody}</p>
               </div>
             </div>
 
@@ -62,7 +63,7 @@ export function DeleteProjectButton({ projectId, projectName }: { projectId: str
                 disabled={loading}
                 className="rounded-md px-3.5 py-2 text-[13px] font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
               >
-                Cancelar
+                {t.projects.cancel}
               </button>
               <button
                 onClick={handleConfirm}
@@ -70,7 +71,7 @@ export function DeleteProjectButton({ projectId, projectName }: { projectId: str
                 className="inline-flex items-center gap-2 rounded-md bg-destructive px-3.5 py-2 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {loading && <Loader2 size={14} className="animate-spin" />}
-                Remover
+                {t.projects.remove}
               </button>
             </div>
           </div>

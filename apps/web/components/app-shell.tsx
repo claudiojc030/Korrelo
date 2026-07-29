@@ -3,17 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, FolderGit2, ShieldHalf, ShieldCheck, LogOut, Search } from "lucide-react";
+import { LayoutDashboard, FolderGit2, ShieldHalf, ShieldCheck, SquareTerminal, LogOut, Search } from "lucide-react";
 import { apiFetch } from "../lib/api-client";
+import { useTranslation } from "../lib/i18n/locale-provider";
 import { ThemeToggle } from "./theme-toggle";
+import { LanguageToggle } from "./language-toggle";
 import { CommandPalette, COMMAND_PALETTE_OPEN_EVENT } from "./command-palette";
-
-const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/projects", label: "Projetos", icon: FolderGit2 },
-  { href: "/system-services", label: "Serviços do servidor", icon: ShieldHalf },
-  { href: "/security", label: "Segurança", icon: ShieldCheck },
-];
 
 function Logo() {
   return (
@@ -29,8 +24,17 @@ function Logo() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { t } = useTranslation();
   const [email, setEmail] = useState<string | null>(null);
   const [isMac, setIsMac] = useState(false);
+
+  const NAV_ITEMS = [
+    { href: "/dashboard", label: t.nav.dashboard, icon: LayoutDashboard },
+    { href: "/projects", label: t.nav.projects, icon: FolderGit2 },
+    { href: "/system-services", label: t.nav.systemServices, icon: ShieldHalf },
+    { href: "/terminal", label: t.nav.systemTerminal, icon: SquareTerminal },
+    { href: "/security", label: t.nav.security, icon: ShieldCheck },
+  ];
 
   useEffect(() => {
     apiFetch("/auth/me")
@@ -66,7 +70,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         >
           <span className="flex items-center gap-2">
             <Search size={15} strokeWidth={1.75} className="flex-none" />
-            Buscar
+            {t.nav.search}
           </span>
           <kbd className="rounded border border-border-subtle px-1.5 py-0.5 font-mono text-[11px]">
             {isMac ? "⌘K" : "Ctrl K"}
@@ -102,12 +106,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           )}
           <ThemeToggle />
+          <LanguageToggle />
           <button
             onClick={handleLogout}
             className="flex items-center gap-3 rounded-lg px-3.5 py-2.5 text-[14px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
           >
             <LogOut size={18} strokeWidth={1.75} className="flex-none" />
-            Sair
+            {t.nav.logout}
           </button>
         </div>
       </aside>

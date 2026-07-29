@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ArrowUpCircle, Check, Copy } from "lucide-react";
+import { useTranslation } from "../../../lib/i18n/locale-provider";
 
 interface UpdateStatus {
   checked: boolean;
@@ -20,6 +21,7 @@ cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static && \
 pm2 restart ecosystem.config.js`;
 
 export function UpdateBanner({ status }: { status: UpdateStatus }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -45,9 +47,9 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
         <div className="flex items-center gap-2.5">
           <ArrowUpCircle size={17} strokeWidth={1.75} className="flex-none text-accent" />
           <p className="text-[13.5px] font-medium text-foreground">
-            Atualização disponível
+            {t.dashboard.updateAvailable}
             <span className="ml-1.5 font-normal text-muted-foreground">
-              ({status.commitsBehind} commit{status.commitsBehind === 1 ? "" : "s"} atrás do repositório)
+              ({status.commitsBehind} {status.commitsBehind === 1 ? t.dashboard.commitsBehindSingular : t.dashboard.commitsBehindPlural})
             </span>
           </p>
         </div>
@@ -55,26 +57,24 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
           onClick={() => setExpanded((v) => !v)}
           className="flex-none text-[12.5px] font-medium text-accent hover:opacity-85"
         >
-          {expanded ? "Ocultar comando" : "Ver comando"}
+          {expanded ? t.dashboard.hideCommand : t.dashboard.showCommand}
         </button>
       </div>
 
       {expanded && (
         <div className="mt-3">
-          <p className="mb-1.5 text-[12px] text-muted-foreground">
-            Rode isso via SSH, na raiz do repositório na sua VPS:
-          </p>
+          <p className="mb-1.5 text-[12px] text-muted-foreground">{t.dashboard.runViaSsh}</p>
           <div className="relative">
             <pre className="overflow-x-auto rounded-lg bg-background p-3 font-mono text-[12px] leading-relaxed text-foreground">
               {UPDATE_COMMAND}
             </pre>
             <button
               onClick={handleCopy}
-              aria-label="Copiar comando"
+              aria-label={t.dashboard.copyCommand}
               className="absolute right-2 top-2 inline-flex items-center gap-1.5 rounded-md border border-border-subtle bg-surface px-2 py-1 text-[11.5px] font-medium text-muted-foreground hover:text-foreground"
             >
               {copied ? <Check size={12} /> : <Copy size={12} />}
-              {copied ? "Copiado" : "Copiar"}
+              {copied ? t.dashboard.copied : t.common.copy}
             </button>
           </div>
         </div>

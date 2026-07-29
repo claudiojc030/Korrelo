@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import type { Project } from "@korrelo/shared-types";
 import { apiFetch } from "../../../../../lib/api-client";
+import { useTranslation } from "../../../../../lib/i18n/locale-provider";
 
 function FeatureToggleRow({
   title,
@@ -46,6 +47,7 @@ function FeatureToggleRow({
 
 export default function ProjectSettingsPage({ params }: { params: { projectId: string } }) {
   const router = useRouter();
+  const { t } = useTranslation();
   const [project, setProject] = useState<Project | null | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [branchInput, setBranchInput] = useState("");
@@ -89,7 +91,7 @@ export default function ProjectSettingsPage({ params }: { params: { projectId: s
   if (project === undefined) {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 py-6">
-        <p className="text-[13px] text-muted-foreground">Carregando...</p>
+        <p className="text-[13px] text-muted-foreground">{t.common.loading}</p>
       </div>
     );
   }
@@ -97,7 +99,7 @@ export default function ProjectSettingsPage({ params }: { params: { projectId: s
   if (!project) {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 py-6">
-        <p className="text-[13px] text-destructive">Não foi possível carregar as configurações.</p>
+        <p className="text-[13px] text-destructive">{t.projectSettings.loadError}</p>
       </div>
     );
   }
@@ -105,53 +107,50 @@ export default function ProjectSettingsPage({ params }: { params: { projectId: s
   return (
     <div className="mx-auto w-full max-w-5xl px-8 py-6">
       <div className="mb-4 flex items-center justify-between">
-        <p className="text-[13.5px] font-medium text-foreground">Funcionalidades deste projeto</p>
+        <p className="text-[13.5px] font-medium text-foreground">{t.projectSettings.featuresTitle}</p>
         {saving && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
       </div>
-      <p className="mb-2 text-[12.5px] text-muted-foreground">
-        Nem todo projeto precisa de tudo. Desative o que não for usar e a aba correspondente some da navegação.
-      </p>
+      <p className="mb-2 text-[12.5px] text-muted-foreground">{t.projectSettings.featuresSubtitle}</p>
       <div className="rounded-xl border border-border-subtle bg-surface px-4">
         <FeatureToggleRow
-          title="Banco de Dados"
-          description="Provisionar ou conectar um banco de dados pra este projeto."
+          title={t.projectSettings.databaseTitle}
+          description={t.projectSettings.databaseDescription}
           checked={project.databaseEnabled}
           disabled={saving}
           onChange={(value) => updateSettings({ databaseEnabled: value })}
         />
         <FeatureToggleRow
-          title="Terminal"
-          description="Acesso a um terminal do container deste projeto direto pelo navegador."
+          title={t.projectSettings.terminalTitle}
+          description={t.projectSettings.terminalDescription}
           checked={project.terminalEnabled}
           disabled={saving}
           onChange={(value) => updateSettings({ terminalEnabled: value })}
         />
       </div>
 
-      <p className="mb-2 mt-6 text-[13.5px] font-medium text-foreground">Deploy automático</p>
+      <p className="mb-2 mt-6 text-[13.5px] font-medium text-foreground">{t.projectSettings.autoDeployTitle}</p>
       <p className="mb-2 text-[12.5px] text-muted-foreground">
-        Exige o Webhook do GitHub App configurado com o evento "Push" apontando pra{" "}
-        <code className="font-mono text-foreground">/github/webhook</code> nesta VPS (uma vez só, nas settings do
-        App no github.com).
+        {t.projectSettings.webhookDescriptionPrefix}{" "}
+        <code className="font-mono text-foreground">/github/webhook</code> {t.projectSettings.webhookDescriptionSuffix}
       </p>
       <div className="rounded-xl border border-border-subtle bg-surface px-4">
         <FeatureToggleRow
-          title="Deploy ao dar push"
-          description="Faz o deploy sozinho sempre que chega um push na branch abaixo, sem precisar clicar em nada."
+          title={t.projectSettings.pushDeployTitle}
+          description={t.projectSettings.pushDeployDescription}
           checked={project.autoDeployEnabled}
           disabled={saving}
           onChange={(value) => updateSettings({ autoDeployEnabled: value })}
         />
         <div className="flex items-center justify-between py-4">
           <div>
-            <p className="text-[13.5px] font-medium text-foreground">Branch monitorada</p>
-            <p className="mt-0.5 text-[12.5px] text-muted-foreground">Só pushes pra essa branch disparam o deploy.</p>
+            <p className="text-[13.5px] font-medium text-foreground">{t.projectSettings.branchTitle}</p>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t.projectSettings.branchDescription}</p>
           </div>
           <div className="flex items-center gap-2">
             <input
               value={branchInput}
               onChange={(e) => setBranchInput(e.target.value)}
-              placeholder="main"
+              placeholder={t.projectSettings.branchPlaceholder}
               className="w-32 rounded-md border border-border-subtle bg-transparent px-2.5 py-1.5 font-mono text-[13px] text-foreground outline-none focus:border-accent"
             />
             <button
@@ -159,7 +158,7 @@ export default function ProjectSettingsPage({ params }: { params: { projectId: s
               disabled={saving || branchInput === project.deployBranch}
               className="rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
             >
-              Salvar
+              {t.common.save}
             </button>
           </div>
         </div>

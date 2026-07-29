@@ -5,6 +5,8 @@ import { ImportFromGithub } from "./import-from-github";
 import { DeployButton } from "./deploy-button";
 import { DeleteProjectButton } from "./delete-project-button";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
+import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
+import { getDictionary, type Dictionary } from "../../../lib/i18n/dictionaries";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -23,15 +25,22 @@ function parseStack(project: Project): DetectedStack | null {
   }
 }
 
-const STATUS_LABEL: Record<Project["status"], string> = {
-  detected: "Detectado",
-  configuring: "Configurando",
-  running: "Rodando",
-  stopped: "Parado",
-  failed: "Falhou",
-};
-
-function ProjectCard({ project, accent }: { project: Project; accent: "good" | "bad" | "none" }) {
+function ProjectCard({
+  project,
+  accent,
+  t,
+}: {
+  project: Project;
+  accent: "good" | "bad" | "none";
+  t: Dictionary;
+}) {
+  const STATUS_LABEL: Record<Project["status"], string> = {
+    detected: t.projects.statusDetected,
+    configuring: t.projects.statusConfiguring,
+    running: t.projects.statusRunning,
+    stopped: t.projects.statusStopped,
+    failed: t.projects.statusFailed,
+  };
   const stack = parseStack(project);
   const borderClass =
     accent === "good" ? "border-l-2 border-l-accent" : accent === "bad" ? "border-l-2 border-l-destructive" : "";
@@ -58,7 +67,7 @@ function ProjectCard({ project, accent }: { project: Project; accent: "good" | "
           {stack.language}
           {stack.framework ? ` · ${stack.framework}` : ""}
           {stack.packageManager ? ` · ${stack.packageManager}` : ""}
-          {stack.recommendedPort ? ` · porta ${stack.recommendedPort}` : ""}
+          {stack.recommendedPort ? ` · ${t.projects.port} ${stack.recommendedPort}` : ""}
         </p>
       )}
 
@@ -79,13 +88,13 @@ function ProjectCard({ project, accent }: { project: Project; accent: "good" | "
               className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground hover:text-foreground"
             >
               <SquareTerminal size={14} strokeWidth={1.75} />
-              Terminal
+              {t.projects.terminal}
             </Link>
           </>
         ) : (
           <>
             {project.status === "failed" && (
-              <span className="text-[12.5px] text-destructive">O deploy falhou.</span>
+              <span className="text-[12.5px] text-destructive">{t.projects.deployFailedLabel}</span>
             )}
             {stack && <DeployButton projectId={project.id} />}
           </>
@@ -100,11 +109,13 @@ function Section({
   count,
   accent,
   projects,
+  t,
 }: {
   title: string;
   count: number;
   accent: "good" | "bad" | "none";
   projects: Project[];
+  t: Dictionary;
 }) {
   if (projects.length === 0) return null;
 
@@ -118,7 +129,7 @@ function Section({
       </div>
       <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {projects.map((project) => (
-          <ProjectCard key={project.id} project={project} accent={accent} />
+          <ProjectCard key={project.id} project={project} accent={accent} t={t} />
         ))}
       </ul>
     </div>
@@ -126,6 +137,7 @@ function Section({
 }
 
 export default async function ProjectsPage() {
+  const t = getDictionary(getLocaleServer());
   const projects = await getProjects();
 
   const running = projects.filter((p) => p.status === "running");
@@ -136,9 +148,9 @@ export default async function ProjectsPage() {
     <div className="mx-auto max-w-5xl px-8 py-10">
       <div className="mb-2 flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Projetos</h1>
+          <h1 className="text-xl font-semibold text-foreground">{t.projects.title}</h1>
           <p className="mt-0.5 text-[13.5px] text-muted-foreground">
-            Importe do GitHub e implante com um clique.
+            {t.projects.subtitle}
           </p>
         </div>
         <ImportFromGithub />
@@ -146,13 +158,18 @@ export default async function ProjectsPage() {
 
       {projects.length > 0 && (
         <p className="mb-8 mt-4 text-[13px] text-muted-foreground">
-          <span className="font-medium text-foreground">{projects.length}</span> projeto
-          {projects.length === 1 ? "" : "s"} ·{" "}
-          <span className="font-medium text-accent">{running.length} rodando</span>
+          <span className="font-medium text-foreground">{projects.length}</span>{" "}
+          {projects.length === 1 ? t.projects.projectSingular : t.projects.projectPlural} ·{" "}
+          <span className="font-medium text-accent">
+            {running.length} {t.projects.runningLabel}
+          </span>
           {failed.length > 0 && (
             <>
               {" "}
-              · <span className="font-medium text-destructive">{failed.length} falhou</span>
+              ·{" "}
+              <span className="font-medium text-destructive">
+                {failed.length} {t.projects.failedLabel}
+              </span>
             </>
           )}
         </p>
@@ -161,15 +178,19 @@ export default async function ProjectsPage() {
       {projects.length === 0 ? (
         <div className="mt-4 flex flex-col items-center gap-2 rounded-xl border border-dashed border-border py-16 text-center">
           <FolderGit2 size={22} strokeWidth={1.5} className="text-muted-foreground" />
-          <p className="text-[13.5px] text-muted-foreground">
-            Nenhum projeto ainda. Importe um repositório do GitHub pra começar.
-          </p>
+          <p className="text-[13.5px] text-muted-foreground">{t.projects.emptyState}</p>
         </div>
       ) : (
         <>
-          <Section title="Rodando" count={running.length} accent="good" projects={running} />
-          <Section title="Aguardando deploy" count={pending.length} accent="none" projects={pending} />
-          <Section title="Falharam" count={failed.length} accent="bad" projects={failed} />
+          <Section title={t.projects.sectionRunning} count={running.length} accent="good" projects={running} t={t} />
+          <Section
+            title={t.projects.sectionPendingDeploy}
+            count={pending.length}
+            accent="none"
+            projects={pending}
+            t={t}
+          />
+          <Section title={t.projects.sectionFailed} count={failed.length} accent="bad" projects={failed} t={t} />
         </>
       )}
     </div>

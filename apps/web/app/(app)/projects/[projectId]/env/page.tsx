@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Plus, Trash2, Save, Loader2, Eye, EyeOff, KeyRound } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
+import { useTranslation } from "../../../../../lib/i18n/locale-provider";
+import { translateApiError } from "../../../../../lib/api-error";
 
 interface EnvRow {
   key: string;
@@ -10,6 +12,7 @@ interface EnvRow {
 }
 
 export default function EnvVarsPage({ params }: { params: { projectId: string } }) {
+  const { t } = useTranslation();
   const [rows, setRows] = useState<EnvRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -51,12 +54,12 @@ export default function EnvVarsPage({ params }: { params: { projectId: string } 
         body: JSON.stringify({ vars }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Falha ao salvar.");
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, t.projectEnv.saveError));
       }
       setSaved(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : t.projectEnv.unknownError);
     } finally {
       setSaving(false);
     }
@@ -65,7 +68,7 @@ export default function EnvVarsPage({ params }: { params: { projectId: string } 
   if (loading) {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 py-6">
-        <p className="text-[13px] text-muted-foreground">Carregando...</p>
+        <p className="text-[13px] text-muted-foreground">{t.common.loading}</p>
       </div>
     );
   }
@@ -76,18 +79,16 @@ export default function EnvVarsPage({ params }: { params: { projectId: string } 
         <div>
           <p className="flex items-center gap-2 text-[13.5px] font-medium text-foreground">
             <KeyRound size={15} strokeWidth={1.75} />
-            Variáveis de ambiente
+            {t.projectEnv.title}
           </p>
-          <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-            Aplicadas no próximo deploy, precisa dar Deploy de novo pra valer pro container já rodando.
-          </p>
+          <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t.projectEnv.subtitle}</p>
         </div>
         <button
           onClick={() => setRevealAll((v) => !v)}
           className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
         >
           {revealAll ? <EyeOff size={14} /> : <Eye size={14} />}
-          {revealAll ? "Ocultar valores" : "Mostrar valores"}
+          {revealAll ? t.projectEnv.hideValues : t.projectEnv.showValues}
         </button>
       </div>
 
@@ -98,7 +99,7 @@ export default function EnvVarsPage({ params }: { params: { projectId: string } 
               <input
                 value={row.key}
                 onChange={(e) => updateRow(index, "key", e.target.value.toUpperCase())}
-                placeholder="NOME_DA_VARIAVEL"
+                placeholder={t.projectEnv.keyPlaceholder}
                 spellCheck={false}
                 className="w-64 flex-none rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
               />
@@ -106,13 +107,13 @@ export default function EnvVarsPage({ params }: { params: { projectId: string } 
                 type={revealAll ? "text" : "password"}
                 value={row.value}
                 onChange={(e) => updateRow(index, "value", e.target.value)}
-                placeholder="valor"
+                placeholder={t.projectEnv.valuePlaceholder}
                 spellCheck={false}
                 className="flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
               />
               <button
                 onClick={() => removeRow(index)}
-                aria-label="Remover variável"
+                aria-label={t.projectEnv.removeVarAriaLabel}
                 className="flex-none rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
               >
                 <Trash2 size={14} strokeWidth={1.75} />
@@ -126,7 +127,7 @@ export default function EnvVarsPage({ params }: { params: { projectId: string } 
           className="mt-3 inline-flex items-center gap-1.5 text-[12.5px] font-medium text-muted-foreground hover:text-foreground"
         >
           <Plus size={14} strokeWidth={1.75} />
-          Adicionar variável
+          {t.projectEnv.addVarButton}
         </button>
       </div>
 
@@ -139,9 +140,9 @@ export default function EnvVarsPage({ params }: { params: { projectId: string } 
           className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} strokeWidth={1.75} />}
-          Salvar
+          {t.common.save}
         </button>
-        {saved && <span className="text-[12.5px] text-accent">Salvo.</span>}
+        {saved && <span className="text-[12.5px] text-accent">{t.projectEnv.saved}</span>}
       </div>
     </div>
   );

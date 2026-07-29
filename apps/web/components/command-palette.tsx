@@ -7,12 +7,14 @@ import {
   FolderGit2,
   ShieldHalf,
   ShieldCheck,
+  SquareTerminal,
   FolderKanban,
   Search,
   CornerDownLeft,
   type LucideIcon,
 } from "lucide-react";
 import { apiFetch } from "../lib/api-client";
+import { useTranslation } from "../lib/i18n/locale-provider";
 
 export const COMMAND_PALETTE_OPEN_EVENT = "korrelo:open-command-palette";
 
@@ -24,15 +26,9 @@ interface PaletteItem {
   icon: LucideIcon;
 }
 
-const STATIC_ITEMS: PaletteItem[] = [
-  { id: "nav-dashboard", label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { id: "nav-projects", label: "Projetos", href: "/projects", icon: FolderGit2 },
-  { id: "nav-services", label: "Serviços do servidor", href: "/system-services", icon: ShieldHalf },
-  { id: "nav-security", label: "Segurança", href: "/security", icon: ShieldCheck },
-];
-
 export function CommandPalette() {
   const router = useRouter();
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -75,15 +71,22 @@ export function CommandPalette() {
   }, [open]);
 
   const items = useMemo<PaletteItem[]>(() => {
+    const staticItems: PaletteItem[] = [
+      { id: "nav-dashboard", label: t.nav.dashboard, href: "/dashboard", icon: LayoutDashboard },
+      { id: "nav-projects", label: t.nav.projects, href: "/projects", icon: FolderGit2 },
+      { id: "nav-services", label: t.nav.systemServices, href: "/system-services", icon: ShieldHalf },
+      { id: "nav-terminal", label: t.nav.systemTerminal, href: "/terminal", icon: SquareTerminal },
+      { id: "nav-security", label: t.nav.security, href: "/security", icon: ShieldCheck },
+    ];
     const projectItems: PaletteItem[] = projects.map((project) => ({
       id: `project-${project.id}`,
       label: project.name,
-      sublabel: "Projeto",
+      sublabel: t.nav.commandPaletteProjectSublabel,
       href: `/projects/${project.id}`,
       icon: FolderKanban,
     }));
-    return [...STATIC_ITEMS, ...projectItems];
-  }, [projects]);
+    return [...staticItems, ...projectItems];
+  }, [projects, t]);
 
   const filtered = useMemo(() => {
     const normalized = query.trim().toLowerCase();
@@ -133,17 +136,17 @@ export function CommandPalette() {
               setSelectedIndex(0);
             }}
             onKeyDown={handleInputKeyDown}
-            placeholder="Ir pra..."
+            placeholder={t.nav.commandPaletteGoTo}
             className="w-full bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground/60"
           />
           <kbd className="flex-none rounded border border-border-subtle px-1.5 py-0.5 text-[11px] text-muted-foreground">
-            Esc
+            {t.nav.commandPaletteEsc}
           </kbd>
         </div>
 
         <div className="max-h-80 overflow-y-auto p-1.5">
           {filtered.length === 0 ? (
-            <p className="px-3 py-4 text-center text-[13px] text-muted-foreground">Nada encontrado.</p>
+            <p className="px-3 py-4 text-center text-[13px] text-muted-foreground">{t.nav.commandPaletteNoResults}</p>
           ) : (
             filtered.map((item, index) => {
               const Icon = item.icon;

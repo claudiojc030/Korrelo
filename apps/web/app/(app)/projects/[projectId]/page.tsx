@@ -2,6 +2,8 @@ import { ExternalLink, GitBranch, Cpu, MemoryStick, HardDrive, History, Webhook,
 import { CONTAINER_MEMORY_LIMIT_MB, type DetectedStack, type Project, type SystemMetrics } from "@korrelo/shared-types";
 import { authHeaderServer } from "../../../../lib/auth-cookie-server";
 import { DomainCard } from "./domain-card";
+import { getLocaleServer } from "../../../../lib/i18n/get-locale-server";
+import { getDictionary } from "../../../../lib/i18n/dictionaries";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
@@ -86,6 +88,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export default async function ProjectSummaryPage({ params }: { params: { projectId: string } }) {
+  const t = getDictionary(getLocaleServer());
   const [project, diskUsageMb, metrics, deployRecords] = await Promise.all([
     getProject(params.projectId),
     getDiskUsage(params.projectId),
@@ -106,14 +109,14 @@ export default async function ProjectSummaryPage({ params }: { params: { project
         <div className="rounded-xl border border-border-subtle bg-surface p-4">
           <h2 className="mb-1 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
             <GitBranch size={14} strokeWidth={1.75} />
-            Repositório
+            {t.projectDetail.repository}
           </h2>
-          <InfoRow label="URL" value={<span className="truncate">{project.repoUrl}</span>} />
-          <InfoRow label="Linguagem" value={stack?.language ?? "-"} />
-          <InfoRow label="Framework" value={stack?.framework ?? "-"} />
-          <InfoRow label="Gerenciador de pacotes" value={stack?.packageManager ?? "-"} />
+          <InfoRow label={t.projectDetail.urlLabel} value={<span className="truncate">{project.repoUrl}</span>} />
+          <InfoRow label={t.projectDetail.language} value={stack?.language ?? "-"} />
+          <InfoRow label={t.projectDetail.framework} value={stack?.framework ?? "-"} />
+          <InfoRow label={t.projectDetail.packageManager} value={stack?.packageManager ?? "-"} />
           <InfoRow
-            label="Comando de start"
+            label={t.projectDetail.startCommand}
             value={<code className="font-mono text-[12px]">{stack?.startCommand ?? "-"}</code>}
           />
         </div>
@@ -121,10 +124,10 @@ export default async function ProjectSummaryPage({ params }: { params: { project
         <div className="rounded-xl border border-border-subtle bg-surface p-4">
           <h2 className="mb-1 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
             <ExternalLink size={14} strokeWidth={1.75} />
-            Deploy
+            {t.projectDetail.deploy}
           </h2>
           <InfoRow
-            label="URL pública"
+            label={t.projectDetail.publicUrl}
             value={
               project.assignedPort ? (
                 <a
@@ -140,9 +143,9 @@ export default async function ProjectSummaryPage({ params }: { params: { project
               )
             }
           />
-          <InfoRow label="Container" value={<code className="font-mono text-[12px]">{project.containerName ?? "-"}</code>} />
+          <InfoRow label={t.projectDetail.container} value={<code className="font-mono text-[12px]">{project.containerName ?? "-"}</code>} />
           <InfoRow
-            label="Criado em"
+            label={t.projectDetail.createdAt}
             value={new Date(project.createdAt).toLocaleString("pt-BR")}
           />
         </div>
@@ -157,57 +160,60 @@ export default async function ProjectSummaryPage({ params }: { params: { project
 
       <h2 className="mb-2.5 mt-6 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
         <Cpu size={14} strokeWidth={1.75} />
-        Consumo de recursos
+        {t.projectDetail.resourceUsage}
       </h2>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-border-subtle bg-surface p-4">
           <div className="flex items-center gap-2 text-muted-foreground">
             <Cpu size={14} strokeWidth={1.75} />
-            <span className="text-[12.5px] font-medium">CPU</span>
+            <span className="text-[12.5px] font-medium">{t.projectDetail.cpu}</span>
           </div>
           <p className="mt-2 font-mono text-[20px] font-semibold text-foreground">
             {container?.cpuPercent != null ? `${container.cpuPercent.toFixed(1)}%` : "-"}
           </p>
           <p className="mt-1 text-[12px] text-muted-foreground">
-            {project.status === "running" ? "processo ativo" : "projeto não está rodando"}
+            {project.status === "running" ? t.projectDetail.processActive : t.projectDetail.projectNotRunning}
           </p>
         </div>
 
         <div className="rounded-xl border border-border-subtle bg-surface p-4">
           <div className="flex items-center gap-2 text-muted-foreground">
             <MemoryStick size={14} strokeWidth={1.75} />
-            <span className="text-[12.5px] font-medium">Memória</span>
+            <span className="text-[12.5px] font-medium">{t.projectDetail.memory}</span>
           </div>
           <p className="mt-2 font-mono text-[20px] font-semibold text-foreground">
             {container?.memUsageMb != null ? `${container.memUsageMb} MB` : "-"}
           </p>
           <p className="mt-1 text-[12px] text-muted-foreground">
-            limite de {metrics ? CONTAINER_MEMORY_LIMIT_MB[metrics.tier] : "-"} MB nesse porte de servidor
+            {t.projectDetail.memoryLimitDetail.replace(
+              "{limit}",
+              String(metrics ? CONTAINER_MEMORY_LIMIT_MB[metrics.tier] : "-"),
+            )}
           </p>
         </div>
 
         <div className="rounded-xl border border-border-subtle bg-surface p-4">
           <div className="flex items-center gap-2 text-muted-foreground">
             <HardDrive size={14} strokeWidth={1.75} />
-            <span className="text-[12.5px] font-medium">Disco</span>
+            <span className="text-[12.5px] font-medium">{t.projectDetail.disk}</span>
           </div>
           <p className="mt-2 font-mono text-[20px] font-semibold text-foreground">
             {diskUsageMb != null ? `${diskUsageMb} MB` : "-"}
           </p>
           <p className="mt-1 text-[12px] text-muted-foreground">
             {metrics?.diskFreeGb != null
-              ? `${metrics.diskFreeGb.toFixed(0)} GB livres no servidor`
-              : "espaço livre indisponível"}
+              ? t.projectDetail.diskFreeDetail.replace("{free}", metrics.diskFreeGb.toFixed(0))
+              : t.projectDetail.diskSpaceUnavailable}
           </p>
         </div>
       </div>
 
       <h2 className="mb-2.5 mt-6 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
         <History size={14} strokeWidth={1.75} />
-        Histórico de deploys
+        {t.projectDetail.deployHistory}
       </h2>
       {deployRecords.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">Nenhum deploy registrado ainda.</p>
+        <p className="text-[13px] text-muted-foreground">{t.projectDetail.noDeploysYet}</p>
       ) : (
         <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
           {deployRecords.map((record) => {
@@ -218,7 +224,11 @@ export default async function ProjectSummaryPage({ params }: { params: { project
                   ? "text-destructive"
                   : "text-warning";
             const statusLabel =
-              record.status === "success" ? "Sucesso" : record.status === "failed" ? "Falhou" : "Em andamento";
+              record.status === "success"
+                ? t.projectDetail.deployStatusSuccess
+                : record.status === "failed"
+                  ? t.projectDetail.deployStatusFailed
+                  : t.projectDetail.deployStatusInProgress;
             const durationMs = record.finishedAt
               ? new Date(record.finishedAt).getTime() - new Date(record.startedAt).getTime()
               : null;
@@ -238,7 +248,7 @@ export default async function ProjectSummaryPage({ params }: { params: { project
                     <p className="text-[13px] text-foreground">
                       {new Date(record.startedAt).toLocaleString("pt-BR")}
                       <span className="ml-2 text-[11.5px] text-muted-foreground">
-                        {record.triggeredBy === "webhook" ? "push automático" : "manual"}
+                        {record.triggeredBy === "webhook" ? t.projectDetail.triggeredByWebhook : t.projectDetail.triggeredByManual}
                       </span>
                     </p>
                     {record.errorMessage && (

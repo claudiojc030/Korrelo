@@ -2,11 +2,11 @@
 
 import { useEffect, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
-import { useTranslation } from "../../../../../lib/i18n/locale-provider";
+import { useTranslation } from "../../../lib/i18n/locale-provider";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
-export function TerminalClient({ projectId }: { projectId: string }) {
+export function SystemTerminalClient() {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -43,9 +43,9 @@ export function TerminalClient({ projectId }: { projectId: string }) {
       fitAddon.fit();
 
       // withCredentials manda o cookie httpOnly de auth junto do handshake,
-      // o gateway valida lendo esse cookie (ver terminal.gateway.ts).
-      socket = io(`${API_URL}/terminal`, { withCredentials: true });
-      socket.on("connect", () => socket?.emit("start", { projectId }));
+      // o gateway valida lendo esse cookie (ver system-terminal.gateway.ts).
+      socket = io(`${API_URL}/system-terminal`, { withCredentials: true });
+      socket.on("connect", () => socket?.emit("start"));
       socket.on("output", (data: string) => term?.write(data));
       socket.on("error", (message: string) => term?.write(`\r\n\x1b[31m${t.projectTerminal.connectionErrorPrefix} ${message}\x1b[0m\r\n`));
       socket.on("exit", () => term?.write(`\r\n\x1b[33m${t.projectTerminal.sessionEnded}\x1b[0m\r\n`));
@@ -62,7 +62,7 @@ export function TerminalClient({ projectId }: { projectId: string }) {
       socket?.disconnect();
       term?.dispose();
     };
-  }, [projectId]);
+  }, []);
 
   return (
     <div className="h-full overflow-hidden rounded-xl border border-border-subtle bg-[#0b1120] p-3">

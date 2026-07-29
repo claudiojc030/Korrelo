@@ -1,0 +1,43 @@
+import type { ApiErrorsDict } from "./api-errors";
+
+export const apiErrorsProjectsAEn: ApiErrorsDict = {
+  PROJECT_NOT_FOUND: "Project not found.",
+  PROJECT_STACK_NOT_DETECTED: "This project doesn't have a detected stack yet. Run import or stack detection before deploying.",
+  DEPLOY_HEALTH_CHECK_FAILED: "Deploy canceled: the container came up but didn't respond to the health check. Automatic rollback was performed.",
+  INVALID_DOMAIN: "Invalid domain. Use a real hostname, e.g. myapp.com (no http://, no port).",
+  PROJECT_NOT_DEPLOYED: "This project hasn't been deployed yet. Deploy it before attaching a domain.",
+  DOMAIN_ALREADY_ATTACHED: "This project already has a domain attached. Remove it before adding another.",
+  DOMAIN_ALREADY_IN_USE: "This domain is already in use by another project.",
+  DOMAIN_NOT_ATTACHED: "This project doesn't have a domain attached.",
+  CRON_JOB_INVALID_SCHEDULE: "Invalid cron expression. Use the standard 5-field format (e.g. \"0 3 * * *\" = every day at 3am).",
+  CRON_JOB_NAME_COMMAND_REQUIRED: "Name and command are required.",
+  CRON_JOB_NOT_FOUND: "Cron job not found.",
+  INVALID_BRANCH_NAME: "Invalid branch name.",
+  CONTAINER_START_FAILED: "Failed to start the container.",
+  NGINX_RELOAD_FAILED: "nginx rejected the domain configuration.",
+  TLS_CERTIFICATE_ISSUANCE_FAILED: "Failed to issue the TLS certificate for the domain.",
+  PORT_ALLOCATION_FAILED: "No free port could be found.",
+  GITHUB_WEBHOOK_SECRET_MISSING: "GITHUB_APP_WEBHOOK_SECRET is not configured on this VPS.",
+  GITHUB_WEBHOOK_INVALID_SIGNATURE: "Invalid webhook signature.",
+};
+
+export const apiErrorsProjectsAPt: ApiErrorsDict = {
+  PROJECT_NOT_FOUND: "Projeto não encontrado.",
+  PROJECT_STACK_NOT_DETECTED: "Este projeto ainda não tem stack detectada. Rode /import ou /detect-stack antes do deploy.",
+  DEPLOY_HEALTH_CHECK_FAILED: "Deploy cancelado: o container subiu mas não respondeu no health check. Rollback automático executado.",
+  INVALID_DOMAIN: "Domínio inválido. Use um hostname real, ex: meuapp.com (sem http://, sem porta).",
+  PROJECT_NOT_DEPLOYED: "Este projeto ainda não foi implantado. Faça o deploy antes de anexar um domínio.",
+  DOMAIN_ALREADY_ATTACHED: "Este projeto já tem um domínio anexado. Remova antes de trocar por outro.",
+  DOMAIN_ALREADY_IN_USE: "Este domínio já está em uso por outro projeto.",
+  DOMAIN_NOT_ATTACHED: "Este projeto não tem domínio anexado.",
+  CRON_JOB_INVALID_SCHEDULE: "Expressão cron inválida. Use o formato padrão de 5 campos (ex: \"0 3 * * *\" = todo dia às 3h).",
+  CRON_JOB_NAME_COMMAND_REQUIRED: "Nome e comando são obrigatórios.",
+  CRON_JOB_NOT_FOUND: "Cron job não encontrado.",
+  INVALID_BRANCH_NAME: "Nome de branch inválido.",
+  CONTAINER_START_FAILED: "Falha ao subir o container.",
+  NGINX_RELOAD_FAILED: "nginx recusou a config do domínio.",
+  TLS_CERTIFICATE_ISSUANCE_FAILED: "Falha ao emitir certificado TLS para o domínio.",
+  PORT_ALLOCATION_FAILED: "Nenhuma porta livre encontrada.",
+  GITHUB_WEBHOOK_SECRET_MISSING: "GITHUB_APP_WEBHOOK_SECRET não configurado nesta VPS.",
+  GITHUB_WEBHOOK_INVALID_SIGNATURE: "Assinatura do webhook inválida.",
+};

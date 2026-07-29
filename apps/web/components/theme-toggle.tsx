@@ -3,8 +3,10 @@
 import { useEffect, useState } from "react";
 import { Moon, Sun } from "lucide-react";
 import { applyTheme, getStoredTheme, type Theme } from "../lib/theme";
+import { useTranslation } from "../lib/i18n/locale-provider";
 
 export function ThemeToggle() {
+  const { t } = useTranslation();
   const [theme, setTheme] = useState<Theme | null>(null);
 
   useEffect(() => {
@@ -32,7 +34,7 @@ export function ThemeToggle() {
       ) : (
         <Sun size={18} strokeWidth={1.75} className="flex-none" />
       )}
-      {theme === "light" ? "Tema escuro" : "Tema claro"}
+      {theme === "light" ? t.nav.darkTheme : t.nav.lightTheme}
     </button>
   );
 }

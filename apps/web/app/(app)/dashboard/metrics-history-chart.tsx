@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { TrendingUp } from "lucide-react";
 import { apiFetch } from "../../../lib/api-client";
+import { useTranslation } from "../../../lib/i18n/locale-provider";
 
 type Range = "1h" | "24h" | "7d";
 
@@ -16,15 +17,17 @@ interface HistoryPoint {
 
 const RANGE_LABEL: Record<Range, string> = { "1h": "1h", "24h": "24h", "7d": "7d" };
 
-function formatTimeTick(iso: string, range: Range): string {
+function formatTimeTick(iso: string, range: Range, locale: "pt" | "en"): string {
   const date = new Date(iso);
+  const bcp47 = locale === "en" ? "en-US" : "pt-BR";
   if (range === "7d") {
-    return date.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+    return date.toLocaleDateString(bcp47, { day: "2-digit", month: "2-digit" });
   }
-  return date.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return date.toLocaleTimeString(bcp47, { hour: "2-digit", minute: "2-digit" });
 }
 
 export function MetricsHistoryChart() {
+  const { t, locale } = useTranslation();
   const [range, setRange] = useState<Range>("1h");
   const [points, setPoints] = useState<HistoryPoint[] | null>(null);
   const [error, setError] = useState(false);
@@ -44,7 +47,7 @@ export function MetricsHistoryChart() {
         <div className="flex items-center gap-2 text-muted-foreground">
           <TrendingUp size={15} strokeWidth={1.75} />
           <h2 className="text-[13px] font-medium">
-            Histórico <span className="text-muted-foreground/60">· CPU, memória e disco</span>
+            {t.dashboard.historyTitle} <span className="text-muted-foreground/60">· {t.dashboard.historySubtitle}</span>
           </h2>
         </div>
         <div className="flex gap-1 rounded-lg border border-border-subtle bg-surface p-0.5">
@@ -64,20 +67,18 @@ export function MetricsHistoryChart() {
 
       <div className="rounded-xl border border-border-subtle bg-surface p-4">
         {error ? (
-          <p className="text-[13px] text-destructive">Não foi possível carregar o histórico.</p>
+          <p className="text-[13px] text-destructive">{t.dashboard.historyError}</p>
         ) : points === null ? (
-          <p className="text-[13px] text-muted-foreground">Carregando...</p>
+          <p className="text-[13px] text-muted-foreground">{t.dashboard.historyLoading}</p>
         ) : points.length < 2 ? (
-          <p className="text-[13px] text-muted-foreground">
-            Ainda não há dados suficientes pra esse período. A coleta roda a cada minuto.
-          </p>
+          <p className="text-[13px] text-muted-foreground">{t.dashboard.historyNotEnoughData}</p>
         ) : (
           <ResponsiveContainer width="100%" height={220}>
             <LineChart data={points} margin={{ top: 5, right: 8, left: -20, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-subtle)" />
               <XAxis
                 dataKey="capturedAt"
-                tickFormatter={(value) => formatTimeTick(value, range)}
+                tickFormatter={(value) => formatTimeTick(value, range, locale)}
                 tick={{ fill: "var(--color-muted-foreground)", fontSize: 11 }}
                 axisLine={{ stroke: "var(--color-border-subtle)" }}
                 tickLine={false}
@@ -91,7 +92,7 @@ export function MetricsHistoryChart() {
                 width={36}
               />
               <Tooltip
-                labelFormatter={(value) => formatTimeTick(String(value), range)}
+                labelFormatter={(value) => formatTimeTick(String(value), range, locale)}
                 formatter={(value, name) => [`${Number(value).toFixed(1)}%`, name]}
                 contentStyle={{
                   background: "var(--color-surface)",
@@ -100,11 +101,11 @@ export function MetricsHistoryChart() {
                   fontSize: 12.5,
                 }}
               />
-              <Line type="monotone" dataKey="cpuPercent" name="CPU" stroke="#f59e0b" dot={false} strokeWidth={1.75} />
+              <Line type="monotone" dataKey="cpuPercent" name={t.dashboard.cpu} stroke="#f59e0b" dot={false} strokeWidth={1.75} />
               <Line
                 type="monotone"
                 dataKey="usedMemPercent"
-                name="Memória"
+                name={t.dashboard.memory}
                 stroke="#3b82f6"
                 dot={false}
                 strokeWidth={1.75}
@@ -112,7 +113,7 @@ export function MetricsHistoryChart() {
               <Line
                 type="monotone"
                 dataKey="usedDiskPercent"
-                name="Disco"
+                name={t.dashboard.disk}
                 stroke="#10b981"
                 dot={false}
                 strokeWidth={1.75}

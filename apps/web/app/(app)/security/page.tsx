@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import { KeyRound, Laptop, Loader2, LogOut, ShieldCheck, ShieldOff, Smartphone, TriangleAlert } from "lucide-react";
 import { apiFetch } from "../../../lib/api-client";
+import { useTranslation } from "../../../lib/i18n/locale-provider";
+import { translateApiError } from "../../../lib/api-error";
+import type { SecurityDict } from "../../../lib/i18n/dictionaries/security";
 
 type Step = "loading" | "disabled" | "setting-up" | "showing-backup-codes" | "enabled";
 
@@ -16,8 +19,8 @@ interface ActiveSession {
   isCurrent: boolean;
 }
 
-function describeUserAgent(userAgent: string | null): { label: string; isMobile: boolean } {
-  if (!userAgent) return { label: "Dispositivo desconhecido", isMobile: false };
+function describeUserAgent(userAgent: string | null, t: SecurityDict): { label: string; isMobile: boolean } {
+  if (!userAgent) return { label: t.unknownDevice, isMobile: false };
   const isMobile = /Mobi|Android|iPhone|iPad/.test(userAgent);
   const browser = /Edg\//.test(userAgent)
     ? "Edge"
@@ -27,7 +30,7 @@ function describeUserAgent(userAgent: string | null): { label: string; isMobile:
         ? "Firefox"
         : /Safari\//.test(userAgent)
           ? "Safari"
-          : "Navegador";
+          : t.browserGeneric;
   const os = /iPhone|iPad/.test(userAgent)
     ? "iOS"
     : /Windows/.test(userAgent)
@@ -42,18 +45,20 @@ function describeUserAgent(userAgent: string | null): { label: string; isMobile:
   return { label: os ? `${browser} · ${os}` : browser, isMobile };
 }
 
-function formatRelativeTime(iso: string): string {
+function formatRelativeTime(iso: string, t: SecurityDict): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const diffMin = Math.round(diffMs / 60_000);
-  if (diffMin < 1) return "agora mesmo";
-  if (diffMin < 60) return `há ${diffMin} min`;
+  if (diffMin < 1) return t.justNow;
+  if (diffMin < 60) return t.minAgoTemplate.replace("{n}", String(diffMin));
   const diffHours = Math.round(diffMin / 60);
-  if (diffHours < 24) return `há ${diffHours}h`;
+  if (diffHours < 24) return t.hourAgoTemplate.replace("{n}", String(diffHours));
   const diffDays = Math.round(diffHours / 24);
-  return `há ${diffDays}d`;
+  return t.dayAgoTemplate.replace("{n}", String(diffDays));
 }
 
 export default function SecurityPage() {
+  const { t } = useTranslation();
+  const security = t.security;
   const [step, setStep] = useState<Step>("loading");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -106,15 +111,15 @@ export default function SecurityPage() {
     try {
       const res = await apiFetch("/auth/2fa/setup", { method: "POST" });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Falha ao iniciar configuração.");
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, security.errorSetupFailed));
       }
       const data = (await res.json()) as { secret: string; qrCodeDataUrl: string };
       setSecret(data.secret);
       setQrCodeDataUrl(data.qrCodeDataUrl);
       setStep("setting-up");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : security.errorUnknown);
     } finally {
       setSubmitting(false);
     }
@@ -131,14 +136,14 @@ export default function SecurityPage() {
         body: JSON.stringify({ code: confirmCode }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Código inválido.");
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, security.errorInvalidCode));
       }
       const data = (await res.json()) as { backupCodes: string[] };
       setBackupCodes(data.backupCodes);
       setStep("showing-backup-codes");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : security.errorUnknown);
     } finally {
       setSubmitting(false);
     }
@@ -155,13 +160,13 @@ export default function SecurityPage() {
         body: JSON.stringify({ password: disablePassword }),
       });
       if (!res.ok) {
-        const body = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(body.message ?? "Falha ao desativar.");
+        const body: unknown = await res.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, security.errorDisableFailed));
       }
       setDisablePassword("");
       setStep("disabled");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Erro desconhecido");
+      setError(err instanceof Error ? err.message : security.errorUnknown);
     } finally {
       setSubmitting(false);
     }
@@ -170,7 +175,7 @@ export default function SecurityPage() {
   if (step === "loading") {
     return (
       <div className="mx-auto w-full max-w-2xl px-8 py-6">
-        <p className="text-[13px] text-muted-foreground">Carregando...</p>
+        <p className="text-[13px] text-muted-foreground">{security.loading}</p>
       </div>
     );
   }
@@ -179,12 +184,9 @@ export default function SecurityPage() {
     <div className="mx-auto w-full max-w-2xl px-8 py-6">
       <div className="mb-1 flex items-center gap-2">
         <ShieldCheck size={16} strokeWidth={1.75} className="text-foreground" />
-        <h1 className="text-[15px] font-semibold text-foreground">Segurança da conta</h1>
+        <h1 className="text-[15px] font-semibold text-foreground">{security.pageTitle}</h1>
       </div>
-      <p className="mb-5 text-[12.5px] text-muted-foreground">
-        Autenticação em duas etapas (2FA) exige um código do seu app autenticador (Google Authenticator, Authy,
-        etc) além da senha pra entrar no Korrelo.
-      </p>
+      <p className="mb-5 text-[12.5px] text-muted-foreground">{security.pageDescription}</p>
 
       {error && <p className="mb-3 text-[13px] text-destructive">{error}</p>}
 
@@ -192,18 +194,16 @@ export default function SecurityPage() {
         <div className="rounded-xl border border-border-subtle bg-surface p-5">
           <div className="flex items-center gap-2 text-muted-foreground">
             <ShieldOff size={16} strokeWidth={1.75} />
-            <span className="text-[13.5px] font-medium text-foreground">2FA desativado</span>
+            <span className="text-[13.5px] font-medium text-foreground">{security.disabledTitle}</span>
           </div>
-          <p className="mt-1.5 text-[12.5px] text-muted-foreground">
-            Sua conta só é protegida por senha no momento.
-          </p>
+          <p className="mt-1.5 text-[12.5px] text-muted-foreground">{security.disabledDescription}</p>
           <button
             onClick={handleStartSetup}
             disabled={submitting}
             className="mt-3 inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             {submitting && <Loader2 size={14} className="animate-spin" />}
-            Ativar 2FA
+            {security.enableButton}
           </button>
         </div>
       )}
@@ -213,25 +213,23 @@ export default function SecurityPage() {
           onSubmit={handleConfirmSetup}
           className="flex flex-col gap-4 rounded-xl border border-border-subtle bg-surface p-5"
         >
-          <p className="text-[13px] text-foreground">
-            1. Escaneie o QR code com seu app autenticador (ou digite o código manualmente).
-          </p>
+          <p className="text-[13px] text-foreground">{security.setupStep1}</p>
           {qrCodeDataUrl && (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={qrCodeDataUrl} alt="QR code do 2FA" className="h-40 w-40 rounded-lg bg-white p-2" />
+            <img src={qrCodeDataUrl} alt={security.qrAlt} className="h-40 w-40 rounded-lg bg-white p-2" />
           )}
           <div>
-            <p className="mb-1 text-[12px] text-muted-foreground">Código manual</p>
+            <p className="mb-1 text-[12px] text-muted-foreground">{security.manualCodeLabel}</p>
             <code className="break-all rounded-md bg-background px-2.5 py-1.5 font-mono text-[12.5px] text-foreground">
               {secret}
             </code>
           </div>
 
-          <p className="text-[13px] text-foreground">2. Digite o código de 6 dígitos que apareceu no app:</p>
+          <p className="text-[13px] text-foreground">{security.setupStep2}</p>
           <input
             value={confirmCode}
             onChange={(e) => setConfirmCode(e.target.value)}
-            placeholder="123456"
+            placeholder={security.codePlaceholder}
             required
             autoFocus
             className="w-40 rounded-md border border-border-subtle bg-transparent px-3 py-2 text-center font-mono text-[16px] tracking-widest text-foreground outline-none focus:border-accent"
@@ -243,7 +241,7 @@ export default function SecurityPage() {
             className="inline-flex w-fit items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
           >
             {submitting && <Loader2 size={14} className="animate-spin" />}
-            Confirmar e ativar
+            {security.confirmButton}
           </button>
         </form>
       )}
@@ -252,10 +250,7 @@ export default function SecurityPage() {
         <div className="rounded-xl border border-border-subtle bg-surface p-5">
           <div className="mb-3 flex items-start gap-2.5 rounded-lg bg-warning/10 p-3">
             <TriangleAlert size={16} strokeWidth={1.75} className="mt-0.5 flex-none text-warning" />
-            <p className="text-[12.5px] text-warning">
-              Guarde esses códigos de backup agora, eles não vão aparecer de novo. Cada um só funciona uma vez,
-              e servem pra entrar caso você perca acesso ao app autenticador.
-            </p>
+            <p className="text-[12.5px] text-warning">{security.backupCodesWarning}</p>
           </div>
           <div className="grid grid-cols-2 gap-2">
             {backupCodes.map((code) => (
@@ -268,7 +263,7 @@ export default function SecurityPage() {
             onClick={() => setStep("enabled")}
             className="mt-4 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90"
           >
-            Já salvei os códigos
+            {security.backupCodesSavedButton}
           </button>
         </div>
       )}
@@ -280,18 +275,16 @@ export default function SecurityPage() {
         >
           <div className="flex items-center gap-2 text-accent">
             <ShieldCheck size={16} strokeWidth={1.75} />
-            <span className="text-[13.5px] font-medium">2FA ativado</span>
+            <span className="text-[13.5px] font-medium">{security.enabledTitle}</span>
           </div>
-          <p className="text-[12.5px] text-muted-foreground">
-            Digite sua senha pra desativar (isso remove a exigência do código no login).
-          </p>
+          <p className="text-[12.5px] text-muted-foreground">{security.enabledDescription}</p>
           <div className="flex items-center gap-2">
             <KeyRound size={14} className="flex-none text-muted-foreground" />
             <input
               type="password"
               value={disablePassword}
               onChange={(e) => setDisablePassword(e.target.value)}
-              placeholder="Sua senha"
+              placeholder={security.passwordPlaceholder}
               required
               className="flex-1 rounded-md border border-border-subtle bg-transparent px-3 py-2 text-[13px] text-foreground outline-none focus:border-accent"
             />
@@ -302,29 +295,26 @@ export default function SecurityPage() {
             className="inline-flex w-fit items-center gap-2 rounded-md bg-destructive px-3.5 py-2 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {submitting && <Loader2 size={14} className="animate-spin" />}
-            Desativar 2FA
+            {security.disableButton}
           </button>
         </form>
       )}
 
       <div className="mt-8 mb-1 flex items-center gap-2">
         <Laptop size={16} strokeWidth={1.75} className="text-foreground" />
-        <h2 className="text-[15px] font-semibold text-foreground">Sessões ativas</h2>
+        <h2 className="text-[15px] font-semibold text-foreground">{security.sessionsTitle}</h2>
       </div>
-      <p className="mb-4 text-[12.5px] text-muted-foreground">
-        Todos os dispositivos com uma sessão válida nesta conta. Encerrar uma sessão derruba o acesso
-        imediatamente, mesmo sem trocar a senha.
-      </p>
+      <p className="mb-4 text-[12.5px] text-muted-foreground">{security.sessionsDescription}</p>
 
       <div className="rounded-xl border border-border-subtle bg-surface">
         {sessionsLoading ? (
-          <p className="p-5 text-[13px] text-muted-foreground">Carregando...</p>
+          <p className="p-5 text-[13px] text-muted-foreground">{security.loading}</p>
         ) : sessions.length === 0 ? (
-          <p className="p-5 text-[13px] text-muted-foreground">Nenhuma sessão ativa encontrada.</p>
+          <p className="p-5 text-[13px] text-muted-foreground">{security.noSessions}</p>
         ) : (
           <ul className="divide-y divide-border-subtle">
             {sessions.map((session) => {
-              const { label, isMobile } = describeUserAgent(session.userAgent);
+              const { label, isMobile } = describeUserAgent(session.userAgent, security);
               return (
                 <li key={session.id} className="flex items-center gap-3 p-4">
                   {isMobile ? (
@@ -337,12 +327,14 @@ export default function SecurityPage() {
                       <span className="text-[13.5px] font-medium text-foreground">{label}</span>
                       {session.isCurrent && (
                         <span className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-medium text-accent">
-                          Esta sessão
+                          {security.currentSessionBadge}
                         </span>
                       )}
                     </div>
                     <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
-                      {session.ipAddress ?? "IP desconhecido"} · último uso {formatRelativeTime(session.lastUsedAt)}
+                      {security.lastUsedTemplate
+                        .replace("{ip}", session.ipAddress ?? security.unknownIp)
+                        .replace("{time}", formatRelativeTime(session.lastUsedAt, security))}
                     </p>
                   </div>
                   {!session.isCurrent && (
@@ -356,7 +348,7 @@ export default function SecurityPage() {
                       ) : (
                         <LogOut size={13} />
                       )}
-                      Encerrar
+                      {security.revokeButton}
                     </button>
                   )}
                 </li>
