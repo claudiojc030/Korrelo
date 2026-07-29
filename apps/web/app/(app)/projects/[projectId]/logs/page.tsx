@@ -57,7 +57,7 @@ export default function LogsPage({ params }: { params: { projectId: string } }) 
       cancelled = true;
       clearInterval(interval);
     };
-  }, [params.projectId, target]);
+  }, [params.projectId, target, t]);
 
   useEffect(() => {
     if (autoScroll && scrollRef.current) {

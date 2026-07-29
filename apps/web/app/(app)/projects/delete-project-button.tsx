@@ -51,7 +51,7 @@ export function DeleteProjectButton({ projectId, projectName }: { projectId: str
               </div>
               <div>
                 <p className="text-[14.5px] font-semibold text-foreground">
-                  {t.projects.remove} "{projectName}"?
+                  {t.projects.remove} &quot;{projectName}&quot;?
                 </p>
                 <p className="mt-1 text-[13px] text-muted-foreground">{t.projects.deleteConfirmBody}</p>
               </div>

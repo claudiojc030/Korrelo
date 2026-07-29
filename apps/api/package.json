@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "prisma generate",
     "build": "nest build",
     "start": "node dist/main",
     "start:dev": "nest start --watch",
@@ -38,6 +39,9 @@
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^8.57.0",
     "@nestjs/schematics": "^10.2.0",
     "@nestjs/testing": "^10.4.0",
     "@types/bcryptjs": "^2.4.6",

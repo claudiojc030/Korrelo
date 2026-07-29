@@ -62,6 +62,9 @@ export function TerminalClient({ projectId }: { projectId: string }) {
       socket?.disconnect();
       term?.dispose();
     };
+    // t só é usado dentro de callbacks de erro/saída; incluir na dependência
+    // derrubaria e reconectaria a sessão de terminal toda vez que o idioma mudar.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   return (
