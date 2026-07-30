@@ -51,20 +51,20 @@ everything up via PM2, and schedules a daily backup.
 At two points it **stops and asks for your input**:
 
 1. **Domain (optional)**: leave it blank to access by IP only.
-2. **GitHub App**: can be left for later, no problem — see below.
+2. **GitHub App**: can be left for later, no problem, see below.
 
 ## 2. Connecting GitHub
 
 The GitHub App is what lets Korrelo list your repositories and receive push
 webhooks (automatic deploy). Without it, you can still use the rest of
 Korrelo normally, only import/auto-deploy via GitHub becomes unavailable.
-No need to configure this during `setup-vps.sh` — just press ENTER to skip
+No need to configure this during `setup-vps.sh`, just press ENTER to skip
 the domain prompt and take care of this later, at your own pace.
 
 **Easy way (recommended)**: on Korrelo's dashboard, under "First steps",
 click **"Create GitHub App automatically"**. This takes you straight to
 GitHub with the name, permissions and webhook already filled in (GitHub's
-"manifest" flow) — you just confirm the creation, Korrelo gets the
+"manifest" flow), you just confirm the creation, Korrelo gets the
 credentials back automatically (App ID, private key, webhook secret), and
 sends you straight to installing the App on whichever repositories you
 want. Nothing to copy by hand.
@@ -78,8 +78,8 @@ want. Nothing to copy by hand.
    - **Homepage URL**: your Korrelo's URL (`https://YOUR_DOMAIN` or `http://YOUR_IP:3000`).
    - **Callback URL**: same URL as above.
    - **Setup URL (optional)**: check "Redirect on update" and set it to
-     `https://YOUR_DOMAIN/api/github/callback` (or `http://YOUR_IP:3001/github/callback` without a domain) —
-     without this, GitHub won't send you back to Korrelo after installing the App.
+     `https://YOUR_DOMAIN/api/github/callback` (or `http://YOUR_IP:3001/github/callback` without a domain).
+     Without this, GitHub won't send you back to Korrelo after installing the App.
    - **Webhook → Active**: check it, and under **Webhook URL** put
      `https://YOUR_DOMAIN/api/github/webhook` (or `http://YOUR_IP:3001/github/webhook` without a domain).
    - **Webhook secret**: generate any random value and note it down, it'll become `GITHUB_APP_WEBHOOK_SECRET`.
@@ -156,7 +156,7 @@ pm2 restart ecosystem.config.js
   before encryption existed, Korrelo encrypts it by itself the next time it's read.
 - **JWT_SECRET and ENV_ENCRYPTION_KEY** are generated automatically on first
   install (`setup-vps.sh`), and as an extra safety net, the API itself
-  generates a fresh value on its own if either is missing when it starts —
+  generates a fresh value on its own if either is missing when it starts,
   you can never end up without these keys by accident.
 - **Connecting GitHub** (manual or automatic) is protected against forged
   links: Korrelo only completes that flow if it was started by your own

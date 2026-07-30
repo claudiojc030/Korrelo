@@ -14,7 +14,7 @@ interface GithubManifestConversion {
 // manifest (github.com/settings/apps/new com um <form manifest=...>) pelas
 // credenciais reais do App recém-criado. Isso substitui os passos manuais de
 // copiar App ID, gerar/baixar a private key e converter ela pra uma linha só
-// com \n (ver README) — tudo já vem pronto na resposta dessa troca.
+// com \n (ver README), tudo já vem pronto na resposta dessa troca.
 @Injectable()
 export class CompleteGithubAppManifestUseCase {
   async execute(code: string): Promise<{ slug: string }> {

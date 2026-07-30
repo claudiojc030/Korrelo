@@ -35,7 +35,7 @@ export function GithubConnectButton() {
     // antemão e submete um form de verdade pro github.com (não dá pra fazer
     // via fetch/CORS). O GitHub cria o App, redireciona de volta com um
     // "code" de uso único, e o backend troca isso pelas credenciais reais
-    // (ver /github/manifest-callback) — sem copiar App ID/chave na mão.
+    // (ver /github/manifest-callback), sem copiar App ID/chave na mão.
     //
     // O "state" vem de uma rota autenticada (só quem está logado consegue
     // gerar um válido) e viaja dentro do redirect_url. Sem ele, qualquer um

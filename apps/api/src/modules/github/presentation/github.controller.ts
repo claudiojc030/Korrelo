@@ -50,7 +50,7 @@ export class GithubController {
   // veio de um redirect de verdade do GitHub: ele é enviado em QUALQUER
   // navegação de topo, inclusive um link forjado por um atacante que a pessoa
   // clique estando logada. Por isso o "state" (emitido só por /install-url,
-  // que exige sessão) é a defesa real aqui — sem um state válido, um
+  // que exige sessão) é a defesa real aqui: sem um state válido, um
   // installation_id de outra conta não é aceito mesmo com cookie válido.
   @Get("callback")
   async callback(

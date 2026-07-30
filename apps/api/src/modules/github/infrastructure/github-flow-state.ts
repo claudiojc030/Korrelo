@@ -13,8 +13,8 @@ function jwtSecret(): string {
 // Prova de que quem está completando um fluxo de redirect do GitHub (criação
 // de App via manifest, ou instalação de App) é a mesma sessão autenticada que
 // iniciou ele. O cookie de sessão sozinho NÃO basta pra provar isso: sendo
-// SameSite=Lax, ele é enviado em qualquer navegação de topo — inclusive um
-// link forjado por um atacante que a pessoa clique estando logada — não só em
+// SameSite=Lax, ele é enviado em qualquer navegação de topo, inclusive um
+// link forjado por um atacante que a pessoa clique estando logada, não só em
 // redirects que vieram de verdade do github.com. Como esse "state" só é
 // emitido por uma rota autenticada, um atacante nunca consegue forjar um
 // válido, então um link malicioso não passa na verificação.
