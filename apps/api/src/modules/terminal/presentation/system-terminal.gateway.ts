@@ -51,6 +51,11 @@ export class SystemTerminalGateway implements OnGatewayConnection, OnGatewayDisc
       client.emit("exit", code);
       client.disconnect();
     });
+    session.onError((message) => {
+      this.logger.error(`Falha ao iniciar shell da VPS: ${message}`);
+      client.emit("error", message);
+      client.disconnect();
+    });
   }
 
   @SubscribeMessage("input")

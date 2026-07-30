@@ -12,6 +12,9 @@ class HostShellSession implements ShellSession {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: process.env.HOME,
     });
+    // Sem um listener de "error", uma falha de spawn (binário não encontrado,
+    // permissão negada) derruba o processo Node inteiro, não só essa sessão.
+    this.child.on("error", () => {});
   }
 
   write(data: string): void {
@@ -25,6 +28,10 @@ class HostShellSession implements ShellSession {
 
   onExit(callback: (code: number | null) => void): void {
     this.child.on("exit", (code) => callback(code));
+  }
+
+  onError(callback: (message: string) => void): void {
+    this.child.on("error", (error) => callback(error.message));
   }
 
   kill(): void {

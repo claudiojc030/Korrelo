@@ -61,6 +61,11 @@ export class TerminalGateway implements OnGatewayConnection, OnGatewayDisconnect
       client.emit("exit", code);
       client.disconnect();
     });
+    session.onError((message) => {
+      this.logger.error(`Falha ao iniciar shell do projeto ${payload.projectId}: ${message}`);
+      client.emit("error", message);
+      client.disconnect();
+    });
   }
 
   @SubscribeMessage("input")

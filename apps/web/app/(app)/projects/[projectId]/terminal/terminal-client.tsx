@@ -41,6 +41,10 @@ export function TerminalClient({ projectId }: { projectId: string }) {
       term.loadAddon(fitAddon);
       term.open(containerRef.current);
       fitAddon.fit();
+      // Sem isso o terminal renderiza mas não recebe teclado: abrir o xterm
+      // não move o foco sozinho, precisa ser pedido explicitamente.
+      term.focus();
+      containerRef.current.addEventListener("click", () => term?.focus());
 
       // withCredentials manda o cookie httpOnly de auth junto do handshake,
       // o gateway valida lendo esse cookie (ver terminal.gateway.ts).

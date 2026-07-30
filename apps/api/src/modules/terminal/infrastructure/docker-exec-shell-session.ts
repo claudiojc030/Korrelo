@@ -12,6 +12,10 @@ class DockerExecShellSession implements ShellSession {
     this.child = spawn("docker", ["exec", "-i", containerName, "sh"], {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    // Sem um listener de "error", uma falha de spawn (docker não encontrado,
+    // container removido no meio do caminho) derruba o processo Node inteiro,
+    // não só essa sessão.
+    this.child.on("error", () => {});
   }
 
   write(data: string): void {
@@ -25,6 +29,10 @@ class DockerExecShellSession implements ShellSession {
 
   onExit(callback: (code: number | null) => void): void {
     this.child.on("exit", (code) => callback(code));
+  }
+
+  onError(callback: (message: string) => void): void {
+    this.child.on("error", (error) => callback(error.message));
   }
 
   kill(): void {
