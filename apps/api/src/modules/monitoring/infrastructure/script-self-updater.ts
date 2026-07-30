@@ -42,10 +42,18 @@ export class ScriptSelfUpdater implements SelfUpdater {
     const scriptPath = path.join(this.repoDir, "scripts", "self-update.sh");
     const out = fs.openSync(this.logPath, "a");
 
+    // O PM2 roda a API com NODE_ENV=production (ver ecosystem.config.js), e
+    // isso é herdado pelo processo filho por padrão. Com NODE_ENV=production
+    // no ambiente, "npm install" pula as devDependencies (typescript entre
+    // elas), quebrando o build logo na primeira etapa por falta do "tsc".
+    const updateEnv = { ...process.env };
+    delete updateEnv.NODE_ENV;
+
     const child = spawn("bash", [scriptPath], {
       cwd: this.repoDir,
       detached: true,
       stdio: ["ignore", out, out],
+      env: updateEnv,
     });
     child.unref();
     fs.closeSync(out);
