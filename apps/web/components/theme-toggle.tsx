@@ -10,6 +10,8 @@ export function ThemeToggle() {
   const [theme, setTheme] = useState<Theme | null>(null);
 
   useEffect(() => {
+    // localStorage só existe no cliente, depois do hydrate.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTheme(getStoredTheme());
   }, []);
 

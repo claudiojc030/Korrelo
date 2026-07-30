@@ -30,7 +30,10 @@ export function UpdateProgressModal({ onClose }: { onClose: () => void }) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const logBoxRef = useRef<HTMLPreElement>(null);
   const phaseRef = useRef<Phase>("updating");
-  phaseRef.current = phase;
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   useEffect(() => {
     let cancelled = false;

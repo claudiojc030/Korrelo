@@ -26,7 +26,6 @@ export default function LogsPage(props: { params: Promise<{ projectId: string }>
       .then((res) => (res.status === 200 ? res.json() : null))
       .then((db) => setHasManagedDatabase(!!db && db.type !== "custom"))
       .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.projectId]);
 
   useEffect(() => {
@@ -51,6 +50,9 @@ export default function LogsPage(props: { params: Promise<{ projectId: string }>
       }
     }
 
+    // Reseta o loading antes de cada busca (troca de aba/projeto ou o
+    // próprio polling), pra não mostrar o log antigo como se fosse atual.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true);
     load();
     const interval = setInterval(load, POLL_MS);

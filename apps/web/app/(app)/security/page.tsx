@@ -91,8 +91,11 @@ export default function SecurityPage() {
   }
 
   useEffect(() => {
+    // loadStatus/loadSessions setam loading de forma síncrona antes do fetch.
+    /* eslint-disable react-hooks/set-state-in-effect */
     loadStatus();
     loadSessions();
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   async function handleRevokeSession(id: string) {

@@ -33,6 +33,9 @@ export function MetricsHistoryChart() {
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    // Reseta antes de buscar o novo range: troca de aba não pode mostrar o
+    // gráfico do range anterior enquanto a nova busca ainda está em voo.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPoints(null);
     setError(false);
     apiFetch(`/monitoring/history?range=${range}`)

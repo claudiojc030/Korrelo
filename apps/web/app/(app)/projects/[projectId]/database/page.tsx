@@ -408,6 +408,8 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
   }
 
   useEffect(() => {
+    // loadTables seta loading/error de forma síncrona antes do fetch assíncrono.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadTables();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);

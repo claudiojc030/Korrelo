@@ -1,16 +1,11 @@
-import dynamic from "next/dynamic";
 import { SquareSlash } from "lucide-react";
 import type { Project } from "@korrelo/shared-types";
+import { TerminalClient } from "./terminal-client";
 import { authHeaderServer } from "../../../../../lib/auth-cookie-server";
 import { getLocaleServer } from "../../../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../../../lib/i18n/dictionaries";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-
-const TerminalClient = dynamic(
-  () => import("./terminal-client").then((mod) => mod.TerminalClient),
-  { ssr: false },
-);
 
 async function getProject(projectId: string): Promise<Project | null> {
   try {

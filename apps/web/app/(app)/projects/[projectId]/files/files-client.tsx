@@ -259,7 +259,7 @@ export default function FilesClient({ projectId }: { projectId: string }) {
               theme="vs-dark"
               language={guessLanguage(selectedPath)}
               value={content}
-              onChange={(value) => setContent(value ?? "")}
+              onChange={(value: string | undefined) => setContent(value ?? "")}
               options={{ minimap: { enabled: false }, fontSize: 13 }}
             />
           ) : (

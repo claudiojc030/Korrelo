@@ -60,6 +60,8 @@ export function CommandPalette() {
 
   useEffect(() => {
     if (!open) return;
+    // Reseta o estado da busca a cada vez que o palette abre.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setQuery("");
     setSelectedIndex(0);
     requestAnimationFrame(() => inputRef.current?.focus());

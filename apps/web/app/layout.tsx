@@ -35,7 +35,13 @@ const THEME_INIT_SCRIPT = `
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const locale = await getLocaleServer();
   return (
-    <html lang={locale === "en" ? "en" : "pt-BR"} className={`${inter.variable} ${jetbrainsMono.variable}`}>
+    <html
+      lang={locale === "en" ? "en" : "pt-BR"}
+      className={`${inter.variable} ${jetbrainsMono.variable}`}
+      // O script beforeInteractive abaixo seta data-theme antes do hydrate,
+      // de propósito (evita flash do tema errado). O mismatch é esperado.
+      suppressHydrationWarning
+    >
       <head>
         <Script id="theme-init" strategy="beforeInteractive">
           {THEME_INIT_SCRIPT}

@@ -1,12 +1,7 @@
-import dynamic from "next/dynamic";
 import { TriangleAlert } from "lucide-react";
+import { SystemTerminalClient } from "./system-terminal-client";
 import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../lib/i18n/dictionaries";
-
-const SystemTerminalClient = dynamic(
-  () => import("./system-terminal-client").then((mod) => mod.SystemTerminalClient),
-  { ssr: false },
-);
 
 export default async function SystemTerminalPage() {
   const t = getDictionary(await getLocaleServer());

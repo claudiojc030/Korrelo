@@ -44,6 +44,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // navigator só existe no cliente, depois do hydrate.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMac(/Mac|iPod|iPhone|iPad/.test(navigator.platform));
   }, []);
 
