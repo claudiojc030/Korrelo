@@ -16,7 +16,7 @@ async function getProject(projectId: string): Promise<Project | null> {
   try {
     const res = await fetch(`${API_URL}/projects/${projectId}`, {
       cache: "no-store",
-      headers: authHeaderServer(),
+      headers: await authHeaderServer(),
     });
     if (!res.ok) return null;
     return res.json();
@@ -25,8 +25,9 @@ async function getProject(projectId: string): Promise<Project | null> {
   }
 }
 
-export default async function TerminalPage({ params }: { params: { projectId: string } }) {
-  const t = getDictionary(getLocaleServer());
+export default async function TerminalPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
+  const t = getDictionary(await getLocaleServer());
   const project = await getProject(params.projectId);
 
   if (project && !project.terminalEnabled) {

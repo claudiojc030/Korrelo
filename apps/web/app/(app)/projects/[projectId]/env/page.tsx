@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, use } from "react";
 import { Plus, Trash2, Save, Loader2, Eye, EyeOff, KeyRound } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
@@ -11,7 +11,8 @@ interface EnvRow {
   value: string;
 }
 
-export default function EnvVarsPage({ params }: { params: { projectId: string } }) {
+export default function EnvVarsPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = use(props.params);
   const { t } = useTranslation();
   const [rows, setRows] = useState<EnvRow[]>([]);
   const [loading, setLoading] = useState(true);

@@ -8,8 +8,8 @@ const SystemTerminalClient = dynamic(
   { ssr: false },
 );
 
-export default function SystemTerminalPage() {
-  const t = getDictionary(getLocaleServer());
+export default async function SystemTerminalPage() {
+  const t = getDictionary(await getLocaleServer());
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">

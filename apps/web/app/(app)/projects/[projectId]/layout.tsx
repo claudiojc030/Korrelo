@@ -12,7 +12,7 @@ async function getProject(projectId: string): Promise<Project | null> {
   try {
     const res = await fetch(`${API_URL}/projects/${projectId}`, {
       cache: "no-store",
-      headers: authHeaderServer(),
+      headers: await authHeaderServer(),
     });
     if (!res.ok) return null;
     return res.json();
@@ -26,9 +26,10 @@ export default async function ProjectLayout({
   params,
 }: {
   children: React.ReactNode;
-  params: { projectId: string };
+  params: Promise<{ projectId: string }>;
 }) {
-  const t = getDictionary(getLocaleServer());
+  const { projectId } = await params;
+  const t = getDictionary(await getLocaleServer());
   const STATUS_STYLE: Record<Project["status"], { label: string; dot: string; text: string }> = {
     detected: { label: t.projectDetail.statusDetected, dot: "bg-muted-foreground", text: "text-muted-foreground" },
     configuring: { label: t.projectDetail.statusConfiguring, dot: "bg-warning", text: "text-warning" },
@@ -37,7 +38,7 @@ export default async function ProjectLayout({
     failed: { label: t.projectDetail.statusFailed, dot: "bg-destructive", text: "text-destructive" },
   };
 
-  const project = await getProject(params.projectId);
+  const project = await getProject(projectId);
 
   if (!project) {
     return (

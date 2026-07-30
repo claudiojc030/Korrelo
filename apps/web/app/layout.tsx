@@ -32,8 +32,8 @@ const THEME_INIT_SCRIPT = `
 })();
 `;
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
-  const locale = getLocaleServer();
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const locale = await getLocaleServer();
   return (
     <html lang={locale === "en" ? "en" : "pt-BR"} className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <head>

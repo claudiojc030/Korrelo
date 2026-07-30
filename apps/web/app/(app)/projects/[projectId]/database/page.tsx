@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { Database, DatabaseZap, Eye, EyeOff, Loader2, Play, TriangleAlert } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
@@ -46,7 +46,8 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export default function DatabasePage({ params }: { params: { projectId: string } }) {
+export default function DatabasePage(props: { params: Promise<{ projectId: string }> }) {
+  const params = use(props.params);
   const router = useRouter();
   const { t } = useTranslation();
   const TYPE_LABEL = getTypeLabels(t.projectDatabase);

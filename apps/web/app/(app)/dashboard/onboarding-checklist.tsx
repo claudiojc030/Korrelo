@@ -18,8 +18,8 @@ interface Step {
   action: React.ReactNode;
 }
 
-export function OnboardingChecklist({ githubConnected, hasProjects, twoFactorEnabled }: OnboardingChecklistProps) {
-  const t = getDictionary(getLocaleServer());
+export async function OnboardingChecklist({ githubConnected, hasProjects, twoFactorEnabled }: OnboardingChecklistProps) {
+  const t = getDictionary(await getLocaleServer());
   const steps: Step[] = [
     {
       key: "github",

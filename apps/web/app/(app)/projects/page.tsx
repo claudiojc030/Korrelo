@@ -11,7 +11,7 @@ import { getDictionary, type Dictionary } from "../../../lib/i18n/dictionaries";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
 async function getProjects(): Promise<Project[]> {
-  const res = await fetch(`${API_URL}/projects`, { cache: "no-store", headers: authHeaderServer() });
+  const res = await fetch(`${API_URL}/projects`, { cache: "no-store", headers: await authHeaderServer() });
   if (!res.ok) return [];
   return res.json();
 }
@@ -137,7 +137,7 @@ function Section({
 }
 
 export default async function ProjectsPage() {
-  const t = getDictionary(getLocaleServer());
+  const t = getDictionary(await getLocaleServer());
   const projects = await getProjects();
 
   const running = projects.filter((p) => p.status === "running");

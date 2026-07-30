@@ -17,7 +17,7 @@ async function getSystemMetrics(): Promise<SystemMetrics | null> {
   try {
     const res = await fetch(`${API_URL}/monitoring/system`, {
       cache: "no-store",
-      headers: authHeaderServer(),
+      headers: await authHeaderServer(),
     });
     if (!res.ok) return null;
     return res.json();
@@ -28,7 +28,7 @@ async function getSystemMetrics(): Promise<SystemMetrics | null> {
 
 async function getProjects(): Promise<Project[]> {
   try {
-    const res = await fetch(`${API_URL}/projects`, { cache: "no-store", headers: authHeaderServer() });
+    const res = await fetch(`${API_URL}/projects`, { cache: "no-store", headers: await authHeaderServer() });
     if (!res.ok) return [];
     return res.json();
   } catch {
@@ -40,7 +40,7 @@ async function getGithubStatus() {
   try {
     const res = await fetch(`${API_URL}/github/status`, {
       cache: "no-store",
-      headers: authHeaderServer(),
+      headers: await authHeaderServer(),
     });
     if (!res.ok) return null;
     return res.json() as Promise<{ connected: boolean; accountLogin: string | null }>;
@@ -53,7 +53,7 @@ async function getTwoFactorStatus(): Promise<{ enabled: boolean } | null> {
   try {
     const res = await fetch(`${API_URL}/auth/2fa/status`, {
       cache: "no-store",
-      headers: authHeaderServer(),
+      headers: await authHeaderServer(),
     });
     if (!res.ok) return null;
     return res.json();
@@ -74,7 +74,7 @@ async function getUpdateStatus(): Promise<UpdateStatus | null> {
   try {
     const res = await fetch(`${API_URL}/monitoring/update-status`, {
       cache: "no-store",
-      headers: authHeaderServer(),
+      headers: await authHeaderServer(),
     });
     if (!res.ok) return null;
     return res.json();
@@ -93,7 +93,7 @@ function formatUptime(seconds: number): string {
 }
 
 export default async function DashboardPage() {
-  const t = getDictionary(getLocaleServer());
+  const t = getDictionary(await getLocaleServer());
   const TIER_LABEL: Record<SystemMetrics["tier"], string> = {
     nano: t.dashboard.tierNano,
     micro: t.dashboard.tierMicro,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import type { Project } from "@korrelo/shared-types";
@@ -45,7 +45,8 @@ function FeatureToggleRow({
   );
 }
 
-export default function ProjectSettingsPage({ params }: { params: { projectId: string } }) {
+export default function ProjectSettingsPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = use(props.params);
   const router = useRouter();
   const { t } = useTranslation();
   const [project, setProject] = useState<Project | null | undefined>(undefined);

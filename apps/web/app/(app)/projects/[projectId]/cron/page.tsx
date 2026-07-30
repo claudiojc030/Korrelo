@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, use } from "react";
 import { Clock, Loader2, Play, Trash2, TriangleAlert } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
@@ -36,7 +36,8 @@ function StatusBadge({ status }: { status: CronJob["lastStatus"] }) {
   );
 }
 
-export default function CronPage({ params }: { params: { projectId: string } }) {
+export default function CronPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = use(props.params);
   const { t } = useTranslation();
   const SCHEDULE_EXAMPLES = [
     { expr: "*/5 * * * *", label: t.projectCron.scheduleExampleEvery5Min },

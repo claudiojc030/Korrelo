@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, use } from "react";
 import { Loader2, RefreshCw, ScrollText } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
@@ -10,7 +10,8 @@ type LogTarget = "app" | "database";
 
 const POLL_MS = 4000;
 
-export default function LogsPage({ params }: { params: { projectId: string } }) {
+export default function LogsPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = use(props.params);
   const { t } = useTranslation();
   const [target, setTarget] = useState<LogTarget>("app");
   const [hasManagedDatabase, setHasManagedDatabase] = useState(false);

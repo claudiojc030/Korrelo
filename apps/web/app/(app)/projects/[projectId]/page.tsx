@@ -11,7 +11,7 @@ async function getProject(projectId: string): Promise<Project | null> {
   try {
     const res = await fetch(`${API_URL}/projects/${projectId}`, {
       cache: "no-store",
-      headers: authHeaderServer(),
+      headers: await authHeaderServer(),
     });
     if (!res.ok) return null;
     return res.json();
@@ -24,7 +24,7 @@ async function getDiskUsage(projectId: string): Promise<number | null> {
   try {
     const res = await fetch(`${API_URL}/projects/${projectId}/disk-usage`, {
       cache: "no-store",
-      headers: authHeaderServer(),
+      headers: await authHeaderServer(),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { diskUsageMb: number };
@@ -47,7 +47,7 @@ async function getDeployRecords(projectId: string): Promise<DeployRecord[]> {
   try {
     const res = await fetch(`${API_URL}/projects/${projectId}/deploys`, {
       cache: "no-store",
-      headers: authHeaderServer(),
+      headers: await authHeaderServer(),
     });
     if (!res.ok) return [];
     return res.json();
@@ -60,7 +60,7 @@ async function getSystemMetrics(): Promise<SystemMetrics | null> {
   try {
     const res = await fetch(`${API_URL}/monitoring/system`, {
       cache: "no-store",
-      headers: authHeaderServer(),
+      headers: await authHeaderServer(),
     });
     if (!res.ok) return null;
     return res.json();
@@ -87,8 +87,9 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-export default async function ProjectSummaryPage({ params }: { params: { projectId: string } }) {
-  const t = getDictionary(getLocaleServer());
+export default async function ProjectSummaryPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
+  const t = getDictionary(await getLocaleServer());
   const [project, diskUsageMb, metrics, deployRecords] = await Promise.all([
     getProject(params.projectId),
     getDiskUsage(params.projectId),
