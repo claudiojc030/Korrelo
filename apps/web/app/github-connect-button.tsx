@@ -52,7 +52,10 @@ export function GithubConnectButton() {
       name: `korrelo-${suffix}`,
       url: webUrl,
       hook_attributes: { url: `${API_URL}/github/webhook` },
-      redirect_url: `${API_URL}/github/manifest-callback?state=${encodeURIComponent(state)}`,
+      // O state vai no caminho, não em query string: o GitHub recusa
+      // redirect_url do manifest que tenha "?" (erro "redirect_url must be
+      // a valid URL"), mesmo sendo uma URL válida.
+      redirect_url: `${API_URL}/github/manifest-callback/${encodeURIComponent(state)}`,
       // Sem isso o GitHub não sabe pra onde mandar o navegador depois que a
       // pessoa escolhe os repositórios na tela de instalação, e o
       // /github/callback (que registra a instalação no Korrelo) nunca seria

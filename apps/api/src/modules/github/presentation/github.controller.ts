@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Query, Res } from "@nestjs/common";
+import { BadRequestException, Controller, Get, Param, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { apiError } from "../../../infrastructure/api-error";
 import { CompleteGithubInstallationUseCase } from "../application/complete-github-installation.use-case";
@@ -71,10 +71,16 @@ export class GithubController {
   // pro github.com/settings/apps/new). Mesmo raciocínio do /callback acima:
   // o state garante que só a sessão que iniciou esse fluxo consegue
   // completá-lo, mesmo que o "code" em si seja de um App qualquer.
-  @Get("manifest-callback")
+  //
+  // O state vai no CAMINHO da URL, não em query string: o GitHub valida o
+  // redirect_url do manifest e rejeita qualquer um que tenha "?" (erro
+  // "redirect_url must be a valid URL"), mesmo sendo uma URL sintaticamente
+  // válida. O "code" continua vindo em query string porque quem adiciona
+  // ele lá é o próprio GitHub, depois que já validou nosso redirect_url.
+  @Get("manifest-callback/:state")
   async manifestCallback(
     @Query("code") code: string,
-    @Query("state") state: string | undefined,
+    @Param("state") state: string | undefined,
     @Res() res: Response,
   ) {
     if (!verifyGithubFlowState(state, MANIFEST_STATE_PURPOSE)) {
