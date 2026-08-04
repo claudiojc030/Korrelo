@@ -54,6 +54,20 @@ export interface ProjectDatabaseDict {
   rowCountTemplate: string;
   postgresQueryPlaceholder: string;
   mongodbQueryPlaceholder: string;
+  importMongoButton: string;
+  importMongoModalTitle: string;
+  importMongoModalDescription: string;
+  importMongoSourceLabel: string;
+  importMongoSourcePlaceholder: string;
+  importMongoWarning: string;
+  importMongoStartButton: string;
+  importMongoStartError: string;
+  importMongoFailedTitle: string;
+  importMongoDoneTitle: string;
+  importMongoDoneSubtitle: string;
+  importMongoLogLabel: string;
+  importMongoCloseButton: string;
+  importMongoAlreadyRunning: string;
 }
 
 export const projectDatabaseEn: ProjectDatabaseDict = {
@@ -114,6 +128,21 @@ export const projectDatabaseEn: ProjectDatabaseDict = {
   rowCountTemplate: "{count} row(s)",
   postgresQueryPlaceholder: "SELECT * FROM my_table LIMIT 100;",
   mongodbQueryPlaceholder: "db.myCollection.find().limit(20).toArray()",
+  importMongoButton: "Import from external MongoDB",
+  importMongoModalTitle: "Import from external MongoDB",
+  importMongoModalDescription:
+    "Paste the connection string of the MongoDB you want to copy data from (e.g. MongoDB Atlas). Korrelo exports everything from there and imports it into this project's own database.",
+  importMongoSourceLabel: "Source connection string",
+  importMongoSourcePlaceholder: "mongodb+srv://user:password@cluster.mongodb.net/mydb",
+  importMongoWarning: "This replaces all data currently in this project's database. This can't be undone.",
+  importMongoStartButton: "Start import",
+  importMongoStartError: "Failed to start the import.",
+  importMongoFailedTitle: "Import failed",
+  importMongoDoneTitle: "Import complete",
+  importMongoDoneSubtitle: "Data from the source MongoDB is now in this project's database.",
+  importMongoLogLabel: "Log",
+  importMongoCloseButton: "Close",
+  importMongoAlreadyRunning: "An import is already running for this project.",
 };
 
 export const projectDatabasePt: ProjectDatabaseDict = {
@@ -174,4 +203,19 @@ export const projectDatabasePt: ProjectDatabaseDict = {
   rowCountTemplate: "{count} linha(s)",
   postgresQueryPlaceholder: "SELECT * FROM minha_tabela LIMIT 100;",
   mongodbQueryPlaceholder: "db.minhaColecao.find().limit(20).toArray()",
+  importMongoButton: "Importar de outro MongoDB",
+  importMongoModalTitle: "Importar de outro MongoDB",
+  importMongoModalDescription:
+    "Cole a connection string do MongoDB de onde você quer copiar os dados (ex.: MongoDB Atlas). O Korrelo exporta tudo de lá e importa pro banco de dados deste projeto.",
+  importMongoSourceLabel: "Connection string de origem",
+  importMongoSourcePlaceholder: "mongodb+srv://usuario:senha@cluster.mongodb.net/meubanco",
+  importMongoWarning: "Isso substitui todos os dados que já estão no banco deste projeto. Não pode ser desfeito.",
+  importMongoStartButton: "Iniciar importação",
+  importMongoStartError: "Falha ao iniciar a importação.",
+  importMongoFailedTitle: "Importação falhou",
+  importMongoDoneTitle: "Importação concluída",
+  importMongoDoneSubtitle: "Os dados do MongoDB de origem já estão no banco deste projeto.",
+  importMongoLogLabel: "Log",
+  importMongoCloseButton: "Fechar",
+  importMongoAlreadyRunning: "Já tem uma importação rodando pra este projeto.",
 };

@@ -16,6 +16,9 @@ export const apiErrorsEn: ApiErrorsDict = {
   ACCESS_TOKEN_INVALID: "Invalid or expired access token.",
   JWT_SECRET_MISSING: "Server misconfiguration (JWT_SECRET not set).",
   TOO_MANY_REQUESTS: "Too many attempts. Wait a minute and try again.",
+  PROJECT_NOT_RUNNING: "The project needs to be deployed and running before importing data.",
+  MONGODB_NOT_PROVISIONED: "Provision a MongoDB database on this project before importing external data.",
+  SOURCE_URI_REQUIRED: "Enter the source MongoDB connection string.",
 };
 
 export const apiErrorsPt: ApiErrorsDict = {
@@ -34,4 +37,7 @@ export const apiErrorsPt: ApiErrorsDict = {
   ACCESS_TOKEN_INVALID: "Token de acesso inválido ou expirado.",
   JWT_SECRET_MISSING: "Erro de configuração do servidor (JWT_SECRET ausente).",
   TOO_MANY_REQUESTS: "Muitas tentativas. Espere um minuto e tente de novo.",
+  PROJECT_NOT_RUNNING: "O projeto precisa estar implantado e rodando antes de importar dados.",
+  MONGODB_NOT_PROVISIONED: "Provisione um banco MongoDB neste projeto antes de importar dados externos.",
+  SOURCE_URI_REQUIRED: "Informe a connection string do MongoDB de origem.",
 };

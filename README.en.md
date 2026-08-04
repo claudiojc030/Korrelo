@@ -148,6 +148,28 @@ Korrelo rolls back the configuration and shows the error, without leaving
 anything broken. Just try attaching again once DNS already resolves to the
 VPS's IP.
 
+## Importing data from another MongoDB
+
+Already using a managed MongoDB (e.g. MongoDB Atlas) and want to bring the
+data into your own VPS? Step by step:
+
+1. Provision a **MongoDB** database on the project (**Database** tab), if
+   you don't have one yet.
+2. On that same tab, click **"Import from external MongoDB"**.
+3. Paste the source database's connection string (e.g.
+   `mongodb+srv://user:password@cluster.mongodb.net/mydb`) and click
+   **Start import**.
+4. Watch the progress on screen (with a live log). Once it's done, the data
+   is already in this project's MongoDB database, no need to change the
+   connection string the app uses.
+
+**Careful**: this replaces all data currently in the project's database,
+it's not a merge. If the source database is large, the import can take a
+few minutes. This feature depends on the `mongodb-database-tools` package
+(installed automatically by `setup-vps.sh`); if your VPS was set up before
+this feature existed, run `bash scripts/setup-vps.sh` again to install just
+what's missing.
+
 ## Updating Korrelo
 
 **Easy way**: when an update is available, a banner shows up on the

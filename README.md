@@ -144,6 +144,28 @@ Se o certificado falhar (geralmente porque o DNS ainda não propagou), o
 Korrelo desfaz a configuração e mostra o erro, sem deixar nada quebrado. Só
 tentar anexar de novo depois que o DNS já resolver pro IP da VPS.
 
+## Importar dados de outro MongoDB
+
+Já usa um MongoDB gerenciado (ex: MongoDB Atlas) e quer trazer os dados pra
+dentro da sua VPS? Passo a passo:
+
+1. Provisione um banco **MongoDB** no projeto (aba **Banco de Dados**), se
+   ainda não tiver um.
+2. Nessa mesma aba, clique em **"Importar de outro MongoDB"**.
+3. Cole a connection string do banco de origem (ex:
+   `mongodb+srv://usuario:senha@cluster.mongodb.net/meubanco`) e clique em
+   **Iniciar importação**.
+4. Acompanhe o progresso na tela (com log em tempo real). Ao terminar, os
+   dados já estão no banco MongoDB deste projeto, sem precisar trocar nada
+   na connection string usada pela aplicação.
+
+**Atenção**: isso substitui todos os dados que já estão no banco do projeto,
+não é uma mesclagem. Se o banco de origem for grande, a importação pode
+levar alguns minutos. Essa função depende do pacote `mongodb-database-tools`
+(instalado automaticamente pelo `setup-vps.sh`); se sua VPS foi configurada
+antes dessa função existir, rode `bash scripts/setup-vps.sh` de novo pra
+instalar só o que falta.
+
 ## Atualizando o Korrelo
 
 **Jeito fácil**: quando houver uma atualização disponível, aparece um aviso

@@ -7,6 +7,7 @@ import { apiFetch } from "../../../../../lib/api-client";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../../../lib/api-error";
 import type { ProjectDatabaseDict } from "../../../../../lib/i18n/dictionaries/project-database";
+import { MongoImportModal } from "./mongo-import-modal";
 
 type DatabaseType = "postgres" | "redis" | "mongodb" | "custom";
 
@@ -62,6 +63,8 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
   const [customEnvVarKey, setCustomEnvVarKey] = useState("DATABASE_URL");
   const [customConnectionString, setCustomConnectionString] = useState("");
   const [redisPersistent, setRedisPersistent] = useState(false);
+  const [importMongoOpen, setImportMongoOpen] = useState(false);
+  const [importVersion, setImportVersion] = useState(0);
 
   function load() {
     apiFetch(`/projects/${params.projectId}/database`)
@@ -312,10 +315,18 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
       </p>
 
       {!isCustom && (
-        <DatabaseBrowser projectId={params.projectId} type={db.type as "postgres" | "redis" | "mongodb"} />
+        <DatabaseBrowser key={importVersion} projectId={params.projectId} type={db.type as "postgres" | "redis" | "mongodb"} />
       )}
 
-      <div className="mt-5">
+      <div className="mt-5 flex items-center gap-4">
+        {db.type === "mongodb" && (
+          <button
+            onClick={() => setImportMongoOpen(true)}
+            className="rounded-md border border-border-subtle px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            {t.projectDatabase.importMongoButton}
+          </button>
+        )}
         <button
           onClick={() => setConfirmRemove(true)}
           className="text-[13px] font-medium text-destructive hover:opacity-85"
@@ -323,6 +334,14 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
           {t.projectDatabase.removeDatabaseButton}
         </button>
       </div>
+
+      {importMongoOpen && (
+        <MongoImportModal
+          projectId={params.projectId}
+          onClose={() => setImportMongoOpen(false)}
+          onImported={() => setImportVersion((v) => v + 1)}
+        />
+      )}
 
       {confirmRemove && (
         <div

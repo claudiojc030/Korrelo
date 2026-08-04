@@ -19,11 +19,14 @@ import { DetachDomainUseCase } from "../application/detach-domain.use-case";
 import { ListDeployRecordsUseCase } from "../application/list-deploy-records.use-case";
 import { ListDatabaseTablesUseCase } from "../application/list-database-tables.use-case";
 import { RunDatabaseQueryUseCase } from "../application/run-database-query.use-case";
+import { StartMongoImportUseCase } from "../application/start-mongo-import.use-case";
+import { GetMongoImportStatusUseCase } from "../application/get-mongo-import-status.use-case";
 import { CreateProjectDto } from "./create-project.dto";
 import { DetectStackDto } from "./detect-stack.dto";
 import { SetEnvVarsDto } from "./set-env-vars.dto";
 import { ProvisionDatabaseDto } from "./provision-database.dto";
 import { RunDatabaseQueryDto } from "./run-database-query.dto";
+import { StartMongoImportDto } from "./start-mongo-import.dto";
 import { UpdateProjectSettingsDto } from "./update-project-settings.dto";
 import { AttachDomainDto } from "./attach-domain.dto";
 
@@ -50,6 +53,8 @@ export class ProjectsController {
     private readonly listDeployRecords: ListDeployRecordsUseCase,
     private readonly listDatabaseTables: ListDatabaseTablesUseCase,
     private readonly runDatabaseQuery: RunDatabaseQueryUseCase,
+    private readonly startMongoImport: StartMongoImportUseCase,
+    private readonly getMongoImportStatus: GetMongoImportStatusUseCase,
   ) {}
 
   @Get()
@@ -132,6 +137,16 @@ export class ProjectsController {
   @Post(":id/database/query")
   runDatabaseQueryEndpoint(@Param("id") id: string, @Body() dto: RunDatabaseQueryDto) {
     return this.runDatabaseQuery.execute(id, dto.query);
+  }
+
+  @Post(":id/database/mongo-import")
+  startMongoImportEndpoint(@Param("id") id: string, @Body() dto: StartMongoImportDto) {
+    return this.startMongoImport.execute(id, dto.sourceUri);
+  }
+
+  @Get(":id/database/mongo-import/status")
+  getMongoImportStatusEndpoint(@Param("id") id: string) {
+    return this.getMongoImportStatus.execute(id);
   }
 
   @Post(":id/detect-stack")

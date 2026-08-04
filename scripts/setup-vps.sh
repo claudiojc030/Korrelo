@@ -67,6 +67,25 @@ sudo apt-get install -y nginx certbot python3-certbot-nginx
 log "Instalando sqlite3 (usado no backup do banco Core)"
 sudo apt-get install -y sqlite3
 
+log "Instalando ferramentas do MongoDB (mongodump/mongorestore)"
+# Usadas pela importação de banco externo (aba Banco de Dados → Importar de
+# outro MongoDB). Não é crítico pro resto do Korrelo funcionar, por isso essa
+# etapa é isolada num subshell e nunca aborta o script inteiro se o
+# repositório da MongoDB não tiver suporte pra essa versão do Ubuntu.
+if ! command -v mongodump &> /dev/null; then
+  (
+    set -e
+    curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
+    CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+    echo "deb [signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg] https://repo.mongodb.org/apt/ubuntu ${CODENAME}/mongodb-org/7.0 multiverse" \
+      | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list > /dev/null
+    sudo apt-get update -y
+    sudo apt-get install -y mongodb-database-tools
+  ) || warn "Não foi possível instalar mongodb-database-tools. A importação de MongoDB externo ficará indisponível até instalar manualmente."
+else
+  echo "mongodb-database-tools já instalado."
+fi
+
 log "Preparando diretório de sites por projeto"
 KORRELO_SITES_DIR=/etc/nginx/korrelo-sites
 sudo mkdir -p "$KORRELO_SITES_DIR"
