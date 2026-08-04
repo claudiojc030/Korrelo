@@ -1,6 +1,7 @@
 import { ExternalLink, GitBranch, Cpu, MemoryStick, HardDrive, History, Webhook, MousePointerClick } from "lucide-react";
 import { CONTAINER_MEMORY_LIMIT_MB, type DetectedStack, type Project, type SystemMetrics } from "@korrelo/shared-types";
 import { authHeaderServer } from "../../../../lib/auth-cookie-server";
+import { getRequestHostServer } from "../../../../lib/get-request-host-server";
 import { DomainCard } from "./domain-card";
 import { getLocaleServer } from "../../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../../lib/i18n/dictionaries";
@@ -90,6 +91,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 export default async function ProjectSummaryPage(props: { params: Promise<{ projectId: string }> }) {
   const params = await props.params;
   const t = getDictionary(await getLocaleServer());
+  const host = await getRequestHostServer();
   const [project, diskUsageMb, metrics, deployRecords] = await Promise.all([
     getProject(params.projectId),
     getDiskUsage(params.projectId),
@@ -132,12 +134,12 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
             value={
               project.assignedPort ? (
                 <a
-                  href={`http://localhost:${project.assignedPort}`}
+                  href={`http://${host}:${project.assignedPort}`}
                   target="_blank"
                   rel="noreferrer"
                   className="text-accent hover:opacity-85"
                 >
-                  localhost:{project.assignedPort}
+                  {host}:{project.assignedPort}
                 </a>
               ) : (
                 "-"

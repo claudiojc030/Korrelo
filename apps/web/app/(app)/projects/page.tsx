@@ -5,6 +5,7 @@ import { ImportFromGithub } from "./import-from-github";
 import { DeployButton } from "./deploy-button";
 import { DeleteProjectButton } from "./delete-project-button";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
+import { getRequestHostServer } from "../../../lib/get-request-host-server";
 import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
 import { getDictionary, type Dictionary } from "../../../lib/i18n/dictionaries";
 
@@ -29,10 +30,12 @@ function ProjectCard({
   project,
   accent,
   t,
+  host,
 }: {
   project: Project;
   accent: "good" | "bad" | "none";
   t: Dictionary;
+  host: string;
 }) {
   const STATUS_LABEL: Record<Project["status"], string> = {
     detected: t.projects.statusDetected,
@@ -75,13 +78,13 @@ function ProjectCard({
         {project.status === "running" && project.assignedPort ? (
           <>
             <a
-              href={`http://localhost:${project.assignedPort}`}
+              href={`http://${host}:${project.assignedPort}`}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:opacity-85"
             >
               <ExternalLink size={14} strokeWidth={1.75} />
-              localhost:{project.assignedPort}
+              {host}:{project.assignedPort}
             </a>
             <Link
               href={`/projects/${project.id}/terminal`}
@@ -110,12 +113,14 @@ function Section({
   accent,
   projects,
   t,
+  host,
 }: {
   title: string;
   count: number;
   accent: "good" | "bad" | "none";
   projects: Project[];
   t: Dictionary;
+  host: string;
 }) {
   if (projects.length === 0) return null;
 
@@ -129,7 +134,7 @@ function Section({
       </div>
       <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {projects.map((project) => (
-          <ProjectCard key={project.id} project={project} accent={accent} t={t} />
+          <ProjectCard key={project.id} project={project} accent={accent} t={t} host={host} />
         ))}
       </ul>
     </div>
@@ -138,6 +143,7 @@ function Section({
 
 export default async function ProjectsPage() {
   const t = getDictionary(await getLocaleServer());
+  const host = await getRequestHostServer();
   const projects = await getProjects();
 
   const running = projects.filter((p) => p.status === "running");
@@ -182,15 +188,16 @@ export default async function ProjectsPage() {
         </div>
       ) : (
         <>
-          <Section title={t.projects.sectionRunning} count={running.length} accent="good" projects={running} t={t} />
+          <Section title={t.projects.sectionRunning} count={running.length} accent="good" projects={running} t={t} host={host} />
           <Section
             title={t.projects.sectionPendingDeploy}
             count={pending.length}
             accent="none"
             projects={pending}
             t={t}
+            host={host}
           />
-          <Section title={t.projects.sectionFailed} count={failed.length} accent="bad" projects={failed} t={t} />
+          <Section title={t.projects.sectionFailed} count={failed.length} accent="bad" projects={failed} t={t} host={host} />
         </>
       )}
     </div>

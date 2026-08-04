@@ -7,6 +7,7 @@ import { OnboardingChecklist } from "./onboarding-checklist";
 import { UpdateBanner } from "./update-banner";
 import { TierBadge } from "./tier-badge";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
+import { getRequestHostServer } from "../../../lib/get-request-host-server";
 import { AutoRefresh } from "../../../components/auto-refresh";
 import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../lib/i18n/dictionaries";
@@ -94,6 +95,7 @@ function formatUptime(seconds: number): string {
 
 export default async function DashboardPage() {
   const t = getDictionary(await getLocaleServer());
+  const host = await getRequestHostServer();
   const TIER_LABEL: Record<SystemMetrics["tier"], string> = {
     nano: t.dashboard.tierNano,
     micro: t.dashboard.tierMicro,
@@ -217,13 +219,13 @@ export default async function DashboardPage() {
                         <div className="mt-1 flex items-center gap-3 pl-3.5">
                           {project.assignedPort && (
                             <a
-                              href={`http://localhost:${project.assignedPort}`}
+                              href={`http://${host}:${project.assignedPort}`}
                               target="_blank"
                               rel="noreferrer"
                               className="inline-flex items-center gap-1 text-[12px] text-accent hover:opacity-85"
                             >
                               <ExternalLink size={11} strokeWidth={1.75} />
-                              localhost:{project.assignedPort}
+                              {host}:{project.assignedPort}
                             </a>
                           )}
                           <Link
