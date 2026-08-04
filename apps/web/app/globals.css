@@ -74,3 +74,10 @@ body {
   outline: 2px solid var(--color-ring);
   outline-offset: 2px;
 }
+
+/* Esconde o ícone nativo de "mostrar senha" do Edge/IE e do Chrome, que
+   duplica o botão de olho já desenhado nos formulários de login/senha. */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
