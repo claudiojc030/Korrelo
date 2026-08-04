@@ -127,6 +127,27 @@ From there:
 - **Dashboard** shows the server's CPU/memory/disk (with history) and per-project usage.
 - `Ctrl+K` (or `Cmd+K` on Mac) opens a quick search to navigate between pages and projects.
 
+## Custom domain per project
+
+Each deployed project can have its own domain (e.g. `pingzen.com`), with
+automatic HTTPS. Step by step:
+
+1. **Outside Korrelo**: on the panel of wherever you registered the domain
+   (Namecheap, GoDaddy, Cloudflare, etc.), create an **A record** pointing
+   the domain (or subdomain, e.g. `app.pingzen.com`) to your **VPS's public
+   IP**.
+2. Wait for DNS to propagate (usually minutes, can take a few hours
+   depending on the provider).
+3. **In Korrelo**: open the project → **Summary** tab → "Custom domain"
+   card → type the domain → click **Attach**.
+4. Done. Korrelo configures nginx and issues the TLS certificate (Let's
+   Encrypt) by itself, automatically.
+
+If the certificate fails (usually because DNS hasn't propagated yet),
+Korrelo rolls back the configuration and shows the error, without leaving
+anything broken. Just try attaching again once DNS already resolves to the
+VPS's IP.
+
 ## Updating Korrelo
 
 **Easy way**: when an update is available, a banner shows up on the

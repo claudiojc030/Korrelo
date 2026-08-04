@@ -124,6 +124,26 @@ A partir daí:
 - **Dashboard** mostra CPU/memória/disco do servidor (com histórico) e consumo por projeto.
 - `Ctrl+K` (ou `Cmd+K` no Mac) abre uma busca rápida pra navegar entre páginas e projetos.
 
+## Domínio personalizado por projeto
+
+Cada projeto implantado pode ter seu próprio domínio (ex: `pingzen.com.br`),
+com HTTPS automático. Passo a passo:
+
+1. **Fora do Korrelo**: no painel do lugar onde você registrou o domínio
+   (Registro.br, GoDaddy, Namecheap, Cloudflare etc.), crie um registro **A**
+   apontando o domínio (ou subdomínio, ex: `app.pingzen.com.br`) pro **IP
+   público da sua VPS**.
+2. Espere o DNS propagar (geralmente minutos, pode levar algumas horas
+   dependendo do provedor).
+3. **No Korrelo**: abra o projeto → aba **Resumo** → card "Domínio
+   personalizado" → digite o domínio → clique em **Anexar**.
+4. Pronto. O Korrelo configura o nginx e emite o certificado TLS (Let's
+   Encrypt) sozinho, automaticamente.
+
+Se o certificado falhar (geralmente porque o DNS ainda não propagou), o
+Korrelo desfaz a configuração e mostra o erro, sem deixar nada quebrado. Só
+tentar anexar de novo depois que o DNS já resolver pro IP da VPS.
+
 ## Atualizando o Korrelo
 
 **Jeito fácil**: quando houver uma atualização disponível, aparece um aviso
