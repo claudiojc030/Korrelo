@@ -15,6 +15,7 @@ export const apiErrorsEn: ApiErrorsDict = {
   ACCESS_TOKEN_MISSING: "Missing access token.",
   ACCESS_TOKEN_INVALID: "Invalid or expired access token.",
   JWT_SECRET_MISSING: "Server misconfiguration (JWT_SECRET not set).",
+  TOO_MANY_REQUESTS: "Too many attempts. Wait a minute and try again.",
 };
 
 export const apiErrorsPt: ApiErrorsDict = {
@@ -32,4 +33,5 @@ export const apiErrorsPt: ApiErrorsDict = {
   ACCESS_TOKEN_MISSING: "Token de acesso ausente.",
   ACCESS_TOKEN_INVALID: "Token de acesso inválido ou expirado.",
   JWT_SECRET_MISSING: "Erro de configuração do servidor (JWT_SECRET ausente).",
+  TOO_MANY_REQUESTS: "Muitas tentativas. Espere um minuto e tente de novo.",
 };
