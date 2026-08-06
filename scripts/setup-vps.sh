@@ -77,6 +77,13 @@ if ! command -v mongodump &> /dev/null; then
     set -e
     curl -fsSL https://pgp.mongodb.com/server-7.0.asc | sudo gpg --dearmor -o /usr/share/keyrings/mongodb-server-7.0.gpg
     CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+    # O repositório oficial do MongoDB 7.0 ainda não publica pacotes pra
+    # códigos-nome mais novos que "jammy" (22.04); o binário do
+    # mongodb-database-tools funciona igual em versões mais novas do Ubuntu,
+    # então cai pra jammy se o codinome atual não tiver Release publicado.
+    if ! curl -fsSL --head "https://repo.mongodb.org/apt/ubuntu/dists/${CODENAME}/mongodb-org/7.0/Release" > /dev/null 2>&1; then
+      CODENAME=jammy
+    fi
     echo "deb [signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg] https://repo.mongodb.org/apt/ubuntu ${CODENAME}/mongodb-org/7.0 multiverse" \
       | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list > /dev/null
     sudo apt-get update -y
@@ -135,7 +142,7 @@ npm run build --workspace=apps/api
 # IP puro. Totalmente opcional, o resto do script funciona sem isso.
 DOMAIN=""
 LETSENCRYPT_EMAIL=""
-PUBLIC_IP=$(curl -s ifconfig.me || echo "SEU_IP")
+PUBLIC_IP=$(curl -4 -s ifconfig.me || echo "SEU_IP")
 
 log "Domínio do próprio Korrelo (opcional)"
 # Quando o script roda via 'curl | bash', o stdin já está ocupado com o
@@ -278,7 +285,7 @@ REPO_DIR="$(pwd)"
 BACKUP_LOG="$HOME/korrelo-backups/backup.log"
 mkdir -p "$(dirname "$BACKUP_LOG")"
 BACKUP_CRON_LINE="0 3 * * * cd ${REPO_DIR} && bash scripts/backup.sh >> ${BACKUP_LOG} 2>&1"
-(crontab -l 2>/dev/null | grep -v "scripts/backup.sh"; echo "$BACKUP_CRON_LINE") | crontab -
+(crontab -l 2>/dev/null | grep -v "scripts/backup.sh" || true; echo "$BACKUP_CRON_LINE") | crontab -
 echo "Backup agendado todo dia às 3h. Rode manualmente com: bash scripts/backup.sh"
 
 log "Alerta de falha de backup (opcional)"
