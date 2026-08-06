@@ -158,6 +158,19 @@ Se o certificado falhar (geralmente porque o DNS ainda não propagou), o
 Korrelo desfaz a configuração e mostra o erro, sem deixar nada quebrado. Só
 tentar anexar de novo depois que o DNS já resolver pro IP da VPS.
 
+## Guardar arquivo enviado por usuário (upload)
+
+Todo projeto ganha automaticamente um volume persistente montado em
+`/app/uploads` dentro do container, pra guardar arquivo que não é código nem
+registro de banco (foto, vídeo, PDF etc. enviado por usuário). Aponte o
+código da sua aplicação pra escrever ali (ex: `/app/uploads/video.mp4`).
+
+Por que não guardar no banco: bancos de documento/relacional (MongoDB,
+Postgres) não são feitos pra arquivo binário grande, isso deixa o banco
+lento e infla o backup diário. `/app/uploads` sobrevive a redeploy (ao
+contrário do resto do container, que é recriado do zero a cada build) e
+**entra automaticamente no backup diário**, igual o banco de dados.
+
 ## Importar dados de outro MongoDB
 
 Já usa um MongoDB gerenciado (ex: MongoDB Atlas) e quer trazer os dados pra

@@ -53,11 +53,32 @@ async function backupCoreDatabase(destDir) {
   }
 }
 
+async function backupProjectUploads(project, destDir) {
+  // /app/uploads é o volume nomeado que todo projeto ganha (ver
+  // docker-compose-file-builder.ts) pra guardar arquivo enviado por usuário
+  // (foto, vídeo) fora do banco. Sobrevive a redeploy mas não é coberto pelos
+  // dumps de banco acima, então copia à parte via docker cp direto do
+  // container do app (não precisa estar com o volume montado em outro lugar).
+  const safeName = project.name.replace(/[^a-z0-9-]+/gi, "-");
+  const dest = path.join(destDir, `${safeName}-uploads`);
+  try {
+    await run("docker", ["cp", `${project.containerName}:/app/uploads`, dest], { maxBuffer: MAX_BUFFER });
+    console.log(`${project.name} (uploads) -> ${dest}`);
+  } catch {
+    // Container sem nada em /app/uploads (path não existe ainda) não é erro,
+    // é só um projeto que não guarda arquivo nenhum.
+  }
+}
+
 async function backupManagedDatabases(prisma, destDir) {
   const projects = await prisma.project.findMany({ include: { managedDatabase: true } });
   const failures = [];
 
   for (const project of projects) {
+    if (project.containerName) {
+      await backupProjectUploads(project, destDir);
+    }
+
     const db = project.managedDatabase;
     if (!db || db.type === "custom" || !project.containerName) continue;
 

@@ -162,6 +162,19 @@ Korrelo rolls back the configuration and shows the error, without leaving
 anything broken. Just try attaching again once DNS already resolves to the
 VPS's IP.
 
+## Storing user-uploaded files
+
+Every project automatically gets a persistent volume mounted at
+`/app/uploads` inside the container, for storing files that aren't code or
+database records (photos, videos, PDFs, etc. uploaded by users). Point your
+app's code to write there (e.g. `/app/uploads/video.mp4`).
+
+Why not store it in the database: document/relational databases (MongoDB,
+Postgres) aren't built for large binary files, that slows the database down
+and bloats the daily backup. `/app/uploads` survives a redeploy (unlike the
+rest of the container, which gets rebuilt from scratch on every build) and
+**gets included automatically in the daily backup**, just like the database.
+
 ## Importing data from another MongoDB
 
 Already using a managed MongoDB (e.g. MongoDB Atlas) and want to bring the

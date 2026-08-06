@@ -12,9 +12,18 @@ const LOGGING_BLOCK = [
   '        max-file: "3"',
 ];
 
+// Caminho fixo dentro do container pro projeto guardar arquivo que não é
+// código nem banco (ex.: vídeo/imagem enviado por usuário). Fica num volume
+// nomeado, então sobrevive a redeploy (diferente do resto do container, que
+// é recriado do zero a cada build) e o backup.js sabe exatamente onde copiar.
+const UPLOADS_VOLUME = "uploads-data";
+const UPLOADS_MOUNT_PATH = "/app/uploads";
+
 @Injectable()
 export class DockerComposeFileBuilder {
   build(config: DeployConfig): string {
+    const volumeNames = [UPLOADS_VOLUME];
+
     const lines = [
       "services:",
       "  app:",
@@ -25,40 +34,51 @@ export class DockerComposeFileBuilder {
       `      - ${ENV_FILENAME}`,
       "    ports:",
       `      - "${config.hostPort}:${config.containerPort}"`,
+      "    volumes:",
+      `      - ${UPLOADS_VOLUME}:${UPLOADS_MOUNT_PATH}`,
       `    mem_limit: ${config.memoryLimitMb}m`,
       ...LOGGING_BLOCK,
     ];
 
     if (config.database) {
       lines.push("    depends_on:", "      - db");
-      lines.push(...this.buildDatabaseService(config.database));
+      const { serviceLines, volumeName } = this.buildDatabaseService(config.database);
+      lines.push(...serviceLines);
+      if (volumeName) volumeNames.push(volumeName);
+    }
+
+    lines.push("volumes:");
+    for (const name of volumeNames) {
+      lines.push(`  ${name}:`);
     }
 
     lines.push("");
     return lines.join("\n");
   }
 
-  private buildDatabaseService(db: DeployConfig["database"]): string[] {
-    if (!db) return [];
-
+  private buildDatabaseService(db: NonNullable<DeployConfig["database"]>): {
+    serviceLines: string[];
+    volumeName: string | null;
+  } {
     if (db.type === "postgres") {
-      return [
-        "  db:",
-        "    image: postgres:16-alpine",
-        // Nome de container fixo (não gerenciado pelo compose com container_name)
-        // pra manter o app resolvendo "db" via DNS interno do compose de qualquer forma.
-        "    restart: unless-stopped",
-        "    environment:",
-        `      POSTGRES_USER: ${db.username}`,
-        `      POSTGRES_PASSWORD: ${db.password}`,
-        `      POSTGRES_DB: ${db.databaseName}`,
-        "    volumes:",
-        "      - db-data:/var/lib/postgresql/data",
-        `    mem_limit: ${db.memoryLimitMb}m`,
-        ...LOGGING_BLOCK,
-        "volumes:",
-        "  db-data:",
-      ];
+      return {
+        volumeName: "db-data",
+        serviceLines: [
+          "  db:",
+          "    image: postgres:16-alpine",
+          // Nome de container fixo (não gerenciado pelo compose com container_name)
+          // pra manter o app resolvendo "db" via DNS interno do compose de qualquer forma.
+          "    restart: unless-stopped",
+          "    environment:",
+          `      POSTGRES_USER: ${db.username}`,
+          `      POSTGRES_PASSWORD: ${db.password}`,
+          `      POSTGRES_DB: ${db.databaseName}`,
+          "    volumes:",
+          "      - db-data:/var/lib/postgresql/data",
+          `    mem_limit: ${db.memoryLimitMb}m`,
+          ...LOGGING_BLOCK,
+        ],
+      };
     }
 
     if (db.type === "redis") {
@@ -89,32 +109,35 @@ export class DockerComposeFileBuilder {
             "allkeys-lru",
           ];
 
-      return [
-        "  db:",
-        "    image: redis:7-alpine",
-        "    restart: unless-stopped",
-        `    command: [${command.map((c) => `"${c}"`).join(", ")}]`,
-        `    mem_limit: ${db.memoryLimitMb}m`,
-        ...(db.persistent ? ["    volumes:", "      - db-data:/data"] : []),
-        ...LOGGING_BLOCK,
-        ...(db.persistent ? ["volumes:", "  db-data:"] : []),
-      ];
+      return {
+        volumeName: db.persistent ? "db-data" : null,
+        serviceLines: [
+          "  db:",
+          "    image: redis:7-alpine",
+          "    restart: unless-stopped",
+          `    command: [${command.map((c) => `"${c}"`).join(", ")}]`,
+          `    mem_limit: ${db.memoryLimitMb}m`,
+          ...(db.persistent ? ["    volumes:", "      - db-data:/data"] : []),
+          ...LOGGING_BLOCK,
+        ],
+      };
     }
 
-    return [
-      "  db:",
-      "    image: mongo:7",
-      "    restart: unless-stopped",
-      "    environment:",
-      `      MONGO_INITDB_ROOT_USERNAME: ${db.username}`,
-      `      MONGO_INITDB_ROOT_PASSWORD: ${db.password}`,
-      `      MONGO_INITDB_DATABASE: ${db.databaseName}`,
-      "    volumes:",
-      "      - db-data:/data/db",
-      `    mem_limit: ${db.memoryLimitMb}m`,
-      ...LOGGING_BLOCK,
-      "volumes:",
-      "  db-data:",
-    ];
+    return {
+      volumeName: "db-data",
+      serviceLines: [
+        "  db:",
+        "    image: mongo:7",
+        "    restart: unless-stopped",
+        "    environment:",
+        `      MONGO_INITDB_ROOT_USERNAME: ${db.username}`,
+        `      MONGO_INITDB_ROOT_PASSWORD: ${db.password}`,
+        `      MONGO_INITDB_DATABASE: ${db.databaseName}`,
+        "    volumes:",
+        "      - db-data:/data/db",
+        `    mem_limit: ${db.memoryLimitMb}m`,
+        ...LOGGING_BLOCK,
+      ],
+    };
   }
 }
