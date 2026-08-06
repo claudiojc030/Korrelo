@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState, use } from "react";
-import { Plus, Trash2, Save, Loader2, Eye, EyeOff, KeyRound } from "lucide-react";
+import { Plus, Trash2, Save, Loader2, Eye, EyeOff, KeyRound, ClipboardPaste } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../../../lib/api-error";
+import { parseEnvText } from "../../../../../lib/parse-env-text";
+import { PasteEnvModal } from "../../../../../components/paste-env-modal";
 
 interface EnvRow {
   key: string;
@@ -20,6 +22,7 @@ export default function EnvVarsPage(props: { params: Promise<{ projectId: string
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [revealAll, setRevealAll] = useState(false);
+  const [pasteOpen, setPasteOpen] = useState(false);
 
   useEffect(() => {
     apiFetch(`/projects/${params.projectId}/env`)
@@ -40,6 +43,28 @@ export default function EnvVarsPage(props: { params: Promise<{ projectId: string
 
   function removeRow(index: number) {
     setRows((prev) => prev.filter((_, i) => i !== index));
+    setSaved(false);
+  }
+
+  async function handlePasteImport(text: string) {
+    const parsed = parseEnvText(text);
+    const keys = Object.keys(parsed);
+    if (keys.length === 0) {
+      throw new Error(t.projectEnv.pasteEnvEmptyError);
+    }
+
+    setRows((prev) => {
+      const next = prev.filter((row) => row.key.trim().length > 0).map((row) => ({ ...row }));
+      for (const key of keys) {
+        const existing = next.find((row) => row.key === key);
+        if (existing) {
+          existing.value = parsed[key];
+        } else {
+          next.push({ key, value: parsed[key] });
+        }
+      }
+      return next;
+    });
     setSaved(false);
   }
 
@@ -84,13 +109,22 @@ export default function EnvVarsPage(props: { params: Promise<{ projectId: string
           </p>
           <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t.projectEnv.subtitle}</p>
         </div>
-        <button
-          onClick={() => setRevealAll((v) => !v)}
-          className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
-        >
-          {revealAll ? <EyeOff size={14} /> : <Eye size={14} />}
-          {revealAll ? t.projectEnv.hideValues : t.projectEnv.showValues}
-        </button>
+        <div className="flex flex-none items-center gap-3">
+          <button
+            onClick={() => setPasteOpen(true)}
+            className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-accent hover:opacity-85"
+          >
+            <ClipboardPaste size={14} strokeWidth={1.75} />
+            {t.projectEnv.pasteEnvButton}
+          </button>
+          <button
+            onClick={() => setRevealAll((v) => !v)}
+            className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
+          >
+            {revealAll ? <EyeOff size={14} /> : <Eye size={14} />}
+            {revealAll ? t.projectEnv.hideValues : t.projectEnv.showValues}
+          </button>
+        </div>
       </div>
 
       <div className="rounded-xl border border-border-subtle bg-surface p-3">
@@ -145,6 +179,18 @@ export default function EnvVarsPage(props: { params: Promise<{ projectId: string
         </button>
         {saved && <span className="text-[12.5px] text-accent">{t.projectEnv.saved}</span>}
       </div>
+
+      {pasteOpen && (
+        <PasteEnvModal
+          title={t.projectEnv.pasteEnvTitle}
+          description={t.projectEnv.pasteEnvDescription}
+          placeholder={t.projectEnv.pasteEnvPlaceholder}
+          importLabel={t.projectEnv.pasteEnvImportButton}
+          cancelLabel={t.common.cancel}
+          onImport={handlePasteImport}
+          onClose={() => setPasteOpen(false)}
+        />
+      )}
     </div>
   );
 }

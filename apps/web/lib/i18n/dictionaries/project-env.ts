@@ -10,6 +10,12 @@ export interface ProjectEnvDict {
   saveError: string;
   unknownError: string;
   saved: string;
+  pasteEnvButton: string;
+  pasteEnvTitle: string;
+  pasteEnvDescription: string;
+  pasteEnvPlaceholder: string;
+  pasteEnvImportButton: string;
+  pasteEnvEmptyError: string;
 }
 
 export const projectEnvEn: ProjectEnvDict = {
@@ -24,6 +30,12 @@ export const projectEnvEn: ProjectEnvDict = {
   saveError: "Failed to save.",
   unknownError: "Unknown error",
   saved: "Saved.",
+  pasteEnvButton: "Paste a whole .env",
+  pasteEnvTitle: "Paste a whole .env",
+  pasteEnvDescription: "Paste the full contents of a .env file (KEY=value, one per line). Comments and blank lines are ignored; matching keys get updated, new ones are added below. Click Save afterwards for it to take effect.",
+  pasteEnvPlaceholder: "DATABASE_URL=...\nAPI_KEY=...",
+  pasteEnvImportButton: "Import",
+  pasteEnvEmptyError: "No variables recognized. Use the KEY=value format, one per line.",
 };
 
 export const projectEnvPt: ProjectEnvDict = {
@@ -38,4 +50,10 @@ export const projectEnvPt: ProjectEnvDict = {
   saveError: "Falha ao salvar.",
   unknownError: "Erro desconhecido",
   saved: "Salvo.",
+  pasteEnvButton: "Colar um .env inteiro",
+  pasteEnvTitle: "Colar um .env inteiro",
+  pasteEnvDescription: "Cole o conteúdo completo de um arquivo .env (CHAVE=valor, uma por linha). Comentários e linhas em branco são ignorados; chaves que já existem são atualizadas, as novas são adicionadas abaixo. Clica em Salvar depois pra valer.",
+  pasteEnvPlaceholder: "DATABASE_URL=...\nAPI_KEY=...",
+  pasteEnvImportButton: "Importar",
+  pasteEnvEmptyError: "Nenhuma variável reconhecida. Use o formato CHAVE=valor, uma por linha.",
 };

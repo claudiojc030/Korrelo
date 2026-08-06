@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Settings as SettingsIcon, Globe, KeyRound, Plus, Trash2, Save, Loader2, Eye, EyeOff, TriangleAlert, ClipboardPaste, X } from "lucide-react";
+import { Settings as SettingsIcon, Globe, KeyRound, Plus, Trash2, Save, Loader2, Eye, EyeOff, TriangleAlert, ClipboardPaste } from "lucide-react";
 import { apiFetch } from "../../../lib/api-client";
 import { useTranslation } from "../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../lib/api-error";
+import { PasteEnvModal } from "../../../components/paste-env-modal";
 
 interface EnvRow {
   key: string;
@@ -29,10 +30,6 @@ export default function SettingsPage() {
   const [revealAll, setRevealAll] = useState(false);
 
   const [pasteOpen, setPasteOpen] = useState(false);
-  const [pasteText, setPasteText] = useState("");
-  const [pasteImporting, setPasteImporting] = useState(false);
-  const [pasteError, setPasteError] = useState<string | null>(null);
-  const [pasteSuccess, setPasteSuccess] = useState<string | null>(null);
 
   function loadEnv() {
     setEnvLoading(true);
@@ -57,30 +54,17 @@ export default function SettingsPage() {
     loadEnv();
   }, []);
 
-  async function handlePasteImport() {
-    if (!pasteText.trim()) return;
-    setPasteImporting(true);
-    setPasteError(null);
-    setPasteSuccess(null);
-    try {
-      const res = await apiFetch("/settings/env/bulk", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: pasteText }),
-      });
-      const body: unknown = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(translateApiError(t, body, t.settings.pasteEnvError));
-      }
-      const { count } = body as { count: number };
-      setPasteSuccess(t.settings.pasteEnvSuccessTemplate.replace("{count}", String(count)));
-      setPasteText("");
-      loadEnv();
-    } catch (err) {
-      setPasteError(err instanceof Error ? err.message : t.settings.unknownError);
-    } finally {
-      setPasteImporting(false);
+  async function handlePasteImport(text: string) {
+    const res = await apiFetch("/settings/env/bulk", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    const body: unknown = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(translateApiError(t, body, t.settings.pasteEnvError));
     }
+    loadEnv();
   }
 
   async function handleAttach() {
@@ -349,54 +333,15 @@ export default function SettingsPage() {
       )}
 
       {pasteOpen && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
-          onClick={() => !pasteImporting && setPasteOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-lg rounded-xl border border-border-subtle bg-surface p-5 shadow-panel"
-          >
-            <div className="mb-1 flex items-center justify-between gap-3">
-              <h2 className="text-[14.5px] font-semibold text-foreground">{t.settings.pasteEnvTitle}</h2>
-              <button onClick={() => setPasteOpen(false)} className="flex-none text-muted-foreground hover:text-foreground">
-                <X size={16} />
-              </button>
-            </div>
-            <p className="mb-3 text-[12.5px] text-muted-foreground">{t.settings.pasteEnvDescription}</p>
-
-            <textarea
-              value={pasteText}
-              onChange={(e) => setPasteText(e.target.value)}
-              placeholder={t.settings.pasteEnvPlaceholder}
-              rows={10}
-              spellCheck={false}
-              className="w-full resize-none rounded-md border border-border-subtle bg-background px-3 py-2 font-mono text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
-            />
-
-            {pasteError && <p className="mt-2 text-[13px] text-destructive">{pasteError}</p>}
-            {pasteSuccess && <p className="mt-2 text-[13px] text-accent">{pasteSuccess}</p>}
-
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => setPasteOpen(false)}
-                className="rounded-md px-3.5 py-2 text-[13px] font-medium text-muted-foreground hover:bg-muted"
-              >
-                {t.common.cancel}
-              </button>
-              <button
-                onClick={handlePasteImport}
-                disabled={pasteImporting || !pasteText.trim()}
-                className="inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
-              >
-                {pasteImporting && <Loader2 size={14} className="animate-spin" />}
-                {t.settings.pasteEnvImportButton}
-              </button>
-            </div>
-          </div>
-        </div>
+        <PasteEnvModal
+          title={t.settings.pasteEnvTitle}
+          description={t.settings.pasteEnvDescription}
+          placeholder={t.settings.pasteEnvPlaceholder}
+          importLabel={t.settings.pasteEnvImportButton}
+          cancelLabel={t.common.cancel}
+          onImport={handlePasteImport}
+          onClose={() => setPasteOpen(false)}
+        />
       )}
     </div>
   );

@@ -31,7 +31,6 @@ export interface SettingsDict {
   pasteEnvPlaceholder: string;
   pasteEnvImportButton: string;
   pasteEnvError: string;
-  pasteEnvSuccessTemplate: string;
 }
 
 export const settingsEn: SettingsDict = {
@@ -70,7 +69,6 @@ export const settingsEn: SettingsDict = {
   pasteEnvPlaceholder: "JWT_SECRET=...\nGITHUB_APP_ID=...",
   pasteEnvImportButton: "Import",
   pasteEnvError: "Failed to import.",
-  pasteEnvSuccessTemplate: "{count} variable(s) imported.",
 };
 
 export const settingsPt: SettingsDict = {
@@ -109,5 +107,4 @@ export const settingsPt: SettingsDict = {
   pasteEnvPlaceholder: "JWT_SECRET=...\nGITHUB_APP_ID=...",
   pasteEnvImportButton: "Importar",
   pasteEnvError: "Falha ao importar.",
-  pasteEnvSuccessTemplate: "{count} variável(is) importada(s).",
 };
