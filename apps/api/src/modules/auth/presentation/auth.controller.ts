@@ -26,6 +26,14 @@ import {
 
 const AUTH_ATTEMPT_LIMIT = { default: { ttl: 60_000, limit: 5 } };
 
+// Num servidor escutando em socket dual-stack (IPv4+IPv6), o Node reporta
+// endereço IPv4 prefixado como "::ffff:1.2.3.4" (formato IPv4-mapped IPv6).
+// Tira o prefixo só pra exibir/gravar um IP legível, sem mudar o valor real.
+function normalizeIp(ip: string | undefined | null): string | null {
+  if (!ip) return null;
+  return ip.startsWith("::ffff:") ? ip.slice("::ffff:".length) : ip;
+}
+
 @Controller("auth")
 export class AuthController {
   constructor(
@@ -59,7 +67,7 @@ export class AuthController {
     const result = await this.registerFirstUser.execute({
       ...dto,
       userAgent: req.get("user-agent") ?? null,
-      ipAddress: req.ip ?? null,
+      ipAddress: normalizeIp(req.ip),
     });
     res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
     res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
@@ -77,7 +85,7 @@ export class AuthController {
     const result = await this.login.execute({
       ...dto,
       userAgent: req.get("user-agent") ?? null,
-      ipAddress: req.ip ?? null,
+      ipAddress: normalizeIp(req.ip),
     });
     if (result.accessToken && result.refreshToken) {
       res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
@@ -96,7 +104,7 @@ export class AuthController {
       throw new UnauthorizedException(apiError("SESSION_EXPIRED", "Sessão expirada. Faça login novamente."));
     }
 
-    const result = await this.refreshAccessToken.execute(rawToken, req.get("user-agent") ?? null, req.ip ?? null);
+    const result = await this.refreshAccessToken.execute(rawToken, req.get("user-agent") ?? null, normalizeIp(req.ip));
     res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
     res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
     return { ok: true };
