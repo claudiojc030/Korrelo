@@ -16,6 +16,7 @@ export interface ProjectEnvDict {
   pasteEnvPlaceholder: string;
   pasteEnvImportButton: string;
   pasteEnvEmptyError: string;
+  portVarHint: string;
 }
 
 export const projectEnvEn: ProjectEnvDict = {
@@ -36,6 +37,7 @@ export const projectEnvEn: ProjectEnvDict = {
   pasteEnvPlaceholder: "DATABASE_URL=...\nAPI_KEY=...",
   pasteEnvImportButton: "Import",
   pasteEnvEmptyError: "No variables recognized. Use the KEY=value format, one per line.",
+  portVarHint: "Korrelo already maps the public port automatically - this only affects which port your app listens on inside the container. Usually fine to leave as is.",
 };
 
 export const projectEnvPt: ProjectEnvDict = {
@@ -56,4 +58,5 @@ export const projectEnvPt: ProjectEnvDict = {
   pasteEnvPlaceholder: "DATABASE_URL=...\nAPI_KEY=...",
   pasteEnvImportButton: "Importar",
   pasteEnvEmptyError: "Nenhuma variável reconhecida. Use o formato CHAVE=valor, uma por linha.",
+  portVarHint: "O Korrelo já mapeia a porta pública sozinho - isso só afeta em qual porta seu app escuta por dentro do container. Geralmente pode deixar como está.",
 };

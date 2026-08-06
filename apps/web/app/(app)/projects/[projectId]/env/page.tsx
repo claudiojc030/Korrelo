@@ -140,29 +140,34 @@ export default function EnvVarsPage(props: { params: Promise<{ projectId: string
       <div className="rounded-xl border border-border-subtle bg-surface p-3">
         <div className="flex flex-col gap-2">
           {rows.map((row, index) => (
-            <div key={index} className="flex items-center gap-2">
-              <input
-                value={row.key}
-                onChange={(e) => updateRow(index, "key", e.target.value.toUpperCase())}
-                placeholder={t.projectEnv.keyPlaceholder}
-                spellCheck={false}
-                className="w-64 flex-none rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
-              />
-              <input
-                type={revealAll ? "text" : "password"}
-                value={row.value}
-                onChange={(e) => updateRow(index, "value", e.target.value)}
-                placeholder={t.projectEnv.valuePlaceholder}
-                spellCheck={false}
-                className="flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
-              />
-              <button
-                onClick={() => removeRow(index)}
-                aria-label={t.projectEnv.removeVarAriaLabel}
-                className="flex-none rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-              >
-                <Trash2 size={14} strokeWidth={1.75} />
-              </button>
+            <div key={index} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <input
+                  value={row.key}
+                  onChange={(e) => updateRow(index, "key", e.target.value.toUpperCase())}
+                  placeholder={t.projectEnv.keyPlaceholder}
+                  spellCheck={false}
+                  className="w-64 flex-none rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
+                />
+                <input
+                  type={revealAll ? "text" : "password"}
+                  value={row.value}
+                  onChange={(e) => updateRow(index, "value", e.target.value)}
+                  placeholder={t.projectEnv.valuePlaceholder}
+                  spellCheck={false}
+                  className="flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
+                />
+                <button
+                  onClick={() => removeRow(index)}
+                  aria-label={t.projectEnv.removeVarAriaLabel}
+                  className="flex-none rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                >
+                  <Trash2 size={14} strokeWidth={1.75} />
+                </button>
+              </div>
+              {row.key === "PORT" && (
+                <p className="pl-0.5 text-[11.5px] text-muted-foreground">{t.projectEnv.portVarHint}</p>
+              )}
             </div>
           ))}
         </div>
