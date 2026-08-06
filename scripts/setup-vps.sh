@@ -16,6 +16,17 @@ log "Atualizando pacotes do sistema"
 sudo apt-get update -y
 sudo apt-get upgrade -y
 
+log "Garantindo sincronização de horário (NTP)"
+# 2FA (TOTP) depende do relógio do servidor bater com o do celular do
+# usuário (janela de 30s). Sem isso, o login com 2FA pode falhar
+# aleatoriamente por drift de relógio, principalmente logo após o boot.
+sudo timedatectl set-ntp true 2>/dev/null || true
+if ! systemctl is-active --quiet systemd-timesyncd 2>/dev/null && ! systemctl is-active --quiet chrony 2>/dev/null; then
+  sudo apt-get install -y chrony
+  sudo systemctl enable --now chrony
+fi
+echo "Horário do sistema: $(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo desconhecido)"
+
 log "Configurando swap (rede de segurança em VPS com pouca RAM)"
 TOTAL_MEM_MB=$(free -m | awk '/^Mem:/{print $2}')
 if [ ! -f /swapfile ] && [ "$TOTAL_MEM_MB" -le 8192 ]; then

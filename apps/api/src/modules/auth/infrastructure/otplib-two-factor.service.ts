@@ -23,7 +23,10 @@ export class OtplibTwoFactorService implements TwoFactorService {
 
   async verifyToken(secret: string, token: string): Promise<boolean> {
     try {
-      const result = await otplib.verify({ secret, token });
+      // epochTolerance aceita ±1 passo de 30s (relógio do servidor com um
+      // pouquinho de drift, ou o usuário demorando pra digitar) sem abrir
+      // brecha de segurança relevante (ainda é só uma janela de ~1 minuto).
+      const result = await otplib.verify({ secret, token, epochTolerance: 30 });
       return result.valid;
     } catch {
       // otplib lança em vez de retornar false quando o token não tem o
