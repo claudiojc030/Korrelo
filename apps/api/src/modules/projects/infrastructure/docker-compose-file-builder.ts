@@ -24,6 +24,8 @@ export class DockerComposeFileBuilder {
   build(config: DeployConfig): string {
     const volumeNames = [UPLOADS_VOLUME];
 
+    const dependsOnDb = config.database ? ["    depends_on:", "      - db"] : [];
+
     const lines = [
       "services:",
       "  app:",
@@ -37,11 +39,27 @@ export class DockerComposeFileBuilder {
       "    volumes:",
       `      - ${UPLOADS_VOLUME}:${UPLOADS_MOUNT_PATH}`,
       `    mem_limit: ${config.memoryLimitMb}m`,
+      ...dependsOnDb,
+      ...LOGGING_BLOCK,
+      // Instância de teste (deploy sem downtime, ver DeployProjectUseCase):
+      // mesma imagem/contexto de build do "app", porta e nome à parte, pra
+      // validar antes de tocar na versão em produção.
+      "  app_staging:",
+      "    build: .",
+      `    container_name: ${config.staging.containerName}`,
+      "    restart: unless-stopped",
+      "    env_file:",
+      `      - ${ENV_FILENAME}`,
+      "    ports:",
+      `      - "${config.staging.hostPort}:${config.containerPort}"`,
+      "    volumes:",
+      `      - ${UPLOADS_VOLUME}:${UPLOADS_MOUNT_PATH}`,
+      `    mem_limit: ${config.memoryLimitMb}m`,
+      ...dependsOnDb,
       ...LOGGING_BLOCK,
     ];
 
     if (config.database) {
-      lines.push("    depends_on:", "      - db");
       const { serviceLines, volumeName } = this.buildDatabaseService(config.database);
       lines.push(...serviceLines);
       if (volumeName) volumeNames.push(volumeName);

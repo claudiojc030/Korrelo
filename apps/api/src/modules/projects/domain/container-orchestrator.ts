@@ -12,6 +12,11 @@ export interface DatabaseServiceConfig {
   persistent: boolean;
 }
 
+export interface StagingServiceConfig {
+  containerName: string;
+  hostPort: number;
+}
+
 export interface DeployConfig {
   projectPath: string;
   containerName: string;
@@ -19,6 +24,10 @@ export interface DeployConfig {
   containerPort: number;
   memoryLimitMb: number;
   database?: DatabaseServiceConfig;
+  // Deploy sem downtime: builda e testa numa instância de teste (porta e
+  // container à parte) ANTES de mexer na versão em produção. Ver
+  // DeployProjectUseCase e deployStaging/promote abaixo.
+  staging: StagingServiceConfig;
 }
 
 export interface TeardownConfig {
@@ -32,6 +41,15 @@ export interface TeardownConfig {
 }
 
 export interface ContainerOrchestrator {
-  deploy(config: DeployConfig): Promise<void>;
+  // Builda e sobe SÓ a instância de teste (app_staging no compose), sem tocar
+  // no container em produção (app) de jeito nenhum.
+  deployStaging(config: DeployConfig): Promise<void>;
+  // Só chamado depois que a instância de teste passou no health check. Recria
+  // o serviço "app" de verdade reaproveitando a imagem já buildada (rápido,
+  // não é um build novo) - esse é o único momento em que a versão em produção
+  // é trocada.
+  promote(config: DeployConfig): Promise<void>;
+  // Remove a instância de teste (sucesso ou falha, sempre no final).
+  removeStaging(config: { projectPath: string; containerName: string }): Promise<void>;
   teardown(config: TeardownConfig): Promise<void>;
 }

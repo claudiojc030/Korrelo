@@ -15,34 +15,52 @@ const execFile = promisify(execFileCallback);
 export class DockerComposeOrchestrator implements ContainerOrchestrator {
   private readonly logger = new Logger(DockerComposeOrchestrator.name);
 
-  async deploy(config: DeployConfig): Promise<void> {
+  async deployStaging(config: DeployConfig): Promise<void> {
     try {
       // execFile (não exec/shell): os argumentos vão direto pro processo, sem
       // passar por interpretação de shell. Isso protege contra command injection
-      // mesmo vindo de dados derivados do projeto (nome, path).
+      // mesmo vindo de dados derivados do projeto (nome, path). Só builda e sobe
+      // "app_staging" - a versão em produção ("app") nem é tocada aqui.
       await execFile(
         "docker",
-        [
-          "compose",
-          "-f",
-          COMPOSE_FILENAME,
-          "-p",
-          config.containerName,
-          "up",
-          "-d",
-          "--build",
-          "--remove-orphans",
-        ],
+        ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "up", "-d", "--build", "app_staging"],
         { cwd: config.projectPath, timeout: 5 * 60 * 1000 },
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new InternalServerErrorException(
-        apiError("CONTAINER_START_FAILED", `Falha ao subir o container: ${message}`),
+        apiError("CONTAINER_START_FAILED", `Falha ao subir o container de teste: ${message}`),
+      );
+    }
+  }
+
+  async promote(config: DeployConfig): Promise<void> {
+    try {
+      // --no-deps: não mexe no "db" (já está rodando). --build aqui é rápido,
+      // a imagem já foi buildada no deployStaging e fica em cache. Esse é o
+      // único momento em que a versão em produção troca, então é a única
+      // janela de indisponibilidade real (poucos segundos, não o build inteiro).
+      await execFile(
+        "docker",
+        ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "up", "-d", "--build", "--no-deps", "app"],
+        { cwd: config.projectPath, timeout: 60 * 1000 },
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new InternalServerErrorException(
+        apiError("CONTAINER_START_FAILED", `Falha ao trocar pra versão nova: ${message}`),
       );
     }
 
     await this.pruneUnusedBuildArtifacts();
+  }
+
+  async removeStaging(config: { projectPath: string; containerName: string }): Promise<void> {
+    await execFile(
+      "docker",
+      ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "rm", "-fs", "app_staging"],
+      { cwd: config.projectPath, timeout: 30_000 },
+    );
   }
 
   // Cada rebuild (`--build`) deixa pra trás a camada de build cache antiga e,

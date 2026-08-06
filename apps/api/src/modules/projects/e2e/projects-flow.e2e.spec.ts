@@ -33,15 +33,25 @@ interface DeployConfigLike {
 }
 
 class FakeContainerOrchestrator {
-  deployCalls: DeployConfigLike[] = [];
+  deployStagingCalls: DeployConfigLike[] = [];
+  promoteCalls: DeployConfigLike[] = [];
+  removeStagingCalls: { projectPath: string; containerName: string }[] = [];
   teardownCalls: { projectPath: string; containerName: string }[] = [];
   shouldFailDeploy = false;
 
-  async deploy(config: DeployConfigLike): Promise<void> {
-    this.deployCalls.push(config);
+  async deployStaging(config: DeployConfigLike): Promise<void> {
+    this.deployStagingCalls.push(config);
     if (this.shouldFailDeploy) {
       throw new Error("fake deploy failure (teste)");
     }
+  }
+
+  async promote(config: DeployConfigLike): Promise<void> {
+    this.promoteCalls.push(config);
+  }
+
+  async removeStaging(config: { projectPath: string; containerName: string }): Promise<void> {
+    this.removeStagingCalls.push(config);
   }
 
   async teardown(config: { projectPath: string; containerName: string }): Promise<void> {
@@ -429,14 +439,18 @@ describe("Projects flow (e2e)", () => {
         .set("Cookie", [authCookieHeader()]);
 
       fakeOrchestrator.shouldFailDeploy = true;
-      const teardownCallsBefore = fakeOrchestrator.teardownCalls.length;
+      const removeStagingCallsBefore = fakeOrchestrator.removeStagingCalls.length;
+      const promoteCallsBefore = fakeOrchestrator.promoteCalls.length;
       const res = await request(app.getHttpServer())
         .post(`/projects/${failingId}/deploy`)
         .set("Cookie", [authCookieHeader()]);
       fakeOrchestrator.shouldFailDeploy = false;
 
       expect(res.status).toBe(500);
-      expect(fakeOrchestrator.teardownCalls.length).toBe(teardownCallsBefore + 1);
+      // Falhou já na instância de teste: limpa ela (removeStaging), mas nunca
+      // chega a promover pra produção (promote não é chamado).
+      expect(fakeOrchestrator.removeStagingCalls.length).toBe(removeStagingCallsBefore + 1);
+      expect(fakeOrchestrator.promoteCalls.length).toBe(promoteCallsBefore);
 
       const project = await request(app.getHttpServer())
         .get(`/projects/${failingId}`)

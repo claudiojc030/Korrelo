@@ -18,7 +18,7 @@ import {
   COMPOSE_FILENAME,
   ENV_FILENAME,
   type ContainerOrchestrator,
-  type TeardownConfig,
+  type DeployConfig,
 } from "../domain/container-orchestrator";
 import { HEALTH_CHECKER, type HealthChecker } from "../domain/health-checker";
 import { ENV_VAR_REPOSITORY, type EnvVarRepository } from "../domain/env-var.repository";
@@ -81,8 +81,14 @@ export class DeployProjectUseCase {
     await fs.writeFile(path.join(projectPath, ".dockerignore"), dockerignore, "utf-8");
 
     const containerPort = stack.recommendedPort ?? 3000;
-    const hostPort = await this.portAllocator.allocate(containerPort);
+    // Porta estável entre redeploys: sem isso, cada deploy corria o risco de
+    // cair numa porta diferente (a porta atual do projeto conta como "em uso"
+    // pelo próprio container antigo ainda rodando), quebrando silenciosamente
+    // um domínio personalizado já anexado.
+    const hostPort = project.assignedPort ?? (await this.portAllocator.allocate(containerPort));
     const containerName = sanitizeContainerName(project.id, project.name);
+    const stagingContainerName = `${containerName}-staging`;
+    const stagingHostPort = await this.portAllocator.allocate(hostPort + 1);
     const memoryLimitMb = this.resourceBudget.getContainerMemoryLimitMb();
 
     const managedDatabase = await this.managedDatabaseRepository.findByProjectId(project.id);
@@ -91,12 +97,13 @@ export class DeployProjectUseCase {
     const managedContainerDatabase =
       managedDatabase && managedDatabase.type !== "custom" ? managedDatabase : null;
 
-    const deployConfig = {
+    const deployConfig: DeployConfig = {
       projectPath,
       containerName,
       hostPort,
       containerPort,
       memoryLimitMb,
+      staging: { containerName: stagingContainerName, hostPort: stagingHostPort },
       database: managedContainerDatabase
         ? {
             type: managedContainerDatabase.type as "postgres" | "redis" | "mongodb",
@@ -120,10 +127,36 @@ export class DeployProjectUseCase {
     const envFileContent = envVars.map((v) => `${v.key}=${v.value}`).join("\n") + "\n";
     await fs.writeFile(path.join(projectPath, ENV_FILENAME), envFileContent, "utf-8");
 
+    // Fase 1: builda e sobe só a instância de teste. A versão em produção (se
+    // já existir) continua no ar o tempo todo, sem ser tocada.
     try {
-      await this.orchestrator.deploy(deployConfig);
+      await this.orchestrator.deployStaging(deployConfig);
     } catch (error) {
-      await this.rollback(deployConfig, "o container não subiu");
+      await this.removeStagingIgnoringErrors(deployConfig);
+      await this.repository.save(project.withFailedDeployment());
+      const message = error instanceof Error ? error.message : String(error);
+      await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
+      throw error;
+    }
+
+    const stagingHealthy = await this.healthChecker.waitUntilHealthy(stagingHostPort, HEALTH_CHECK_TIMEOUT_MS);
+    if (!stagingHealthy) {
+      await this.removeStagingIgnoringErrors(deployConfig);
+      await this.repository.save(project.withFailedDeployment());
+      const message = `Container de teste subiu mas não respondeu em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. A versão em produção não foi tocada.`;
+      await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
+      throw new InternalServerErrorException(
+        apiError("DEPLOY_HEALTH_CHECK_FAILED", `Deploy cancelado: ${message}`),
+      );
+    }
+
+    // Fase 2: já validado, agora sim troca a versão em produção. Reaproveita a
+    // imagem recém-buildada (cache), então essa troca é rápida - segundos, não
+    // o tempo do build inteiro.
+    try {
+      await this.orchestrator.promote(deployConfig);
+    } catch (error) {
+      await this.removeStagingIgnoringErrors(deployConfig);
       await this.repository.save(project.withFailedDeployment());
       const message = error instanceof Error ? error.message : String(error);
       await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
@@ -131,10 +164,11 @@ export class DeployProjectUseCase {
     }
 
     const healthy = await this.healthChecker.waitUntilHealthy(hostPort, HEALTH_CHECK_TIMEOUT_MS);
+    await this.removeStagingIgnoringErrors(deployConfig);
+
     if (!healthy) {
-      await this.rollback(deployConfig, "falhou no health check");
       await this.repository.save(project.withFailedDeployment());
-      const message = `Container subiu mas não respondeu na porta ${hostPort} em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. Rollback automático executado.`;
+      const message = `A versão trocada não respondeu na porta final ${hostPort} depois da promoção.`;
       await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
       throw new InternalServerErrorException(
         apiError("DEPLOY_HEALTH_CHECK_FAILED", `Deploy cancelado: ${message}`),
@@ -146,13 +180,11 @@ export class DeployProjectUseCase {
     return this.repository.save(deployedProject);
   }
 
-  private async rollback(config: TeardownConfig, reason: string): Promise<void> {
-    this.logger.warn(`Rollback: ${reason} (${config.containerName}), removendo container`);
+  private async removeStagingIgnoringErrors(config: { projectPath: string; containerName: string }): Promise<void> {
     try {
-      await this.orchestrator.teardown(config);
-    } catch (teardownError) {
-      // Não deixa o erro do rollback mascarar a causa original da falha do deploy.
-      this.logger.error(`Falha ao limpar container após rollback: ${teardownError}`);
+      await this.orchestrator.removeStaging(config);
+    } catch (error) {
+      this.logger.error(`Falha ao remover container de teste: ${error}`);
     }
   }
 }
