@@ -68,6 +68,7 @@ export interface ProjectDatabaseDict {
   importMongoLogLabel: string;
   importMongoCloseButton: string;
   importMongoAlreadyRunning: string;
+  importMongoDisabledHint: string;
 }
 
 export const projectDatabaseEn: ProjectDatabaseDict = {
@@ -143,6 +144,7 @@ export const projectDatabaseEn: ProjectDatabaseDict = {
   importMongoLogLabel: "Log",
   importMongoCloseButton: "Close",
   importMongoAlreadyRunning: "An import is already running for this project.",
+  importMongoDisabledHint: "The database container hasn't started yet. Deploy the project first.",
 };
 
 export const projectDatabasePt: ProjectDatabaseDict = {
@@ -218,4 +220,5 @@ export const projectDatabasePt: ProjectDatabaseDict = {
   importMongoLogLabel: "Log",
   importMongoCloseButton: "Fechar",
   importMongoAlreadyRunning: "Já tem uma importação rodando pra este projeto.",
+  importMongoDisabledHint: "O container do banco ainda não subiu. Faça o deploy do projeto primeiro.",
 };

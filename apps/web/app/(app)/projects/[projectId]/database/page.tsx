@@ -66,6 +66,7 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
   const [redisPersistent, setRedisPersistent] = useState(false);
   const [importMongoOpen, setImportMongoOpen] = useState(false);
   const [importVersion, setImportVersion] = useState(0);
+  const [dbContainerNotRunning, setDbContainerNotRunning] = useState(false);
 
   function load() {
     apiFetch(`/projects/${params.projectId}/database`)
@@ -316,14 +317,21 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
       </p>
 
       {!isCustom && (
-        <DatabaseBrowser key={importVersion} projectId={params.projectId} type={db.type as "postgres" | "redis" | "mongodb"} />
+        <DatabaseBrowser
+          key={importVersion}
+          projectId={params.projectId}
+          type={db.type as "postgres" | "redis" | "mongodb"}
+          onContainerStatusChange={setDbContainerNotRunning}
+        />
       )}
 
       <div className="mt-5 flex items-center gap-4">
         {db.type === "mongodb" && (
           <button
             onClick={() => setImportMongoOpen(true)}
-            className="rounded-md border border-border-subtle px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted"
+            disabled={dbContainerNotRunning}
+            title={dbContainerNotRunning ? t.projectDatabase.importMongoDisabledHint : undefined}
+            className="rounded-md border border-border-subtle px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent"
           >
             {t.projectDatabase.importMongoButton}
           </button>
@@ -399,7 +407,15 @@ interface QueryResult {
   notice: string | null;
 }
 
-function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgres" | "redis" | "mongodb" }) {
+function DatabaseBrowser({
+  projectId,
+  type,
+  onContainerStatusChange,
+}: {
+  projectId: string;
+  type: "postgres" | "redis" | "mongodb";
+  onContainerStatusChange?: (notRunning: boolean) => void;
+}) {
   const { t } = useTranslation();
   const QUERY_PLACEHOLDER: Record<"postgres" | "redis" | "mongodb", string> = {
     postgres: t.projectDatabase.postgresQueryPlaceholder,
@@ -421,11 +437,14 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
       .then(async (res) => {
         if (!res.ok) {
           const body: unknown = await res.json().catch(() => ({}));
-          if (body && typeof body === "object" && (body as { code?: unknown }).code === "DATABASE_CONTAINER_NOT_RUNNING") {
-            setContainerNotRunning(true);
-          }
+          const isContainerNotRunning = Boolean(
+            body && typeof body === "object" && (body as { code?: unknown }).code === "DATABASE_CONTAINER_NOT_RUNNING",
+          );
+          setContainerNotRunning(isContainerNotRunning);
+          onContainerStatusChange?.(isContainerNotRunning);
           throw new Error(translateApiError(t, body, t.projectDatabase.listTablesError));
         }
+        onContainerStatusChange?.(false);
         return res.json();
       })
       .then((data: { tables: string[] }) => setTables(data.tables))
