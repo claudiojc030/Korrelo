@@ -28,6 +28,9 @@ import { ListDatabaseTablesUseCase } from "./application/list-database-tables.us
 import { RunDatabaseQueryUseCase } from "./application/run-database-query.use-case";
 import { StartMongoImportUseCase } from "./application/start-mongo-import.use-case";
 import { GetMongoImportStatusUseCase } from "./application/get-mongo-import-status.use-case";
+import { StartDatabaseExportUseCase } from "./application/start-database-export.use-case";
+import { GetDatabaseExportStatusUseCase } from "./application/get-database-export-status.use-case";
+import { GetDatabaseExportFileUseCase } from "./application/get-database-export-file.use-case";
 import { ListCronJobsUseCase } from "./application/list-cron-jobs.use-case";
 import { CreateCronJobUseCase } from "./application/create-cron-job.use-case";
 import { UpdateCronJobUseCase } from "./application/update-cron-job.use-case";
@@ -63,6 +66,7 @@ import { PrismaCronJobRepository } from "./infrastructure/prisma-cron-job.reposi
 import { DockerExecCronRunner } from "./infrastructure/docker-exec-cron-runner";
 import { DockerExecDatabaseQueryRunner } from "./infrastructure/docker-exec-database-query-runner";
 import { ScriptMongoImporter } from "./infrastructure/script-mongo-importer";
+import { ScriptDatabaseExporter } from "./infrastructure/script-database-exporter";
 import { CronSchedulerService } from "./infrastructure/cron-scheduler.service";
 import { EnvVarCipher } from "../../infrastructure/crypto/env-var-cipher";
 import { PROJECT_REPOSITORY } from "./domain/project.repository";
@@ -80,6 +84,7 @@ import { CRON_JOB_REPOSITORY } from "./domain/cron-job.repository";
 import { CRON_JOB_RUNNER } from "./domain/cron-job-runner";
 import { DATABASE_QUERY_RUNNER } from "./domain/database-query-runner";
 import { MONGO_IMPORTER } from "./domain/mongo-importer";
+import { DATABASE_EXPORTER } from "./domain/database-exporter";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
 @Module({
@@ -119,6 +124,9 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     RunDatabaseQueryUseCase,
     StartMongoImportUseCase,
     GetMongoImportStatusUseCase,
+    StartDatabaseExportUseCase,
+    GetDatabaseExportStatusUseCase,
+    GetDatabaseExportFileUseCase,
     NodeDockerfileGenerator,
     PhpDockerfileGenerator,
     PythonDockerfileGenerator,
@@ -146,6 +154,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: CRON_JOB_RUNNER, useClass: DockerExecCronRunner },
     { provide: DATABASE_QUERY_RUNNER, useClass: DockerExecDatabaseQueryRunner },
     { provide: MONGO_IMPORTER, useClass: ScriptMongoImporter },
+    { provide: DATABASE_EXPORTER, useClass: ScriptDatabaseExporter },
   ],
   exports: [PROJECT_REPOSITORY],
 })

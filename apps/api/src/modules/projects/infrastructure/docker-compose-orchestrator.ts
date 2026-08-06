@@ -42,10 +42,13 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
   }
 
   async teardown(config: TeardownConfig): Promise<void> {
-    await execFile(
-      "docker",
-      ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "down", "--remove-orphans"],
-      { cwd: config.projectPath, timeout: 60 * 1000 },
-    );
+    const args = ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "down", "--remove-orphans"];
+    if (config.removeVolumes) {
+      // -v apaga o volume do banco (dado do projeto); --rmi local só remove a
+      // imagem buildada pra ESTE projeto (não mexe em imagens baixadas como
+      // postgres/redis/mongo, que podem ser reaproveitadas por outros).
+      args.push("-v", "--rmi", "local");
+    }
+    await execFile("docker", args, { cwd: config.projectPath, timeout: 60 * 1000 });
   }
 }

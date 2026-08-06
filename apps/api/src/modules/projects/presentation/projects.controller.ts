@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { ListProjectsUseCase } from "../application/list-projects.use-case";
 import { GetProjectUseCase } from "../application/get-project.use-case";
 import { CreateProjectUseCase } from "../application/create-project.use-case";
@@ -21,6 +22,9 @@ import { ListDatabaseTablesUseCase } from "../application/list-database-tables.u
 import { RunDatabaseQueryUseCase } from "../application/run-database-query.use-case";
 import { StartMongoImportUseCase } from "../application/start-mongo-import.use-case";
 import { GetMongoImportStatusUseCase } from "../application/get-mongo-import-status.use-case";
+import { StartDatabaseExportUseCase } from "../application/start-database-export.use-case";
+import { GetDatabaseExportStatusUseCase } from "../application/get-database-export-status.use-case";
+import { GetDatabaseExportFileUseCase } from "../application/get-database-export-file.use-case";
 import { CreateProjectDto } from "./create-project.dto";
 import { DetectStackDto } from "./detect-stack.dto";
 import { SetEnvVarsDto } from "./set-env-vars.dto";
@@ -55,6 +59,9 @@ export class ProjectsController {
     private readonly runDatabaseQuery: RunDatabaseQueryUseCase,
     private readonly startMongoImport: StartMongoImportUseCase,
     private readonly getMongoImportStatus: GetMongoImportStatusUseCase,
+    private readonly startDatabaseExport: StartDatabaseExportUseCase,
+    private readonly getDatabaseExportStatus: GetDatabaseExportStatusUseCase,
+    private readonly getDatabaseExportFile: GetDatabaseExportFileUseCase,
   ) {}
 
   @Get()
@@ -147,6 +154,22 @@ export class ProjectsController {
   @Get(":id/database/mongo-import/status")
   getMongoImportStatusEndpoint(@Param("id") id: string) {
     return this.getMongoImportStatus.execute(id);
+  }
+
+  @Post(":id/database/export")
+  startDatabaseExportEndpoint(@Param("id") id: string) {
+    return this.startDatabaseExport.execute(id);
+  }
+
+  @Get(":id/database/export/status")
+  getDatabaseExportStatusEndpoint(@Param("id") id: string) {
+    return this.getDatabaseExportStatus.execute(id);
+  }
+
+  @Get(":id/database/export/download")
+  async downloadDatabaseExportEndpoint(@Param("id") id: string, @Res() res: Response) {
+    const { filePath, fileName } = await this.getDatabaseExportFile.execute(id);
+    res.download(filePath, fileName);
   }
 
   @Post(":id/detect-stack")

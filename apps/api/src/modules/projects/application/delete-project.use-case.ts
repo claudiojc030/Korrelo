@@ -24,7 +24,7 @@ export class DeleteProjectUseCase {
 
     if (project.containerName) {
       try {
-        await this.orchestrator.teardown({ projectPath, containerName: project.containerName });
+        await this.orchestrator.teardown({ projectPath, containerName: project.containerName, removeVolumes: true });
       } catch (error) {
         this.logger.warn(`Falha ao remover container ${project.containerName} durante delete: ${error}`);
       }

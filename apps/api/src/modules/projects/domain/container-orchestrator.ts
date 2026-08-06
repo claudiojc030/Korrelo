@@ -24,6 +24,11 @@ export interface DeployConfig {
 export interface TeardownConfig {
   projectPath: string;
   containerName: string;
+  // Só true na exclusão definitiva do projeto (DeleteProjectUseCase). No
+  // rollback de um deploy que falhou (DeployProjectUseCase) fica false/undefined
+  // de propósito, pra não apagar o volume do banco numa tentativa que pode ser
+  // corrigida e reimplantada em seguida.
+  removeVolumes?: boolean;
 }
 
 export interface ContainerOrchestrator {

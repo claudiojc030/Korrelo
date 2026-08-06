@@ -30,6 +30,14 @@ export interface ProjectsDict {
   importDetectError: string;
   fetchingRepos: string;
   noReposAvailable: string;
+  deleteConfirmBodyWithDatabase: string;
+  exportDatabaseButton: string;
+  exportDatabaseDescription: string;
+  exportDatabaseStartError: string;
+  exportDatabaseFailedLabel: string;
+  exportDatabaseDoneLabel: string;
+  exportDatabaseDownloadButton: string;
+  deleteAnywayCheckbox: string;
 }
 
 export const projectsEn: ProjectsDict = {
@@ -64,6 +72,15 @@ export const projectsEn: ProjectsDict = {
   importDetectError: "Failed to import/detect the stack.",
   fetchingRepos: "Fetching repositories...",
   noReposAvailable: "No repositories available.",
+  deleteConfirmBodyWithDatabase:
+    "This stops the container, deletes the cloned files AND the project's database volume (data included). This can't be undone.",
+  exportDatabaseButton: "Export database first",
+  exportDatabaseDescription: "Generates a downloadable dump of this project's database before you delete anything.",
+  exportDatabaseStartError: "Failed to start the export.",
+  exportDatabaseFailedLabel: "Export failed",
+  exportDatabaseDoneLabel: "Export ready",
+  exportDatabaseDownloadButton: "Download",
+  deleteAnywayCheckbox: "I don't need the data, delete anyway",
 };
 
 export const projectsPt: ProjectsDict = {
@@ -98,4 +115,13 @@ export const projectsPt: ProjectsDict = {
   importDetectError: "Falha ao importar/detectar a stack.",
   fetchingRepos: "Buscando repositórios...",
   noReposAvailable: "Nenhum repositório disponível.",
+  deleteConfirmBodyWithDatabase:
+    "Isso para o container, apaga os arquivos clonados E o volume do banco de dados do projeto (dados inclusos). Não pode ser desfeito.",
+  exportDatabaseButton: "Exportar banco antes",
+  exportDatabaseDescription: "Gera um arquivo pra baixar com o banco de dados deste projeto antes de apagar qualquer coisa.",
+  exportDatabaseStartError: "Falha ao iniciar a exportação.",
+  exportDatabaseFailedLabel: "Exportação falhou",
+  exportDatabaseDoneLabel: "Exportação pronta",
+  exportDatabaseDownloadButton: "Baixar",
+  deleteAnywayCheckbox: "Não preciso dos dados, apagar mesmo assim",
 };
