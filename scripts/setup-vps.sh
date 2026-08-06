@@ -200,17 +200,10 @@ else
 fi
 
 log "Buildando a Web"
+# next.config.js usa output: "standalone". O postbuild (apps/web/package.json)
+# copia .next/static e public/ pra dentro do standalone automaticamente -
+# sem isso o server sobe mas serve CSS/JS/fontes como 404.
 npm run build --workspace=apps/web
-
-# next.config.js usa output: "standalone". O build gera um server.js enxuto
-# em .next/standalone (só as dependências realmente usadas), mas não copia
-# os assets estáticos e a pasta public sozinho (é assim que o Next.js
-# funciona, não é opcional). Sem isso o server sobe mas serve CSS/JS/fontes
-# como 404. Rodar de novo é seguro (sobrescreve).
-cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
-if [ -d apps/web/public ]; then
-  cp -r apps/web/public apps/web/.next/standalone/apps/web/public
-fi
 
 log "Rodando migrations do banco (produção, não-interativo)"
 (cd apps/api && npx prisma migrate deploy)
