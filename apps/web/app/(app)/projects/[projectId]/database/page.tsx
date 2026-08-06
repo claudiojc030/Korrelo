@@ -8,6 +8,7 @@ import { useTranslation } from "../../../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../../../lib/api-error";
 import type { ProjectDatabaseDict } from "../../../../../lib/i18n/dictionaries/project-database";
 import { MongoImportModal } from "./mongo-import-modal";
+import { DeployButton } from "../../deploy-button";
 
 type DatabaseType = "postgres" | "redis" | "mongodb" | "custom";
 
@@ -407,6 +408,7 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
   };
   const [tables, setTables] = useState<string[] | null>(null);
   const [tablesError, setTablesError] = useState<string | null>(null);
+  const [containerNotRunning, setContainerNotRunning] = useState(false);
   const [query, setQuery] = useState("");
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<QueryResult | null>(null);
@@ -414,10 +416,14 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
 
   function loadTables() {
     setTablesError(null);
+    setContainerNotRunning(false);
     apiFetch(`/projects/${projectId}/database/tables`)
       .then(async (res) => {
         if (!res.ok) {
           const body: unknown = await res.json().catch(() => ({}));
+          if (body && typeof body === "object" && (body as { code?: unknown }).code === "DATABASE_CONTAINER_NOT_RUNNING") {
+            setContainerNotRunning(true);
+          }
           throw new Error(translateApiError(t, body, t.projectDatabase.listTablesError));
         }
         return res.json();
@@ -483,7 +489,14 @@ function DatabaseBrowser({ projectId, type }: { projectId: string; type: "postgr
             {entityLabel}
           </p>
           {tablesError ? (
-            <p className="px-1 text-[12px] text-destructive">{tablesError}</p>
+            <div className="px-1">
+              <p className="text-[12px] text-destructive">{tablesError}</p>
+              {containerNotRunning && (
+                <div className="mt-2">
+                  <DeployButton projectId={projectId} onDeployed={loadTables} />
+                </div>
+              )}
+            </div>
           ) : tables === null ? (
             <p className="px-1 text-[12px] text-muted-foreground">{t.common.loading}</p>
           ) : tables.length === 0 ? (

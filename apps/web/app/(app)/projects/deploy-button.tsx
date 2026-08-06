@@ -7,7 +7,7 @@ import { apiFetch } from "../../../lib/api-client";
 import { useTranslation } from "../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../lib/api-error";
 
-export function DeployButton({ projectId }: { projectId: string }) {
+export function DeployButton({ projectId, onDeployed }: { projectId: string; onDeployed?: () => void }) {
   const { t } = useTranslation();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -23,6 +23,7 @@ export function DeployButton({ projectId }: { projectId: string }) {
         throw new Error(translateApiError(t, body, t.projects.deployError));
       }
       router.refresh();
+      onDeployed?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : t.projects.unknownError);
     } finally {

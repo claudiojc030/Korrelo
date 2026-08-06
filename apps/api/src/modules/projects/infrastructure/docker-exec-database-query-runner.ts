@@ -95,6 +95,18 @@ export class DockerExecDatabaseQueryRunner implements DatabaseQueryRunner {
     } catch (error) {
       const err = error as { stdout?: string; stderr?: string; message: string };
       const detail = [err.stderr, err.stdout].filter(Boolean).join("\n").trim() || err.message;
+      // Acontece quando o banco foi provisionado depois do último deploy: o
+      // compose file só ganha o serviço "db" no próximo deploy, então até lá
+      // o container simplesmente não existe. Sem essa distinção, o erro cru
+      // do docker (genérico e em inglês) confundia mais do que ajudava.
+      if (detail.includes("No such container")) {
+        throw new BadRequestException(
+          apiError(
+            "DATABASE_CONTAINER_NOT_RUNNING",
+            "O banco foi provisionado, mas o container dele ainda não subiu. Rode um novo Deploy pra ativá-lo.",
+          ),
+        );
+      }
       throw new BadRequestException(apiError("DATABASE_QUERY_FAILED", detail.slice(0, 4000)));
     }
   }
