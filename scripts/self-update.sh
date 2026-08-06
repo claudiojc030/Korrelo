@@ -34,10 +34,9 @@ step 60 "Buildando a API"
 npm run build --workspace=apps/api || fail "build da API falhou"
 
 step 80 "Buildando a Web"
+# O postbuild (apps/web/package.json) já copia .next/static e public/ pro
+# standalone sozinho, não precisa de passo manual aqui.
 npm run build --workspace=apps/web || fail "build da Web falhou"
-
-step 85 "Copiando assets estáticos da Web"
-cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static 2>/dev/null || true
 
 step 92 "Aplicando migrations do banco"
 (cd apps/api && npx prisma migrate deploy) || fail "migrations falharam"
