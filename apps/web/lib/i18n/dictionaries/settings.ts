@@ -25,6 +25,13 @@ export interface SettingsDict {
   hideValues: string;
   unknownError: string;
   removeVarAriaLabel: string;
+  pasteEnvButton: string;
+  pasteEnvTitle: string;
+  pasteEnvDescription: string;
+  pasteEnvPlaceholder: string;
+  pasteEnvImportButton: string;
+  pasteEnvError: string;
+  pasteEnvSuccessTemplate: string;
 }
 
 export const settingsEn: SettingsDict = {
@@ -57,6 +64,13 @@ export const settingsEn: SettingsDict = {
   hideValues: "Hide values",
   unknownError: "Unknown error",
   removeVarAriaLabel: "Remove variable",
+  pasteEnvButton: "Paste a whole .env",
+  pasteEnvTitle: "Paste a whole .env",
+  pasteEnvDescription: "Paste the full contents of a .env file (KEY=value, one per line). Comments and blank lines are ignored; existing keys get overwritten, others are left alone.",
+  pasteEnvPlaceholder: "JWT_SECRET=...\nGITHUB_APP_ID=...",
+  pasteEnvImportButton: "Import",
+  pasteEnvError: "Failed to import.",
+  pasteEnvSuccessTemplate: "{count} variable(s) imported.",
 };
 
 export const settingsPt: SettingsDict = {
@@ -89,4 +103,11 @@ export const settingsPt: SettingsDict = {
   hideValues: "Ocultar valores",
   unknownError: "Erro desconhecido",
   removeVarAriaLabel: "Remover variável",
+  pasteEnvButton: "Colar um .env inteiro",
+  pasteEnvTitle: "Colar um .env inteiro",
+  pasteEnvDescription: "Cole o conteúdo completo de um arquivo .env (CHAVE=valor, uma por linha). Comentários e linhas em branco são ignorados; chaves existentes são sobrescritas, as outras ficam como estão.",
+  pasteEnvPlaceholder: "JWT_SECRET=...\nGITHUB_APP_ID=...",
+  pasteEnvImportButton: "Importar",
+  pasteEnvError: "Falha ao importar.",
+  pasteEnvSuccessTemplate: "{count} variável(is) importada(s).",
 };

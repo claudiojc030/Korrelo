@@ -41,4 +41,8 @@ export class FileCoreEnvRepository implements CoreEnvRepository {
   async upsertOne(key: string, value: string): Promise<void> {
     upsertEnvValues(this.envPath, { [key]: value });
   }
+
+  async upsertMany(values: Record<string, string>): Promise<void> {
+    upsertEnvValues(this.envPath, values);
+  }
 }

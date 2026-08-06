@@ -4,8 +4,10 @@ import { AttachCoreDomainUseCase } from "../application/attach-core-domain.use-c
 import { DetachCoreDomainUseCase } from "../application/detach-core-domain.use-case";
 import { ListCoreEnvUseCase } from "../application/list-core-env.use-case";
 import { SetCoreEnvVarUseCase } from "../application/set-core-env-var.use-case";
+import { SetCoreEnvBulkUseCase } from "../application/set-core-env-bulk.use-case";
 import { AttachCoreDomainDto } from "./attach-core-domain.dto";
 import { SetCoreEnvVarDto } from "./set-core-env-var.dto";
+import { SetCoreEnvBulkDto } from "./set-core-env-bulk.dto";
 
 @Controller("settings")
 export class SettingsController {
@@ -15,6 +17,7 @@ export class SettingsController {
     private readonly detachCoreDomain: DetachCoreDomainUseCase,
     private readonly listCoreEnv: ListCoreEnvUseCase,
     private readonly setCoreEnvVar: SetCoreEnvVarUseCase,
+    private readonly setCoreEnvBulk: SetCoreEnvBulkUseCase,
   ) {}
 
   @Get("domain")
@@ -42,5 +45,10 @@ export class SettingsController {
   async setEnvVarEndpoint(@Body() dto: SetCoreEnvVarDto) {
     await this.setCoreEnvVar.execute(dto.key, dto.value);
     return { ok: true };
+  }
+
+  @Put("env/bulk")
+  setEnvBulkEndpoint(@Body() dto: SetCoreEnvBulkDto) {
+    return this.setCoreEnvBulk.execute(dto.text);
   }
 }
