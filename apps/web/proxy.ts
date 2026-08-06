@@ -24,20 +24,31 @@ export async function proxy(request: NextRequest) {
   // de inatividade mandava direto pro login, mesmo com sessão válida.
   const refreshToken = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
   if (refreshToken) {
-    try {
-      const refreshRes = await fetch(`${API_URL}/auth/refresh`, {
-        method: "POST",
-        headers: { cookie: `${REFRESH_TOKEN_COOKIE}=${refreshToken}` },
-      });
-      if (refreshRes.ok) {
-        const response = NextResponse.next();
-        for (const cookie of refreshRes.headers.getSetCookie()) {
-          response.headers.append("set-cookie", cookie);
+    // Até 2 tentativas: um restart do PM2 (deploy/atualização) deixa a API
+    // fora do ar por 1-2s. Sem isso, um refresh que caísse bem nesse instante
+    // via erro de REDE (não uma resposta 401 de verdade) deslogava o usuário
+    // à toa, mesmo com a sessão perfeitamente válida.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const refreshRes = await fetch(`${API_URL}/auth/refresh`, {
+          method: "POST",
+          headers: { cookie: `${REFRESH_TOKEN_COOKIE}=${refreshToken}` },
+        });
+        if (refreshRes.ok) {
+          const response = NextResponse.next();
+          for (const cookie of refreshRes.headers.getSetCookie()) {
+            response.headers.append("set-cookie", cookie);
+          }
+          return response;
         }
-        return response;
+        // Resposta de verdade (401 etc.): sessão inválida mesmo, não adianta tentar de novo.
+        break;
+      } catch {
+        // Erro de rede/conexão recusada: só nesse caso vale tentar de novo.
+        if (attempt === 0) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
       }
-    } catch {
-      // API fora do ar ou rede falhou: cai pro redirect de login abaixo.
     }
   }
 
