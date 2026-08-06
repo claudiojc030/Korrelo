@@ -119,6 +119,10 @@ class FakeRepositoryCloner {
   async getCurrentBranch(): Promise<string | null> {
     return "main";
   }
+
+  async getLastCommit(): Promise<{ hash: string; message: string } | null> {
+    return { hash: "abc1234", message: "fake commit (teste)" };
+  }
 }
 
 function extractCookie(setCookieHeader: string | string[] | undefined, name: string): string | null {

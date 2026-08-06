@@ -7,4 +7,7 @@ export interface RepositoryCloner {
   // pré-preencher a branch monitorada do deploy automático sem o usuário
   // precisar adivinhar/corrigir manualmente depois.
   getCurrentBranch(destPath: string): Promise<string | null>;
+  // Commit que ficou checado out depois do cloneOrUpdate, pro histórico de
+  // deploy mostrar qual versão do GitHub está rodando de fato.
+  getLastCommit(destPath: string): Promise<{ hash: string; message: string } | null>;
 }

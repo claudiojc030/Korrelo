@@ -26,6 +26,8 @@ export class PrismaDeployRecordRepository implements DeployRecordRepository {
         triggeredBy: record.triggeredBy,
         errorMessage: record.errorMessage,
         log: record.log,
+        commitHash: record.commitHash,
+        commitMessage: record.commitMessage,
         startedAt: record.startedAt,
         finishedAt: record.finishedAt,
       },
@@ -33,6 +35,8 @@ export class PrismaDeployRecordRepository implements DeployRecordRepository {
         status: record.status,
         errorMessage: record.errorMessage,
         log: record.log,
+        commitHash: record.commitHash,
+        commitMessage: record.commitMessage,
         finishedAt: record.finishedAt,
       },
     });
@@ -46,6 +50,8 @@ export class PrismaDeployRecordRepository implements DeployRecordRepository {
     triggeredBy: string;
     errorMessage: string | null;
     log: string;
+    commitHash: string | null;
+    commitMessage: string | null;
     startedAt: Date;
     finishedAt: Date | null;
   }): DeployRecord {
@@ -56,6 +62,8 @@ export class PrismaDeployRecordRepository implements DeployRecordRepository {
       row.triggeredBy as DeployTrigger,
       row.errorMessage,
       row.log,
+      row.commitHash,
+      row.commitMessage,
       row.startedAt,
       row.finishedAt,
     );

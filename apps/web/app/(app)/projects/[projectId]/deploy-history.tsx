@@ -11,6 +11,8 @@ interface DeployRecord {
   triggeredBy: "manual" | "webhook";
   errorMessage: string | null;
   log: string;
+  commitHash: string | null;
+  commitMessage: string | null;
   startedAt: string;
   finishedAt: string | null;
 }
@@ -67,6 +69,12 @@ export function DeployHistory({ projectId, initialRecords }: { projectId: string
                       {record.triggeredBy === "webhook" ? t.projectDetail.triggeredByWebhook : t.projectDetail.triggeredByManual}
                     </span>
                   </p>
+                  {record.commitHash && (
+                    <p className="mt-0.5 text-[12px] text-muted-foreground">
+                      <code className="font-mono text-accent">{record.commitHash}</code>{" "}
+                      <span className="truncate">{record.commitMessage}</span>
+                    </p>
+                  )}
                   {record.errorMessage && (
                     <p className="mt-0.5 max-w-md truncate text-[12px] text-destructive">{record.errorMessage}</p>
                   )}

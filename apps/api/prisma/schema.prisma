@@ -37,6 +37,8 @@ model DeployRecord {
   triggeredBy  String
   errorMessage String?
   log          String    @default("")
+  commitHash   String?
+  commitMessage String?
   startedAt    DateTime  @default(now())
   finishedAt   DateTime?
 }

@@ -44,6 +44,8 @@ interface DeployRecord {
   triggeredBy: "manual" | "webhook";
   errorMessage: string | null;
   log: string;
+  commitHash: string | null;
+  commitMessage: string | null;
   startedAt: string;
   finishedAt: string | null;
 }

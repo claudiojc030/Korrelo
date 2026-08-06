@@ -28,6 +28,12 @@ import {
 } from "../domain/managed-database.repository";
 import { DEPLOY_RECORD_REPOSITORY, type DeployRecordRepository } from "../domain/deploy-record.repository";
 import { DeployRecord, type DeployTrigger } from "../domain/deploy-record.entity";
+import { REPOSITORY_CLONER, type RepositoryCloner } from "../domain/repository-cloner";
+import { GITHUB_APP_CLIENT, type GithubAppClient } from "../../github/domain/github-app-client";
+import {
+  GITHUB_INSTALLATION_REPOSITORY,
+  type GithubInstallationRepository,
+} from "../../github/domain/github-installation.repository";
 import { PortAllocator } from "../infrastructure/port-allocator";
 import { ResourceBudgetCalculator } from "../infrastructure/resource-budget-calculator";
 import { DockerComposeFileBuilder } from "../infrastructure/docker-compose-file-builder";
@@ -52,6 +58,10 @@ export class DeployProjectUseCase {
     @Inject(ENV_VAR_REPOSITORY) private readonly envVarRepository: EnvVarRepository,
     @Inject(MANAGED_DATABASE_REPOSITORY) private readonly managedDatabaseRepository: ManagedDatabaseRepository,
     @Inject(DEPLOY_RECORD_REPOSITORY) private readonly deployRecordRepository: DeployRecordRepository,
+    @Inject(REPOSITORY_CLONER) private readonly cloner: RepositoryCloner,
+    @Inject(GITHUB_APP_CLIENT) private readonly githubAppClient: GithubAppClient,
+    @Inject(GITHUB_INSTALLATION_REPOSITORY)
+    private readonly githubInstallationRepository: GithubInstallationRepository,
     private readonly portAllocator: PortAllocator,
     private readonly resourceBudget: ResourceBudgetCalculator,
     private readonly composeFileBuilder: DockerComposeFileBuilder,
@@ -71,10 +81,20 @@ export class DeployProjectUseCase {
       );
     }
 
-    const deployRecord = await this.deployRecordRepository.save(DeployRecord.start(projectId, triggeredBy));
+    let deployRecord = await this.deployRecordRepository.save(DeployRecord.start(projectId, triggeredBy));
 
     const stack = JSON.parse(project.detectedStack) as DetectedStack;
     const projectPath = getProjectWorkspacePath(project.id);
+
+    // Sem isso o deploy só reconstruía a imagem em cima do código já clonado
+    // no /import, nunca pegando commits novos - webhook e deploy manual
+    // ficavam presos pra sempre na versão importada originalmente.
+    const accessToken = await this.resolveGithubAccessToken();
+    await this.cloner.cloneOrUpdate(project.repoUrl, projectPath, accessToken);
+    const lastCommit = await this.cloner.getLastCommit(projectPath);
+    if (lastCommit) {
+      deployRecord = await this.deployRecordRepository.save(deployRecord.withCommit(lastCommit.hash, lastCommit.message));
+    }
 
     const { dockerfile, dockerignore } = this.dockerfileGenerator.generate(stack);
     await fs.writeFile(path.join(projectPath, "Dockerfile"), dockerfile, "utf-8");
@@ -183,6 +203,14 @@ export class DeployProjectUseCase {
     await this.deployRecordRepository.save(record.withResult("success", null));
     const deployedProject = project.withDeployment(containerName, hostPort);
     return this.repository.save(deployedProject);
+  }
+
+  private async resolveGithubAccessToken(): Promise<string | undefined> {
+    const installation = await this.githubInstallationRepository.findLatest();
+    if (!installation) return undefined;
+
+    const { token } = await this.githubAppClient.createInstallationToken(installation.installationId);
+    return token;
   }
 
   private async removeStagingIgnoringErrors(config: { projectPath: string; containerName: string }): Promise<void> {

@@ -47,4 +47,14 @@ export class SimpleGitRepositoryCloner implements RepositoryCloner {
       return null;
     }
   }
+
+  async getLastCommit(destPath: string): Promise<{ hash: string; message: string } | null> {
+    try {
+      const log = await simpleGit(destPath).log({ maxCount: 1 });
+      const latest = log.latest;
+      return latest ? { hash: latest.hash.slice(0, 7), message: latest.message } : null;
+    } catch {
+      return null;
+    }
+  }
 }
