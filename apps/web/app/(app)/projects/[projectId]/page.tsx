@@ -3,6 +3,7 @@ import { CONTAINER_MEMORY_LIMIT_MB, type DetectedStack, type Project, type Syste
 import { authHeaderServer } from "../../../../lib/auth-cookie-server";
 import { getRequestHostServer } from "../../../../lib/get-request-host-server";
 import { DomainCard } from "./domain-card";
+import { DeployButton } from "../deploy-button";
 import { getLocaleServer } from "../../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../../lib/i18n/dictionaries";
 
@@ -151,6 +152,9 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
             label={t.projectDetail.createdAt}
             value={new Date(project.createdAt).toLocaleString("pt-BR")}
           />
+          <div className="mt-3 border-t border-border-subtle pt-3">
+            <DeployButton projectId={project.id} />
+          </div>
         </div>
 
         <DomainCard
