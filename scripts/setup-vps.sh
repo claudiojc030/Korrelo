@@ -272,8 +272,12 @@ else
 fi
 
 log "Subindo o Core via PM2"
-pm2 start ecosystem.config.js
-pm2 save
+# "sg docker -c" roda o comando com o grupo docker aplicado sem precisar de
+# logout/login. Sem isso, o deploy de projetos falha com "permission denied"
+# no docker.sock até o usuário abrir uma sessão SSH nova (o usermod -aG
+# docker lá em cima só vale pra sessões futuras, não pra esta).
+sg docker -c "pm2 start ecosystem.config.js"
+sg docker -c "pm2 save"
 pm2 startup systemd -u "$USER" --hp "$HOME" | tail -1 | sudo bash || true
 
 log "Configurando backup automático diário"
