@@ -106,7 +106,13 @@ export class AuthController {
 
     const result = await this.refreshAccessToken.execute(rawToken, req.get("user-agent") ?? null, normalizeIp(req.ip));
     res.cookie(TOKEN_COOKIE, result.accessToken, buildTokenCookieOptions(req.secure));
-    res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
+    // null só na janela de graça de reuso (corrida entre requisições
+    // concorrentes): o cookie de refresh certo já foi setado por quem venceu
+    // a corrida, mexer nele de novo aqui poderia sobrescrever com um valor
+    // desatualizado dependendo da ordem de chegada das respostas.
+    if (result.refreshToken) {
+      res.cookie(REFRESH_TOKEN_COOKIE, result.refreshToken, buildRefreshTokenCookieOptions(req.secure));
+    }
     return { ok: true };
   }
 

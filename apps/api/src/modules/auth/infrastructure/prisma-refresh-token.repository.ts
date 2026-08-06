@@ -41,6 +41,7 @@ export class PrismaRefreshTokenRepository implements RefreshTokenRepository {
       },
       update: {
         revokedAt: token.revokedAt,
+        replacedByTokenHash: token.replacedByTokenHash,
         lastUsedAt: token.lastUsedAt,
       },
     });
@@ -55,6 +56,7 @@ export class PrismaRefreshTokenRepository implements RefreshTokenRepository {
     ipAddress: string | null;
     expiresAt: Date;
     revokedAt: Date | null;
+    replacedByTokenHash: string | null;
     lastUsedAt: Date;
     createdAt: Date;
   }): RefreshToken {
@@ -66,6 +68,7 @@ export class PrismaRefreshTokenRepository implements RefreshTokenRepository {
       row.ipAddress,
       row.expiresAt,
       row.revokedAt,
+      row.replacedByTokenHash,
       row.lastUsedAt,
       row.createdAt,
     );

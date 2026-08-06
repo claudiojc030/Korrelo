@@ -116,6 +116,10 @@ model RefreshToken {
   ipAddress  String?
   expiresAt  DateTime
   revokedAt  DateTime?
+  // Hash do token que rotacionou este aqui. Permite um curto período de graça
+  // pra pedidos concorrentes que ainda usam o token velho (ver
+  // RefreshAccessTokenUseCase) sem precisar deslogar por causa de uma corrida.
+  replacedByTokenHash String?
   lastUsedAt DateTime  @default(now())
   createdAt  DateTime  @default(now())
 }

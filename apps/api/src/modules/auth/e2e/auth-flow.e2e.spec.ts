@@ -169,11 +169,15 @@ describe("Auth flow (e2e)", () => {
       expect(newRefreshCookie).toBeTruthy();
       expect(newRefreshCookie).not.toBe(oldRefreshCookie);
 
-      // reuso do refresh token antigo (já rotacionado) deve ser rejeitado
+      // reuso do refresh token antigo dentro da janela de graça (corrida de
+      // requisições concorrentes) ganha só um access token novo, não é tratado
+      // como token roubado - e não pisa no cookie de refresh que já é o certo.
       const reuse = await request(app.getHttpServer())
         .post("/auth/refresh")
         .set("Cookie", [`korrelo_refresh_token=${oldRefreshCookie}`]);
-      expect(reuse.status).toBe(401);
+      expect(reuse.status).toBe(201);
+      expect(extractCookie(reuse.headers["set-cookie"], "korrelo_token")).toBeTruthy();
+      expect(extractCookie(reuse.headers["set-cookie"], "korrelo_refresh_token")).toBeNull();
 
       refreshCookie = newRefreshCookie!;
       accessCookie = newAccessCookie!;
