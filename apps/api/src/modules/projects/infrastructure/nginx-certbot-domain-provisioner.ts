@@ -40,7 +40,7 @@ function buildServerBlock(domain: string, port: number): string {
 export class NginxCertbotDomainProvisioner implements DomainProvisioner {
   private readonly logger = new Logger(NginxCertbotDomainProvisioner.name);
 
-  async attach(domain: string, port: number, adminEmail: string): Promise<void> {
+  async attach(domain: string, port: number): Promise<void> {
     await fs.mkdir(SITES_DIR, { recursive: true });
     await fs.writeFile(siteFilePath(domain), buildServerBlock(domain, port), "utf-8");
 
@@ -56,10 +56,13 @@ export class NginxCertbotDomainProvisioner implements DomainProvisioner {
 
     try {
       // --nginx edita esse mesmo server block pra adicionar o 443 + redirect
-      // automaticamente depois de emitir o certificado.
+      // automaticamente depois de emitir o certificado. Sem e-mail (o Korrelo
+      // não coleta um de verdade do administrador): --register-unsafely-without-email
+      // é a forma suportada de pular isso, diferente de inventar um endereço
+      // fake tipo "admin@localhost", que o Let's Encrypt passou a rejeitar.
       await execFile(
         "sudo",
-        ["certbot", "--nginx", "-d", domain, "-m", adminEmail, "--agree-tos", "--redirect", "-n"],
+        ["certbot", "--nginx", "-d", domain, "--register-unsafely-without-email", "--agree-tos", "--redirect", "-n"],
         { timeout: 2 * 60 * 1000 },
       );
     } catch (error) {

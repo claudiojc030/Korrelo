@@ -3,9 +3,6 @@ import { apiError } from "../../../infrastructure/api-error";
 import { CORE_DOMAIN_REPOSITORY, type CoreDomainRepository } from "../domain/core-domain-repository";
 import { CORE_DOMAIN_PROVISIONER, type CoreDomainProvisioner } from "../domain/core-domain-provisioner";
 
-// Mesmo placeholder usado pelo AttachDomainUseCase de projeto: o Korrelo não
-// coleta e-mail real do administrador (login é por usuário).
-const LETSENCRYPT_CONTACT_EMAIL = "admin@localhost";
 const DOMAIN_PATTERN = /^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$/;
 
 @Injectable()
@@ -33,7 +30,7 @@ export class AttachCoreDomainUseCase {
       );
     }
 
-    await this.domainProvisioner.attach(normalizedDomain, LETSENCRYPT_CONTACT_EMAIL);
+    await this.domainProvisioner.attach(normalizedDomain);
     await this.domainRepository.set(normalizedDomain);
     return { domain: normalizedDomain };
   }

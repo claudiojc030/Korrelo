@@ -57,7 +57,7 @@ function buildServerBlock(domain: string): string {
 export class NginxCertbotCoreDomainProvisioner implements CoreDomainProvisioner {
   private readonly logger = new Logger(NginxCertbotCoreDomainProvisioner.name);
 
-  async attach(domain: string, adminEmail: string): Promise<void> {
+  async attach(domain: string): Promise<void> {
     await fs.mkdir(SITES_DIR, { recursive: true });
     await fs.writeFile(siteFilePath(domain), buildServerBlock(domain), "utf-8");
 
@@ -72,9 +72,12 @@ export class NginxCertbotCoreDomainProvisioner implements CoreDomainProvisioner 
     }
 
     try {
+      // Sem e-mail: --register-unsafely-without-email é a forma suportada de
+      // pular isso (o Let's Encrypt passou a rejeitar e-mails fake tipo
+      // "admin@localhost").
       await execFile(
         "sudo",
-        ["certbot", "--nginx", "-d", domain, "-m", adminEmail, "--agree-tos", "--redirect", "-n"],
+        ["certbot", "--nginx", "-d", domain, "--register-unsafely-without-email", "--agree-tos", "--redirect", "-n"],
         { timeout: 2 * 60 * 1000 },
       );
     } catch (error) {
