@@ -1,4 +1,4 @@
-import { Injectable, InternalServerErrorException } from "@nestjs/common";
+import { Injectable, InternalServerErrorException, Logger } from "@nestjs/common";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { apiError } from "../../../infrastructure/api-error";
@@ -13,6 +13,8 @@ const execFile = promisify(execFileCallback);
 
 @Injectable()
 export class DockerComposeOrchestrator implements ContainerOrchestrator {
+  private readonly logger = new Logger(DockerComposeOrchestrator.name);
+
   async deploy(config: DeployConfig): Promise<void> {
     try {
       // execFile (não exec/shell): os argumentos vão direto pro processo, sem
@@ -38,6 +40,24 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       throw new InternalServerErrorException(
         apiError("CONTAINER_START_FAILED", `Falha ao subir o container: ${message}`),
       );
+    }
+
+    await this.pruneUnusedBuildArtifacts();
+  }
+
+  // Cada rebuild (`--build`) deixa pra trás a camada de build cache antiga e,
+  // se o Dockerfile mudou, a imagem <none> anterior com a mesma tag. Nenhum
+  // dos dois é usado pelo container que acabou de subir, então dá pra limpar
+  // sempre, sem risco de derrubar algo em uso (docker nunca remove imagem
+  // referenciada por container rodando, mesmo com -f). Roda depois de CADA
+  // deploy (Korrelo continua reaproveitando o cache de builds recentes,
+  // já que -f não é "-a": só o que virou lixo desde então).
+  private async pruneUnusedBuildArtifacts(): Promise<void> {
+    try {
+      await execFile("docker", ["image", "prune", "-f"], { timeout: 60 * 1000 });
+      await execFile("docker", ["builder", "prune", "-f"], { timeout: 60 * 1000 });
+    } catch (error) {
+      this.logger.warn(`Falha ao limpar imagens/cache de build não usados: ${error}`);
     }
   }
 
