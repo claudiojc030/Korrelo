@@ -15,6 +15,7 @@ export interface Project {
   domainSslStatus: DomainSslStatus;
   autoDeployEnabled: boolean;
   deployBranch: string;
+  diskLimitMb: number | null;
   createdAt: string;
 }
 

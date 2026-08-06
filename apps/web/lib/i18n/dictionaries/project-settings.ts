@@ -14,6 +14,11 @@ export interface ProjectSettingsDict {
   branchTitle: string;
   branchDescription: string;
   branchPlaceholder: string;
+  diskAlertTitle: string;
+  diskAlertDescription: string;
+  diskAlertLabel: string;
+  diskAlertHint: string;
+  diskAlertPlaceholder: string;
 }
 
 export const projectSettingsEn: ProjectSettingsDict = {
@@ -32,6 +37,12 @@ export const projectSettingsEn: ProjectSettingsDict = {
   branchTitle: "Watched branch",
   branchDescription: "Only pushes to this branch trigger a deploy.",
   branchPlaceholder: "main",
+  diskAlertTitle: "Disk usage alert",
+  diskAlertDescription:
+    "Korrelo doesn't hard-cap disk per project (Docker's default storage driver can't enforce a per-container quota without repartitioning the whole VPS), but it can warn you. Requires BACKUP_ALERT_NTFY_TOPIC configured (Settings, or during setup).",
+  diskAlertLabel: "Alert threshold",
+  diskAlertHint: "Leave empty to disable. Checked hourly, re-notifies at most once a day.",
+  diskAlertPlaceholder: "5",
 };
 
 export const projectSettingsPt: ProjectSettingsDict = {
@@ -50,4 +61,10 @@ export const projectSettingsPt: ProjectSettingsDict = {
   branchTitle: "Branch monitorada",
   branchDescription: "Só pushes pra essa branch disparam o deploy.",
   branchPlaceholder: "main",
+  diskAlertTitle: "Alerta de uso de disco",
+  diskAlertDescription:
+    "O Korrelo não trava o disco por projeto (o driver de storage padrão do Docker não segura quota por container sem reparticionar a VPS inteira), mas pode te avisar. Exige BACKUP_ALERT_NTFY_TOPIC configurado (aba Configurações, ou na instalação).",
+  diskAlertLabel: "Limite pro alerta",
+  diskAlertHint: "Deixe vazio pra desativar. Checado de hora em hora, reavisa no máximo uma vez por dia.",
+  diskAlertPlaceholder: "5",
 };

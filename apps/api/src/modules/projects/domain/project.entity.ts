@@ -17,6 +17,9 @@ export class Project {
     public readonly domainSslStatus: DomainSslStatus,
     public readonly autoDeployEnabled: boolean,
     public readonly deployBranch: string,
+    // Alerta (não bloqueio: o Docker padrão não segura quota de disco por
+    // container sem reparticionar a VPS inteira em XFS). Null = sem alerta.
+    public readonly diskLimitMb: number | null,
     public readonly createdAt: Date,
   ) {}
 
@@ -35,6 +38,7 @@ export class Project {
       "none",
       false,
       "main",
+      null,
       new Date(),
     );
   }
@@ -54,6 +58,7 @@ export class Project {
       this.domainSslStatus,
       this.autoDeployEnabled,
       this.deployBranch,
+      this.diskLimitMb,
       this.createdAt,
     );
   }
@@ -73,6 +78,7 @@ export class Project {
       this.domainSslStatus,
       this.autoDeployEnabled,
       this.deployBranch,
+      this.diskLimitMb,
       this.createdAt,
     );
   }
@@ -92,6 +98,7 @@ export class Project {
       this.domainSslStatus,
       this.autoDeployEnabled,
       this.deployBranch,
+      this.diskLimitMb,
       this.createdAt,
     );
   }
@@ -111,6 +118,7 @@ export class Project {
       this.domainSslStatus,
       this.autoDeployEnabled,
       this.deployBranch,
+      this.diskLimitMb,
       this.createdAt,
     );
   }
@@ -130,6 +138,7 @@ export class Project {
       domainSslStatus,
       this.autoDeployEnabled,
       this.deployBranch,
+      this.diskLimitMb,
       this.createdAt,
     );
   }
@@ -149,6 +158,27 @@ export class Project {
       this.domainSslStatus,
       autoDeployEnabled,
       deployBranch,
+      this.diskLimitMb,
+      this.createdAt,
+    );
+  }
+
+  withDiskLimit(diskLimitMb: number | null): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
+      diskLimitMb,
       this.createdAt,
     );
   }

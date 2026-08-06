@@ -10,6 +10,8 @@ export interface UpdateProjectSettingsInput {
   databaseEnabled?: boolean;
   autoDeployEnabled?: boolean;
   deployBranch?: string;
+  // undefined = não mexe; null = remove o alerta; número = novo limite em MB.
+  diskLimitMb?: number | null;
 }
 
 @Injectable()
@@ -29,11 +31,20 @@ export class UpdateProjectSettingsUseCase {
       );
     }
 
+    if (input.diskLimitMb !== undefined && input.diskLimitMb !== null && input.diskLimitMb <= 0) {
+      throw new BadRequestException(
+        apiError("INVALID_DISK_LIMIT", "O limite de disco precisa ser um número maior que zero (ou vazio pra desativar o alerta)."),
+      );
+    }
+
     let updated = project.withSettings(
       input.terminalEnabled ?? project.terminalEnabled,
       input.databaseEnabled ?? project.databaseEnabled,
     );
     updated = updated.withAutoDeploy(input.autoDeployEnabled ?? project.autoDeployEnabled, deployBranch);
+    if (input.diskLimitMb !== undefined) {
+      updated = updated.withDiskLimit(input.diskLimitMb);
+    }
 
     return this.repository.save(updated);
   }

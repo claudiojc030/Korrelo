@@ -21,6 +21,7 @@ model Project {
   domainSslStatus  String   @default("none")
   autoDeployEnabled Boolean @default(false)
   deployBranch     String   @default("main")
+  diskLimitMb      Int?
   createdAt        DateTime @default(now())
   envVars          EnvVar[]
   managedDatabase  ManagedDatabase?

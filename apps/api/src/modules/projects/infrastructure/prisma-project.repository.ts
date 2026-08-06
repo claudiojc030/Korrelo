@@ -45,6 +45,7 @@ export class PrismaProjectRepository implements ProjectRepository {
         domainSslStatus: project.domainSslStatus,
         autoDeployEnabled: project.autoDeployEnabled,
         deployBranch: project.deployBranch,
+        diskLimitMb: project.diskLimitMb,
         createdAt: project.createdAt,
       },
       update: {
@@ -60,6 +61,7 @@ export class PrismaProjectRepository implements ProjectRepository {
         domainSslStatus: project.domainSslStatus,
         autoDeployEnabled: project.autoDeployEnabled,
         deployBranch: project.deployBranch,
+        diskLimitMb: project.diskLimitMb,
       },
     });
     return this.toDomain(row);
@@ -83,6 +85,7 @@ export class PrismaProjectRepository implements ProjectRepository {
     domainSslStatus: string;
     autoDeployEnabled: boolean;
     deployBranch: string;
+    diskLimitMb: number | null;
     createdAt: Date;
   }): Project {
     return new Project(
@@ -99,6 +102,7 @@ export class PrismaProjectRepository implements ProjectRepository {
       row.domainSslStatus as DomainSslStatus,
       row.autoDeployEnabled,
       row.deployBranch,
+      row.diskLimitMb,
       row.createdAt,
     );
   }
