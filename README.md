@@ -18,6 +18,20 @@ e monitore tudo pelo navegador.
 
 ## 1. Instale na VPS
 
+A maioria das VPS (Hostinger, DigitalOcean, etc.) só te dá acesso como `root`
+por padrão. O instalador **recusa rodar como root** de propósito (roda o Core
+sem privilégio, por segurança), então antes de tudo crie um usuário comum com
+sudo:
+
+```bash
+ssh root@SEU_IP
+adduser seu-usuario
+usermod -aG sudo seu-usuario
+exit
+```
+
+Aí conecta de novo já com esse usuário e roda o instalador:
+
 ```bash
 ssh seu-usuario@SEU_IP
 curl -fsSL https://raw.githubusercontent.com/claudiojc030/Korrelo/main/scripts/install.sh | bash

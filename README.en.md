@@ -18,6 +18,20 @@ monitor everything from your browser.
 
 ## 1. Install on the VPS
 
+Most VPS providers (Hostinger, DigitalOcean, etc.) only give you `root` access
+by default. The installer **refuses to run as root** on purpose (it runs the
+Core without privilege, for security), so create a regular user with sudo
+first:
+
+```bash
+ssh root@YOUR_IP
+adduser your-user
+usermod -aG sudo your-user
+exit
+```
+
+Then connect again with that user and run the installer:
+
 ```bash
 ssh your-user@YOUR_IP
 curl -fsSL https://raw.githubusercontent.com/claudiojc030/Korrelo/main/scripts/install.sh | bash
