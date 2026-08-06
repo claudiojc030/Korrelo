@@ -38,7 +38,9 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       const { stdout, stderr } = await execFile(
         "docker",
         ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "up", "-d", "--build", "app_staging"],
-        { cwd: config.projectPath, timeout: 5 * 60 * 1000 },
+        // 15min: exportar a imagem pro storage do Docker pode ser lento numa
+        // VPS pequena sob carga (I/O de disco), 5min matava builds legítimos.
+        { cwd: config.projectPath, timeout: 15 * 60 * 1000 },
       );
       return combineOutput(stdout, stderr);
     } catch (error) {
