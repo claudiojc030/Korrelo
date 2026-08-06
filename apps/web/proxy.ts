@@ -7,6 +7,12 @@ import { TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from "./lib/auth-cookie-client";
 // corretamente) está sempre disponível, sem precisar declarar runtime.
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
+function extractCookieValue(setCookies: string[], name: string): string | null {
+  const raw = setCookies.find((c) => c.startsWith(`${name}=`));
+  if (!raw) return null;
+  return raw.split(";")[0].slice(name.length + 1);
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -35,8 +41,18 @@ export async function proxy(request: NextRequest) {
           headers: { cookie: `${REFRESH_TOKEN_COOKIE}=${refreshToken}` },
         });
         if (refreshRes.ok) {
-          const response = NextResponse.next();
-          for (const cookie of refreshRes.headers.getSetCookie()) {
+          const setCookies = refreshRes.headers.getSetCookie();
+          // Sem isso, o Set-Cookie só valeria pra PRÓXIMA requisição do
+          // navegador: essa aqui (a que disparou o refresh) ainda renderizava
+          // Server Components com o cookie antigo/vazio, então qualquer fetch
+          // que dependesse dele (ex.: authHeaderServer) falhava com 401 mesmo
+          // a sessão sendo válida - piscava "API fora do ar" a cada ~15min.
+          const newAccessToken = extractCookieValue(setCookies, TOKEN_COOKIE);
+          if (newAccessToken) {
+            request.cookies.set(TOKEN_COOKIE, newAccessToken);
+          }
+          const response = NextResponse.next({ request });
+          for (const cookie of setCookies) {
             response.headers.append("set-cookie", cookie);
           }
           return response;
