@@ -36,6 +36,7 @@ model DeployRecord {
   status       String
   triggeredBy  String
   errorMessage String?
+  log          String    @default("")
   startedAt    DateTime  @default(now())
   finishedAt   DateTime?
 }

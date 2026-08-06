@@ -129,13 +129,16 @@ export class DeployProjectUseCase {
 
     // Fase 1: builda e sobe só a instância de teste. A versão em produção (se
     // já existir) continua no ar o tempo todo, sem ser tocada.
+    let record = deployRecord;
     try {
-      await this.orchestrator.deployStaging(deployConfig);
+      const stagingLog = await this.orchestrator.deployStaging(deployConfig);
+      record = record.appendLog(`--- build/staging ---\n${stagingLog}`);
+      await this.deployRecordRepository.save(record);
     } catch (error) {
       await this.removeStagingIgnoringErrors(deployConfig);
       await this.repository.save(project.withFailedDeployment());
       const message = error instanceof Error ? error.message : String(error);
-      await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
+      await this.deployRecordRepository.save(record.appendLog(message).withResult("failed", message));
       throw error;
     }
 
@@ -144,7 +147,7 @@ export class DeployProjectUseCase {
       await this.removeStagingIgnoringErrors(deployConfig);
       await this.repository.save(project.withFailedDeployment());
       const message = `Container de teste subiu mas não respondeu em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. A versão em produção não foi tocada.`;
-      await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
+      await this.deployRecordRepository.save(record.withResult("failed", message));
       throw new InternalServerErrorException(
         apiError("DEPLOY_HEALTH_CHECK_FAILED", `Deploy cancelado: ${message}`),
       );
@@ -154,12 +157,14 @@ export class DeployProjectUseCase {
     // imagem recém-buildada (cache), então essa troca é rápida - segundos, não
     // o tempo do build inteiro.
     try {
-      await this.orchestrator.promote(deployConfig);
+      const promoteLog = await this.orchestrator.promote(deployConfig);
+      record = record.appendLog(`--- promote ---\n${promoteLog}`);
+      await this.deployRecordRepository.save(record);
     } catch (error) {
       await this.removeStagingIgnoringErrors(deployConfig);
       await this.repository.save(project.withFailedDeployment());
       const message = error instanceof Error ? error.message : String(error);
-      await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
+      await this.deployRecordRepository.save(record.appendLog(message).withResult("failed", message));
       throw error;
     }
 
@@ -169,13 +174,13 @@ export class DeployProjectUseCase {
     if (!healthy) {
       await this.repository.save(project.withFailedDeployment());
       const message = `A versão trocada não respondeu na porta final ${hostPort} depois da promoção.`;
-      await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
+      await this.deployRecordRepository.save(record.withResult("failed", message));
       throw new InternalServerErrorException(
         apiError("DEPLOY_HEALTH_CHECK_FAILED", `Deploy cancelado: ${message}`),
       );
     }
 
-    await this.deployRecordRepository.save(deployRecord.withResult("success", null));
+    await this.deployRecordRepository.save(record.withResult("success", null));
     const deployedProject = project.withDeployment(containerName, hostPort);
     return this.repository.save(deployedProject);
   }

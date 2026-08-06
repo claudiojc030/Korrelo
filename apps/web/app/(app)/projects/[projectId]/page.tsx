@@ -1,9 +1,10 @@
-import { ExternalLink, GitBranch, Cpu, MemoryStick, HardDrive, History, Webhook, MousePointerClick } from "lucide-react";
+import { ExternalLink, GitBranch, Cpu, MemoryStick, HardDrive, History } from "lucide-react";
 import { CONTAINER_MEMORY_LIMIT_MB, type DetectedStack, type Project, type SystemMetrics } from "@korrelo/shared-types";
 import { authHeaderServer } from "../../../../lib/auth-cookie-server";
 import { getRequestHostServer } from "../../../../lib/get-request-host-server";
 import { DomainCard } from "./domain-card";
 import { DeployButton } from "../deploy-button";
+import { DeployHistory } from "./deploy-history";
 import { getProjectPublicUrl } from "../../../../lib/project-public-url";
 import { getLocaleServer } from "../../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../../lib/i18n/dictionaries";
@@ -42,6 +43,7 @@ interface DeployRecord {
   status: "running" | "success" | "failed";
   triggeredBy: "manual" | "webhook";
   errorMessage: string | null;
+  log: string;
   startedAt: string;
   finishedAt: string | null;
 }
@@ -218,65 +220,7 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
         <History size={14} strokeWidth={1.75} />
         {t.projectDetail.deployHistory}
       </h2>
-      {deployRecords.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">{t.projectDetail.noDeploysYet}</p>
-      ) : (
-        <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
-          {deployRecords.map((record) => {
-            const statusStyle =
-              record.status === "success"
-                ? "text-accent"
-                : record.status === "failed"
-                  ? "text-destructive"
-                  : "text-warning";
-            const statusLabel =
-              record.status === "success"
-                ? t.projectDetail.deployStatusSuccess
-                : record.status === "failed"
-                  ? t.projectDetail.deployStatusFailed
-                  : t.projectDetail.deployStatusInProgress;
-            const durationMs = record.finishedAt
-              ? new Date(record.finishedAt).getTime() - new Date(record.startedAt).getTime()
-              : null;
-
-            return (
-              <details key={record.id} className="group border-b border-border-subtle last:border-0">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 [&::-webkit-details-marker]:hidden">
-                  <div className="flex items-center gap-2.5">
-                    {record.triggeredBy === "webhook" ? (
-                      <Webhook size={13} strokeWidth={1.75} className="flex-none text-muted-foreground" />
-                    ) : (
-                      <MousePointerClick size={13} strokeWidth={1.75} className="flex-none text-muted-foreground" />
-                    )}
-                    <div>
-                      <p className="text-[13px] text-foreground">
-                        {new Date(record.startedAt).toLocaleString("pt-BR")}
-                        <span className="ml-2 text-[11.5px] text-muted-foreground">
-                          {record.triggeredBy === "webhook" ? t.projectDetail.triggeredByWebhook : t.projectDetail.triggeredByManual}
-                        </span>
-                      </p>
-                      {record.errorMessage && (
-                        <p className="mt-0.5 max-w-md truncate text-[12px] text-destructive">{record.errorMessage}</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex flex-none items-center gap-3 text-[12.5px]">
-                    {durationMs != null && (
-                      <span className="text-muted-foreground">{Math.round(durationMs / 1000)}s</span>
-                    )}
-                    <span className={`font-medium ${statusStyle}`}>{statusLabel}</span>
-                  </div>
-                </summary>
-                {record.errorMessage && (
-                  <pre className="whitespace-pre-wrap break-words border-t border-border-subtle bg-background px-4 py-3 font-mono text-[12px] text-destructive">
-                    {record.errorMessage}
-                  </pre>
-                )}
-              </details>
-            );
-          })}
-        </div>
-      )}
+      <DeployHistory projectId={project.id} initialRecords={deployRecords} />
     </div>
   );
 }

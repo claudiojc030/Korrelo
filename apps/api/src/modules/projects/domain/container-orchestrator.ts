@@ -42,13 +42,14 @@ export interface TeardownConfig {
 
 export interface ContainerOrchestrator {
   // Builda e sobe SÓ a instância de teste (app_staging no compose), sem tocar
-  // no container em produção (app) de jeito nenhum.
-  deployStaging(config: DeployConfig): Promise<void>;
+  // no container em produção (app) de jeito nenhum. Retorna stdout+stderr
+  // combinados do docker compose, pro histórico de deploy mostrar o log real.
+  deployStaging(config: DeployConfig): Promise<string>;
   // Só chamado depois que a instância de teste passou no health check. Recria
   // o serviço "app" de verdade reaproveitando a imagem já buildada (rápido,
   // não é um build novo) - esse é o único momento em que a versão em produção
   // é trocada.
-  promote(config: DeployConfig): Promise<void>;
+  promote(config: DeployConfig): Promise<string>;
   // Remove a instância de teste (sucesso ou falha, sempre no final).
   removeStaging(config: { projectPath: string; containerName: string }): Promise<void>;
   teardown(config: TeardownConfig): Promise<void>;

@@ -45,6 +45,7 @@ export interface ProjectDetailDict {
   deployStatusInProgress: string;
   triggeredByWebhook: string;
   triggeredByManual: string;
+  noDeployLogYet: string;
 
   // domain-card.tsx
   customDomainTitle: string;
@@ -107,6 +108,7 @@ export const projectDetailEn: ProjectDetailDict = {
   deployStatusInProgress: "In progress",
   triggeredByWebhook: "automatic push",
   triggeredByManual: "manual",
+  noDeployLogYet: "No log yet.",
 
   customDomainTitle: "Custom domain",
   deployBeforeDomain: "Deploy the project before attaching a domain.",
@@ -169,6 +171,7 @@ export const projectDetailPt: ProjectDetailDict = {
   deployStatusInProgress: "Em andamento",
   triggeredByWebhook: "push automático",
   triggeredByManual: "manual",
+  noDeployLogYet: "Nenhum log ainda.",
 
   customDomainTitle: "Domínio personalizado",
   deployBeforeDomain: "Faça o deploy do projeto antes de anexar um domínio.",

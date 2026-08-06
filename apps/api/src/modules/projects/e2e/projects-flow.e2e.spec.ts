@@ -39,15 +39,17 @@ class FakeContainerOrchestrator {
   teardownCalls: { projectPath: string; containerName: string }[] = [];
   shouldFailDeploy = false;
 
-  async deployStaging(config: DeployConfigLike): Promise<void> {
+  async deployStaging(config: DeployConfigLike): Promise<string> {
     this.deployStagingCalls.push(config);
     if (this.shouldFailDeploy) {
       throw new Error("fake deploy failure (teste)");
     }
+    return "fake staging output";
   }
 
-  async promote(config: DeployConfigLike): Promise<void> {
+  async promote(config: DeployConfigLike): Promise<string> {
     this.promoteCalls.push(config);
+    return "fake promote output";
   }
 
   async removeStaging(config: { projectPath: string; containerName: string }): Promise<void> {
