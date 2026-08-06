@@ -6,6 +6,7 @@ import { DeployButton } from "./deploy-button";
 import { DeleteProjectButton } from "./delete-project-button";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
 import { getRequestHostServer } from "../../../lib/get-request-host-server";
+import { getProjectPublicUrl } from "../../../lib/project-public-url";
 import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
 import { getDictionary, type Dictionary } from "../../../lib/i18n/dictionaries";
 
@@ -77,15 +78,22 @@ function ProjectCard({
       <div className="mt-3 flex items-center gap-4 border-t border-border-subtle pt-3">
         {project.status === "running" && project.assignedPort ? (
           <>
-            <a
-              href={`http://${host}:${project.assignedPort}`}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:opacity-85"
-            >
-              <ExternalLink size={14} strokeWidth={1.75} />
-              {host}:{project.assignedPort}
-            </a>
+            {(() => {
+              const url = getProjectPublicUrl(project, host);
+              return (
+                url && (
+                  <a
+                    href={url.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:opacity-85"
+                  >
+                    <ExternalLink size={14} strokeWidth={1.75} />
+                    {url.label}
+                  </a>
+                )
+              );
+            })()}
             <Link
               href={`/projects/${project.id}/terminal`}
               className="inline-flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground hover:text-foreground"

@@ -103,6 +103,10 @@ class FakeRepositoryCloner {
       }),
     );
   }
+
+  async getCurrentBranch(): Promise<string | null> {
+    return "main";
+  }
 }
 
 function extractCookie(setCookieHeader: string | string[] | undefined, name: string): string | null {

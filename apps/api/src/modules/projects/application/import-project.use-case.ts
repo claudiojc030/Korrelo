@@ -33,7 +33,16 @@ export class ImportProjectUseCase {
     await this.cloner.cloneOrUpdate(project.repoUrl, destPath, accessToken);
 
     const detectedStack = await this.detector.detect(destPath);
-    const updatedProject = project.withDetectedStack(JSON.stringify(detectedStack));
+    let updatedProject = project.withDetectedStack(JSON.stringify(detectedStack));
+
+    // Pré-preenche a branch monitorada do deploy automático com a que o
+    // repositório de fato usa, em vez de sempre assumir "main" (muito repo
+    // por aí ainda usa "master", ou outro nome).
+    const currentBranch = await this.cloner.getCurrentBranch(destPath);
+    if (currentBranch) {
+      updatedProject = updatedProject.withAutoDeploy(updatedProject.autoDeployEnabled, currentBranch);
+    }
+
     return this.repository.save(updatedProject);
   }
 

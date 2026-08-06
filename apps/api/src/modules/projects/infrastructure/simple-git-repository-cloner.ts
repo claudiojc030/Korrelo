@@ -34,7 +34,17 @@ export class SimpleGitRepositoryCloner implements RepositoryCloner {
 
     await fs.mkdir(destPath, { recursive: true });
     // Clone raso: só o commit mais recente. Suficiente para detectar stack e
-    // consistente com o orçamento de disco/rede de VPS pequenas.
+    // consistente com o orçamento de disco/rede de VPS pequenas. Sem "-b":
+    // pega a branch padrão de verdade do repositório (main, master, o que for).
     await simpleGit().clone(authenticatedUrl, destPath, ["--depth", "1"]);
+  }
+
+  async getCurrentBranch(destPath: string): Promise<string | null> {
+    try {
+      const status = await simpleGit(destPath).status();
+      return status.current ?? null;
+    } catch {
+      return null;
+    }
   }
 }

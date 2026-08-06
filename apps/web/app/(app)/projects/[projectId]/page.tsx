@@ -4,6 +4,7 @@ import { authHeaderServer } from "../../../../lib/auth-cookie-server";
 import { getRequestHostServer } from "../../../../lib/get-request-host-server";
 import { DomainCard } from "./domain-card";
 import { DeployButton } from "../deploy-button";
+import { getProjectPublicUrl } from "../../../../lib/project-public-url";
 import { getLocaleServer } from "../../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../../lib/i18n/dictionaries";
 
@@ -133,18 +134,16 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
           <InfoRow
             label={t.projectDetail.publicUrl}
             value={
-              project.assignedPort ? (
-                <a
-                  href={`http://${host}:${project.assignedPort}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-accent hover:opacity-85"
-                >
-                  {host}:{project.assignedPort}
-                </a>
-              ) : (
-                "-"
-              )
+              (() => {
+                const url = getProjectPublicUrl(project, host);
+                return url ? (
+                  <a href={url.href} target="_blank" rel="noreferrer" className="text-accent hover:opacity-85">
+                    {url.label}
+                  </a>
+                ) : (
+                  "-"
+                );
+              })()
             }
           />
           <InfoRow label={t.projectDetail.container} value={<code className="font-mono text-[12px]">{project.containerName ?? "-"}</code>} />

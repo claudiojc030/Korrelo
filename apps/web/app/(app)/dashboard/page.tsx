@@ -8,6 +8,7 @@ import { UpdateBanner } from "./update-banner";
 import { TierBadge } from "./tier-badge";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
 import { getRequestHostServer } from "../../../lib/get-request-host-server";
+import { getProjectPublicUrl } from "../../../lib/project-public-url";
 import { AutoRefresh } from "../../../components/auto-refresh";
 import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../lib/i18n/dictionaries";
@@ -217,17 +218,22 @@ export default async function DashboardPage() {
                           <p className="truncate text-[13.5px] font-medium text-foreground">{project.name}</p>
                         </div>
                         <div className="mt-1 flex items-center gap-3 pl-3.5">
-                          {project.assignedPort && (
-                            <a
-                              href={`http://${host}:${project.assignedPort}`}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center gap-1 text-[12px] text-accent hover:opacity-85"
-                            >
-                              <ExternalLink size={11} strokeWidth={1.75} />
-                              {host}:{project.assignedPort}
-                            </a>
-                          )}
+                          {(() => {
+                            const url = getProjectPublicUrl(project, host);
+                            return (
+                              url && (
+                                <a
+                                  href={url.href}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 text-[12px] text-accent hover:opacity-85"
+                                >
+                                  <ExternalLink size={11} strokeWidth={1.75} />
+                                  {url.label}
+                                </a>
+                              )
+                            );
+                          })()}
                           <Link
                             href={`/projects/${project.id}/terminal`}
                             className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
