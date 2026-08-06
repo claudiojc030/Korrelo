@@ -19,6 +19,8 @@ export const apiErrorsEn: ApiErrorsDict = {
   PROJECT_NOT_RUNNING: "The project needs to be deployed and running before importing data.",
   MONGODB_NOT_PROVISIONED: "Provision a MongoDB database on this project before importing external data.",
   SOURCE_URI_REQUIRED: "Enter the source MongoDB connection string.",
+  CORE_DOMAIN_ALREADY_ATTACHED: "Korrelo already has a domain attached. Remove it before attaching another one.",
+  CORE_DOMAIN_NOT_ATTACHED: "Korrelo doesn't have a domain attached.",
 };
 
 export const apiErrorsPt: ApiErrorsDict = {
@@ -40,4 +42,6 @@ export const apiErrorsPt: ApiErrorsDict = {
   PROJECT_NOT_RUNNING: "O projeto precisa estar implantado e rodando antes de importar dados.",
   MONGODB_NOT_PROVISIONED: "Provisione um banco MongoDB neste projeto antes de importar dados externos.",
   SOURCE_URI_REQUIRED: "Informe a connection string do MongoDB de origem.",
+  CORE_DOMAIN_ALREADY_ATTACHED: "O Korrelo já tem um domínio anexado. Remova antes de trocar por outro.",
+  CORE_DOMAIN_NOT_ATTACHED: "O Korrelo não tem domínio anexado.",
 };

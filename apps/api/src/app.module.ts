@@ -9,6 +9,7 @@ import { MonitoringModule } from "./modules/monitoring/monitoring.module";
 import { TerminalModule } from "./modules/terminal/terminal.module";
 import { AuthModule } from "./modules/auth/auth.module";
 import { SystemServicesModule } from "./modules/system-services/system-services.module";
+import { SettingsModule } from "./modules/settings/settings.module";
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { SystemServicesModule } from "./modules/system-services/system-services.
     MonitoringModule,
     TerminalModule,
     SystemServicesModule,
+    SettingsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ApiThrottlerGuard }],
 })

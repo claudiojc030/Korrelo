@@ -4,6 +4,7 @@ export interface NavDict {
   projects: string;
   systemServices: string;
   security: string;
+  settings: string;
   logout: string;
   languageSwitchTo: string;
   commandPaletteGoTo: string;
@@ -24,6 +25,7 @@ export const navEn: NavDict = {
   projects: "Projects",
   systemServices: "Server services",
   security: "Security",
+  settings: "Settings",
   logout: "Log out",
   languageSwitchTo: "Português",
   commandPaletteGoTo: "Go to...",
@@ -45,6 +47,7 @@ export const navPt: NavDict = {
   projects: "Projetos",
   systemServices: "Serviços do servidor",
   security: "Segurança",
+  settings: "Configurações",
   logout: "Sair",
   languageSwitchTo: "English",
   commandPaletteGoTo: "Ir pra...",

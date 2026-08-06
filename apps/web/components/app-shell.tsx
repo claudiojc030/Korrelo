@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, FolderGit2, ShieldHalf, ShieldCheck, SquareTerminal, LogOut, Search } from "lucide-react";
+import { LayoutDashboard, FolderGit2, ShieldHalf, ShieldCheck, SquareTerminal, Settings, LogOut, Search } from "lucide-react";
 import { apiFetch } from "../lib/api-client";
 import { useTranslation } from "../lib/i18n/locale-provider";
 import { ThemeToggle } from "./theme-toggle";
@@ -34,6 +34,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/system-services", label: t.nav.systemServices, icon: ShieldHalf },
     { href: "/terminal", label: t.nav.systemTerminal, icon: SquareTerminal },
     { href: "/security", label: t.nav.security, icon: ShieldCheck },
+    { href: "/settings", label: t.nav.settings, icon: Settings },
   ];
 
   useEffect(() => {
