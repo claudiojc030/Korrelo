@@ -19,6 +19,7 @@ export default function EnvVarsPage(props: { params: Promise<{ projectId: string
   const [rows, setRows] = useState<EnvRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deploying, setDeploying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [revealAll, setRevealAll] = useState(false);
@@ -83,11 +84,20 @@ export default function EnvVarsPage(props: { params: Promise<{ projectId: string
         const body: unknown = await res.json().catch(() => ({}));
         throw new Error(translateApiError(t, body, t.projectEnv.saveError));
       }
+      setSaving(false);
+
+      setDeploying(true);
+      const deployRes = await apiFetch(`/projects/${params.projectId}/deploy`, { method: "POST" });
+      if (!deployRes.ok) {
+        const body: unknown = await deployRes.json().catch(() => ({}));
+        throw new Error(translateApiError(t, body, t.projects.deployError));
+      }
       setSaved(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : t.projectEnv.unknownError);
     } finally {
       setSaving(false);
+      setDeploying(false);
     }
   }
 
@@ -171,11 +181,11 @@ export default function EnvVarsPage(props: { params: Promise<{ projectId: string
       <div className="mt-4 flex items-center gap-3">
         <button
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || deploying}
           className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
         >
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} strokeWidth={1.75} />}
-          {t.common.save}
+          {saving || deploying ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} strokeWidth={1.75} />}
+          {deploying ? t.projects.deploying : t.common.save}
         </button>
         {saved && <span className="text-[12.5px] text-accent">{t.projectEnv.saved}</span>}
       </div>
