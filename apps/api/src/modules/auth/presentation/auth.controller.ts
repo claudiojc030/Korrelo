@@ -100,7 +100,7 @@ export class AuthController {
     const rawToken = req.cookies?.[REFRESH_TOKEN_COOKIE];
     if (!rawToken) {
       res.clearCookie(TOKEN_COOKIE, { path: "/" });
-      res.clearCookie(REFRESH_TOKEN_COOKIE, { path: "/auth" });
+      res.clearCookie(REFRESH_TOKEN_COOKIE, { path: "/" });
       throw new UnauthorizedException(apiError("SESSION_EXPIRED", "Sessão expirada. Faça login novamente."));
     }
 

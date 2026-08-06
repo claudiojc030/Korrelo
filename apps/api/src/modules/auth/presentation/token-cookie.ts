@@ -18,15 +18,18 @@ export function buildTokenCookieOptions(secure: boolean): CookieOptions {
   };
 }
 
-// Path restrito a /auth: o navegador só manda esse cookie pras rotas de auth
-// (refresh/logout), nunca em toda requisição. Isso reduz a exposição do segredo
-// de longa duração mesmo sendo httpOnly.
+// Path "/" (não só "/auth"): o proxy.ts do Next.js precisa desse cookie em
+// QUALQUER navegação de página pra renovar a sessão sozinho quando o access
+// token expira (15min de inatividade). Com path restrito a "/auth" o
+// navegador nunca mandava esse cookie numa navegação normal (ex.: /dashboard),
+// só em chamadas de API que batem direto em /auth/*  então a renovação
+// silenciosa nunca funcionava de verdade e o usuário caía pro login.
 export function buildRefreshTokenCookieOptions(secure: boolean): CookieOptions {
   return {
     httpOnly: true,
     sameSite: "lax",
     secure,
-    path: "/auth",
+    path: "/",
     maxAge: REFRESH_TOKEN_MAX_AGE_MS,
   };
 }
