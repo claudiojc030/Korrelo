@@ -240,35 +240,39 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
               : null;
 
             return (
-              <div
-                key={record.id}
-                className="flex items-center justify-between gap-4 border-b border-border-subtle px-4 py-3 last:border-0"
-              >
-                <div className="flex items-center gap-2.5">
-                  {record.triggeredBy === "webhook" ? (
-                    <Webhook size={13} strokeWidth={1.75} className="flex-none text-muted-foreground" />
-                  ) : (
-                    <MousePointerClick size={13} strokeWidth={1.75} className="flex-none text-muted-foreground" />
-                  )}
-                  <div>
-                    <p className="text-[13px] text-foreground">
-                      {new Date(record.startedAt).toLocaleString("pt-BR")}
-                      <span className="ml-2 text-[11.5px] text-muted-foreground">
-                        {record.triggeredBy === "webhook" ? t.projectDetail.triggeredByWebhook : t.projectDetail.triggeredByManual}
-                      </span>
-                    </p>
-                    {record.errorMessage && (
-                      <p className="mt-0.5 max-w-md truncate text-[12px] text-destructive">{record.errorMessage}</p>
+              <details key={record.id} className="group border-b border-border-subtle last:border-0">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 [&::-webkit-details-marker]:hidden">
+                  <div className="flex items-center gap-2.5">
+                    {record.triggeredBy === "webhook" ? (
+                      <Webhook size={13} strokeWidth={1.75} className="flex-none text-muted-foreground" />
+                    ) : (
+                      <MousePointerClick size={13} strokeWidth={1.75} className="flex-none text-muted-foreground" />
                     )}
+                    <div>
+                      <p className="text-[13px] text-foreground">
+                        {new Date(record.startedAt).toLocaleString("pt-BR")}
+                        <span className="ml-2 text-[11.5px] text-muted-foreground">
+                          {record.triggeredBy === "webhook" ? t.projectDetail.triggeredByWebhook : t.projectDetail.triggeredByManual}
+                        </span>
+                      </p>
+                      {record.errorMessage && (
+                        <p className="mt-0.5 max-w-md truncate text-[12px] text-destructive">{record.errorMessage}</p>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="flex flex-none items-center gap-3 text-[12.5px]">
-                  {durationMs != null && (
-                    <span className="text-muted-foreground">{Math.round(durationMs / 1000)}s</span>
-                  )}
-                  <span className={`font-medium ${statusStyle}`}>{statusLabel}</span>
-                </div>
-              </div>
+                  <div className="flex flex-none items-center gap-3 text-[12.5px]">
+                    {durationMs != null && (
+                      <span className="text-muted-foreground">{Math.round(durationMs / 1000)}s</span>
+                    )}
+                    <span className={`font-medium ${statusStyle}`}>{statusLabel}</span>
+                  </div>
+                </summary>
+                {record.errorMessage && (
+                  <pre className="whitespace-pre-wrap break-words border-t border-border-subtle bg-background px-4 py-3 font-mono text-[12px] text-destructive">
+                    {record.errorMessage}
+                  </pre>
+                )}
+              </details>
             );
           })}
         </div>
