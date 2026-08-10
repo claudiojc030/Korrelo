@@ -407,6 +407,17 @@ interface QueryResult {
   notice: string | null;
 }
 
+// O backend já converte valores não-string com JSON.stringify (pra caber numa
+// célula de texto). Sem desfazer isso aqui, número/objeto/array reaparecia
+// entre aspas na visualização em JSON, parecendo string por engano.
+function parseMongoCell(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
 function DatabaseBrowser({
   projectId,
   type,
@@ -458,8 +469,9 @@ function DatabaseBrowser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  async function handleRunQuery() {
-    if (!query.trim()) return;
+  async function handleRunQuery(queryOverride?: string) {
+    const queryToRun = queryOverride ?? query;
+    if (!queryToRun.trim()) return;
     setRunning(true);
     setQueryError(null);
     setResult(null);
@@ -467,7 +479,7 @@ function DatabaseBrowser({
       const res = await apiFetch(`/projects/${projectId}/database/query`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query: queryToRun }),
       });
       const body: unknown = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -479,6 +491,20 @@ function DatabaseBrowser({
     } finally {
       setRunning(false);
     }
+  }
+
+  function selectEntity(name: string) {
+    const q =
+      type === "postgres"
+        ? `SELECT * FROM "${name}" LIMIT 100;`
+        : type === "mongodb"
+          ? `db.${name}.find().limit(20).toArray()`
+          : `GET ${name}`;
+    setQuery(q);
+    // Mongo e Postgres têm dados "prontos pra ver" ao clicar (igual o Atlas);
+    // Redis não, porque "name" ali é uma chave de amostra, não um comando -
+    // GET só faz sentido se o usuário confirmar que é isso que quer rodar.
+    if (type !== "redis") handleRunQuery(q);
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -525,11 +551,7 @@ function DatabaseBrowser({
               {tables.map((name) => (
                 <li key={name}>
                   <button
-                    onClick={() => {
-                      if (type === "postgres") setQuery(`SELECT * FROM "${name}" LIMIT 100;`);
-                      else if (type === "mongodb") setQuery(`db.${name}.find().limit(20).toArray()`);
-                      else setQuery(`GET ${name}`);
-                    }}
+                    onClick={() => selectEntity(name)}
                     className="w-full truncate rounded-md px-2 py-1.5 text-left font-mono text-[12.5px] text-foreground hover:bg-muted"
                     title={name}
                   >
@@ -554,7 +576,7 @@ function DatabaseBrowser({
           <div className="flex items-center justify-between">
             <p className="text-[11.5px] text-muted-foreground">{t.projectDatabase.ctrlEnterHint}</p>
             <button
-              onClick={handleRunQuery}
+              onClick={() => handleRunQuery()}
               disabled={running || !query.trim()}
               className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3.5 py-1.5 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
             >
@@ -572,7 +594,22 @@ function DatabaseBrowser({
                   {result.notice}
                 </p>
               )}
-              {result.columns.length > 0 ? (
+              {result.columns.length > 0 && type === "mongodb" ? (
+                <div className="flex max-h-96 flex-col gap-2 overflow-auto p-3">
+                  {result.rows.map((row, i) => (
+                    <pre
+                      key={i}
+                      className="overflow-x-auto rounded-md border border-border-subtle bg-background px-3 py-2 font-mono text-[12px] text-foreground"
+                    >
+                      {JSON.stringify(
+                        Object.fromEntries(result.columns.map((col, j) => [col, parseMongoCell(row[j])])),
+                        null,
+                        2,
+                      )}
+                    </pre>
+                  ))}
+                </div>
+              ) : result.columns.length > 0 ? (
                 <div className="max-h-96 overflow-auto">
                   <table className="w-full border-collapse text-left text-[12.5px]">
                     <thead>
