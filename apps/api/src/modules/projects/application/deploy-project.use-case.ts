@@ -49,6 +49,11 @@ function sanitizeContainerName(projectId: string, projectName: string): string {
 @Injectable()
 export class DeployProjectUseCase {
   private readonly logger = new Logger(DeployProjectUseCase.name);
+  // Duas chamadas concorrentes pro mesmo projeto (ex.: um push automático
+  // caindo bem na hora de um deploy manual) escreveriam o mesmo
+  // docker-compose.korrelo.yml ao mesmo tempo, corrompendo o arquivo. Essa
+  // fila encadeia execuções do MESMO projeto sem bloquear projetos diferentes.
+  private readonly deployQueues = new Map<string, Promise<unknown>>();
 
   constructor(
     @Inject(PROJECT_REPOSITORY) private readonly repository: ProjectRepository,
@@ -68,6 +73,21 @@ export class DeployProjectUseCase {
   ) {}
 
   async execute(projectId: string, triggeredBy: DeployTrigger = "manual"): Promise<Project> {
+    const previous = this.deployQueues.get(projectId) ?? Promise.resolve();
+    const run = previous.catch(() => {}).then(() => this.runDeploy(projectId, triggeredBy));
+    this.deployQueues.set(projectId, run);
+    try {
+      return await run;
+    } finally {
+      // Só limpa se ninguém encadeou outro deploy por trás desse enquanto
+      // ele rodava (senão apagaria a referência do deploy mais novo).
+      if (this.deployQueues.get(projectId) === run) {
+        this.deployQueues.delete(projectId);
+      }
+    }
+  }
+
+  private async runDeploy(projectId: string, triggeredBy: DeployTrigger): Promise<Project> {
     const project = await this.repository.findById(projectId);
     if (!project) {
       throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));

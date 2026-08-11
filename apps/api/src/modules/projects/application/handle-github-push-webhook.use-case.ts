@@ -7,9 +7,16 @@ export interface GithubPushEvent {
   ref: string; // ex: "refs/heads/main"
 }
 
+// Vários commits seguidos (comum ao iterar rápido) cada um dispara seu
+// próprio webhook. Sem isso, cada push virava um deploy inteiro na fila
+// (DeployProjectUseCase.deployQueues), inclusive de commits já superados -
+// minutos de espera acumulados pra só o último importar de verdade.
+const DEBOUNCE_MS = 10_000;
+
 @Injectable()
 export class HandleGithubPushWebhookUseCase {
   private readonly logger = new Logger(HandleGithubPushWebhookUseCase.name);
+  private readonly pendingDeploys = new Map<string, NodeJS.Timeout>();
 
   constructor(
     @Inject(PROJECT_REPOSITORY) private readonly projectRepository: ProjectRepository,
@@ -26,11 +33,19 @@ export class HandleGithubPushWebhookUseCase {
       if (project.deployBranch !== pushedBranch) continue;
 
       triggered.push(project.id);
-      // Não espera o deploy terminar, porque um build pode levar minutos, e o
-      // GitHub considera a entrega do webhook falha depois de ~10s sem resposta.
-      this.deployProject.execute(project.id, "webhook").catch((error) => {
-        this.logger.error(`Auto-deploy falhou pro projeto "${project.name}" (${project.id}): ${error}`);
-      });
+
+      const existingTimer = this.pendingDeploys.get(project.id);
+      if (existingTimer) clearTimeout(existingTimer);
+
+      const timer = setTimeout(() => {
+        this.pendingDeploys.delete(project.id);
+        // Não espera o deploy terminar, porque um build pode levar minutos, e
+        // o GitHub considera a entrega do webhook falha depois de ~10s sem resposta.
+        this.deployProject.execute(project.id, "webhook").catch((error) => {
+          this.logger.error(`Auto-deploy falhou pro projeto "${project.name}" (${project.id}): ${error}`);
+        });
+      }, DEBOUNCE_MS);
+      this.pendingDeploys.set(project.id, timer);
     }
 
     return { triggered };
