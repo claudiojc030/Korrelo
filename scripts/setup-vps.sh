@@ -168,7 +168,7 @@ log "Domínio do próprio Korrelo (opcional)"
 if [ -r /dev/tty ]; then
   read -rp "Domínio pra acessar o painel do Korrelo? (deixe em branco pra usar só http://${PUBLIC_IP}:3000): " DOMAIN < /dev/tty
 else
-  echo "Sem terminal interativo disponível, seguindo sem domínio (só http://${PUBLIC_IP}:3000)."
+  echo "Sem terminal interativo disponível, seguindo sem domínio (só http://${PUBLIC_IP})."
   DOMAIN=""
 fi
 if [ -n "$DOMAIN" ]; then
@@ -176,8 +176,13 @@ if [ -n "$DOMAIN" ]; then
   BASE_WEB_URL="https://${DOMAIN}"
   BASE_API_URL="https://${DOMAIN}/api"
 else
-  BASE_WEB_URL="http://${PUBLIC_IP}:3000"
-  BASE_API_URL="http://${PUBLIC_IP}:3001"
+  # Sem domínio, o acesso é só por IP através do Nginx (site padrão acima),
+  # não mais direto nas portas 3000/3001 - senão o navegador chama a API num
+  # Origin diferente do CORS_ORIGINS configurado, e o front-end (que embute
+  # NEXT_PUBLIC_API_URL no build) tentaria falar com uma porta fechada no
+  # firewall.
+  BASE_WEB_URL="http://${PUBLIC_IP}"
+  BASE_API_URL="http://${PUBLIC_IP}/api"
 fi
 
 log "Configurando .env da API"
