@@ -599,7 +599,7 @@ function DatabaseBrowser({
                   {result.rows.map((row, i) => (
                     <pre
                       key={i}
-                      className="overflow-x-auto rounded-md border border-border-subtle bg-background px-3 py-2 font-mono text-[12px] text-foreground"
+                      className="whitespace-pre-wrap break-words rounded-md border border-border-subtle bg-background px-3 py-2 font-mono text-[12px] text-foreground"
                     >
                       {JSON.stringify(
                         Object.fromEntries(result.columns.map((col, j) => [col, parseMongoCell(row[j])])),
