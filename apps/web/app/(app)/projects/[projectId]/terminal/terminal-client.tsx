@@ -65,6 +65,13 @@ export function TerminalClient({ projectId }: { projectId: string }) {
 
       term.onData((data) => socket?.emit("input", data));
       term.onResize(({ cols, rows }) => socket?.emit("resize", { cols, rows }));
+      // xterm não copia pro clipboard sozinho ao selecionar (só via menu de
+      // contexto do navegador, nada óbvio). Colar (Ctrl/Cmd+V) já funciona
+      // nativo, é o textarea interno do xterm recebendo o evento de paste.
+      term.onSelectionChange(() => {
+        const selection = term?.getSelection();
+        if (selection) navigator.clipboard?.writeText(selection).catch(() => {});
+      });
 
       handleResize = () => fitAddon?.fit();
       window.addEventListener("resize", handleResize);
