@@ -25,6 +25,14 @@ export class PrismaRefreshTokenRepository implements RefreshTokenRepository {
     return rows.map((row) => this.toDomain(row));
   }
 
+  async revokeIfActive(id: string, replacedByTokenHash: string | null): Promise<boolean> {
+    const result = await this.prisma.refreshToken.updateMany({
+      where: { id, revokedAt: null },
+      data: { revokedAt: new Date(), replacedByTokenHash },
+    });
+    return result.count > 0;
+  }
+
   async save(token: RefreshToken): Promise<RefreshToken> {
     const row = await this.prisma.refreshToken.upsert({
       where: { id: token.id },

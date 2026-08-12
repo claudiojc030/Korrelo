@@ -3,8 +3,8 @@ import { apiError } from "../../../infrastructure/api-error";
 import { USER_REPOSITORY, type UserRepository } from "../domain/user.repository";
 import { REFRESH_TOKEN_REPOSITORY, type RefreshTokenRepository } from "../domain/refresh-token.repository";
 import { TOKEN_SERVICE, type TokenService } from "../domain/token-service";
-import { hashRefreshToken } from "../infrastructure/refresh-token-crypto";
-import { TokenPairIssuer } from "./token-pair-issuer";
+import { RefreshToken } from "../domain/refresh-token.entity";
+import { generateRefreshToken, hashRefreshToken, REFRESH_TOKEN_TTL_DAYS } from "../infrastructure/refresh-token-crypto";
 
 export interface RefreshResult {
   accessToken: string;
@@ -22,7 +22,6 @@ export class RefreshAccessTokenUseCase {
     @Inject(USER_REPOSITORY) private readonly userRepository: UserRepository,
     @Inject(REFRESH_TOKEN_REPOSITORY) private readonly refreshTokenRepository: RefreshTokenRepository,
     @Inject(TOKEN_SERVICE) private readonly tokenService: TokenService,
-    private readonly tokenPairIssuer: TokenPairIssuer,
   ) {}
 
   async execute(
@@ -60,16 +59,33 @@ export class RefreshAccessTokenUseCase {
       throw new UnauthorizedException(apiError("SESSION_EXPIRED", "Sessão expirada. Faça login novamente."));
     }
 
-    const { accessToken, refreshToken } = await this.tokenPairIssuer.issue(
-      user.id,
-      user.username,
-      userAgent ?? stored.userAgent,
-      ipAddress ?? stored.ipAddress,
+    const refreshToken = generateRefreshToken();
+    const refreshTokenHash = hashRefreshToken(refreshToken);
+
+    // Revogação atômica (WHERE revokedAt IS NULL) ANTES de persistir o token
+    // novo: se outra sub-requisição paralela da mesma navegação (mesmo
+    // refresh cookie antigo) já rotacionou esse token entre o find() acima e
+    // agora, won == false e a gente nem chega a criar a linha nova - antes
+    // disso, o token novo já tinha sido salvo incondicionalmente e ficava
+    // órfão, nunca revogado, "ativo" pra sempre na lista de sessões.
+    const won = await this.refreshTokenRepository.revokeIfActive(stored.id, refreshTokenHash);
+    if (!won) {
+      const winner = await this.refreshTokenRepository.findById(stored.id);
+      const actual = winner?.replacedByTokenHash
+        ? await this.refreshTokenRepository.findByTokenHash(winner.replacedByTokenHash)
+        : null;
+      if (actual?.isValid()) {
+        const accessToken = this.tokenService.sign({ sub: user.id, username: user.username });
+        return { accessToken, refreshToken: null, username: user.username };
+      }
+      throw new UnauthorizedException(apiError("SESSION_EXPIRED", "Sessão expirada. Faça login novamente."));
+    }
+
+    const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
+    await this.refreshTokenRepository.save(
+      RefreshToken.create(user.id, refreshTokenHash, expiresAt, userAgent ?? stored.userAgent, ipAddress ?? stored.ipAddress),
     );
-    // Rotação: o token usado é revogado antes de emitir o novo par, então
-    // reuso de um refresh token antigo (ex.: token roubado já consumido pelo
-    // dono legítimo) é detectado e rejeitado depois da janela de graça acima.
-    await this.refreshTokenRepository.save(stored.revoke(hashRefreshToken(refreshToken)));
+    const accessToken = this.tokenService.sign({ sub: user.id, username: user.username });
 
     return { accessToken, refreshToken, username: user.username };
   }

@@ -122,7 +122,7 @@ export class AuthController {
     const rawToken = req.cookies?.[REFRESH_TOKEN_COOKIE];
     await this.logoutUseCase.execute(rawToken);
     res.clearCookie(TOKEN_COOKIE, { path: "/" });
-    res.clearCookie(REFRESH_TOKEN_COOKIE, { path: "/auth" });
+    res.clearCookie(REFRESH_TOKEN_COOKIE, { path: "/" });
     return { ok: true };
   }
 
