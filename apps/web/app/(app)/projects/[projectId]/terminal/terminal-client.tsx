@@ -66,11 +66,24 @@ export function TerminalClient({ projectId }: { projectId: string }) {
       term.onData((data) => socket?.emit("input", data));
       term.onResize(({ cols, rows }) => socket?.emit("resize", { cols, rows }));
       // xterm não copia pro clipboard sozinho ao selecionar (só via menu de
-      // contexto do navegador, nada óbvio). Colar (Ctrl/Cmd+V) já funciona
-      // nativo, é o textarea interno do xterm recebendo o evento de paste.
+      // contexto do navegador, nada óbvio).
       term.onSelectionChange(() => {
         const selection = term?.getSelection();
         if (selection) navigator.clipboard?.writeText(selection).catch(() => {});
+      });
+      // Sem isso, Ctrl/Cmd+V manda o caractere de controle ^V literal pro
+      // shell em vez de colar - xterm não intercepta paste do teclado sozinho,
+      // só via clique direito (que exige o menu nativo do navegador aparecer).
+      term.attachCustomKeyEventHandler((event) => {
+        const isPasteShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v";
+        if (isPasteShortcut && event.type === "keydown") {
+          navigator.clipboard
+            ?.readText()
+            .then((text) => socket?.emit("input", text))
+            .catch(() => {});
+          return false;
+        }
+        return true;
       });
 
       handleResize = () => fitAddon?.fit();
