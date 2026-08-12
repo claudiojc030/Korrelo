@@ -1,42 +1,52 @@
 import { Injectable } from "@nestjs/common";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import * as pty from "node-pty";
 import type { ShellSession, ShellSessionFactory } from "../domain/shell-session";
 
 class DockerExecShellSession implements ShellSession {
-  private readonly child: ChildProcessWithoutNullStreams;
+  private proc: pty.IPty | null = null;
+  private spawnErrorMessage: string | null = null;
 
   constructor(containerName: string) {
-    // spawn (não shell): containerName vem do banco (gerado por nós no deploy),
-    // nunca de input direto do cliente do WebSocket, e mesmo assim, argumentos
-    // de array nunca passam por interpretação de shell.
-    this.child = spawn("docker", ["exec", "-i", containerName, "sh"], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    // Sem um listener de "error", uma falha de spawn (docker não encontrado,
-    // container removido no meio do caminho) derruba o processo Node inteiro,
-    // não só essa sessão.
-    this.child.on("error", () => {});
+    // spawn com array de argumentos (não shell): containerName vem do banco
+    // (gerado por nós no deploy), nunca de input direto do cliente do
+    // WebSocket, e mesmo assim argumentos de array nunca passam por
+    // interpretação de shell. "-t" aloca um pty DENTRO do container também -
+    // sem ele o "sh" lá dentro não mostra prompt nem ecoa digitação.
+    try {
+      this.proc = pty.spawn("docker", ["exec", "-it", containerName, "sh"], {
+        name: "xterm-256color",
+        cols: 80,
+        rows: 24,
+      });
+    } catch (error) {
+      this.spawnErrorMessage = error instanceof Error ? error.message : String(error);
+    }
   }
 
   write(data: string): void {
-    this.child.stdin.write(data);
+    this.proc?.write(data);
+  }
+
+  resize(cols: number, rows: number): void {
+    this.proc?.resize(cols, rows);
   }
 
   onData(callback: (data: string) => void): void {
-    this.child.stdout.on("data", (chunk: Buffer) => callback(chunk.toString("utf-8")));
-    this.child.stderr.on("data", (chunk: Buffer) => callback(chunk.toString("utf-8")));
+    this.proc?.onData(callback);
   }
 
   onExit(callback: (code: number | null) => void): void {
-    this.child.on("exit", (code) => callback(code));
+    this.proc?.onExit(({ exitCode }) => callback(exitCode));
   }
 
   onError(callback: (message: string) => void): void {
-    this.child.on("error", (error) => callback(error.message));
+    if (this.spawnErrorMessage) {
+      queueMicrotask(() => callback(this.spawnErrorMessage!));
+    }
   }
 
   kill(): void {
-    this.child.kill();
+    this.proc?.kill();
   }
 }
 

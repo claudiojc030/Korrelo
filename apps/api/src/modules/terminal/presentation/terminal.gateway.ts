@@ -73,6 +73,11 @@ export class TerminalGateway implements OnGatewayConnection, OnGatewayDisconnect
     this.sessions.get(client.id)?.write(data);
   }
 
+  @SubscribeMessage("resize")
+  handleResize(@ConnectedSocket() client: Socket, @MessageBody() size: { cols: number; rows: number }): void {
+    this.sessions.get(client.id)?.resize(size.cols, size.rows);
+  }
+
   handleDisconnect(client: Socket): void {
     this.sessions.get(client.id)?.kill();
     this.sessions.delete(client.id);

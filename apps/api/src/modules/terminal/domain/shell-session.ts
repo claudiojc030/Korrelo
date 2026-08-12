@@ -2,6 +2,7 @@ export const SHELL_SESSION_FACTORY = Symbol("SHELL_SESSION_FACTORY");
 
 export interface ShellSession {
   write(data: string): void;
+  resize(cols: number, rows: number): void;
   onData(callback: (data: string) => void): void;
   onExit(callback: (code: number | null) => void): void;
   // Falha ao criar o processo em si (binário não encontrado, permissão

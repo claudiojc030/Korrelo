@@ -49,7 +49,10 @@ export function SystemTerminalClient() {
       // withCredentials manda o cookie httpOnly de auth junto do handshake,
       // o gateway valida lendo esse cookie (ver system-terminal.gateway.ts).
       socket = io(`${API_URL}/system-terminal`, { withCredentials: true });
-      socket.on("connect", () => socket?.emit("start"));
+      socket.on("connect", () => {
+        socket?.emit("start");
+        socket?.emit("resize", { cols: term!.cols, rows: term!.rows });
+      });
       socket.on("output", (data: string) => term?.write(data));
       socket.on("error", (message: string) => term?.write(`\r\n\x1b[31m${t.projectTerminal.connectionErrorPrefix} ${message}\x1b[0m\r\n`));
       socket.on("exit", () => term?.write(`\r\n\x1b[33m${t.projectTerminal.sessionEnded}\x1b[0m\r\n`));
@@ -61,6 +64,7 @@ export function SystemTerminalClient() {
       });
 
       term.onData((data) => socket?.emit("input", data));
+      term.onResize(({ cols, rows }) => socket?.emit("resize", { cols, rows }));
 
       handleResize = () => fitAddon?.fit();
       window.addEventListener("resize", handleResize);
