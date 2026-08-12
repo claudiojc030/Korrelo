@@ -31,7 +31,7 @@ const FAKE_METRICS: SystemMetrics = {
   usedDiskPercent: 60,
   uptimeSeconds: 3600,
   tier: "medium",
-  containers: [{ name: "fake-container", status: "Up 1 hour", memUsageMb: 128, cpuPercent: 3.5 }],
+  containers: [{ name: "fake-container", status: "Up 1 hour", memUsageMb: 128, memLimitMb: 512, cpuPercent: 3.5 }],
 };
 
 class FakeSystemMetricsCollector {

@@ -60,8 +60,8 @@ async function getDiskUsage(): Promise<{ totalGb: number | null; freeGb: number 
   }
 }
 
-function parseMemUsageMb(memUsage: string): number | null {
-  const match = memUsage.match(/^([\d.]+)\s*(KiB|MiB|GiB)/);
+function parseMemAmountMb(amount: string): number | null {
+  const match = amount.match(/^([\d.]+)\s*(KiB|MiB|GiB)/);
   if (!match) return null;
 
   const value = Number(match[1]);
@@ -73,6 +73,18 @@ function parseMemUsageMb(memUsage: string): number | null {
     default:
       return Math.round(value);
   }
+}
+
+// "{{.MemUsage}}" do docker stats vem como "393.2MiB / 512MiB" - usado E o
+// limite real do cgroup na mesma string, então dá pra extrair os dois de uma
+// vez em vez de fixar o limite por tier (que não reflete a divisão dinâmica
+// de RAM entre projetos rodando ao mesmo tempo).
+function parseMemUsage(memUsage: string): { usedMb: number | null; limitMb: number | null } {
+  const [usedPart, limitPart] = memUsage.split("/");
+  return {
+    usedMb: usedPart ? parseMemAmountMb(usedPart.trim()) : null,
+    limitMb: limitPart ? parseMemAmountMb(limitPart.trim()) : null,
+  };
 }
 
 async function getContainers(): Promise<ContainerSummary[]> {
@@ -90,6 +102,7 @@ async function getContainers(): Promise<ContainerSummary[]> {
     if (rows.length === 0) return [];
 
     let memByName = new Map<string, number>();
+    let memLimitByName = new Map<string, number>();
     let cpuByName = new Map<string, number>();
     try {
       const { stdout: statsOut } = await execFile("docker", [
@@ -99,13 +112,19 @@ async function getContainers(): Promise<ContainerSummary[]> {
         "{{.Name}}|{{.MemUsage}}|{{.CPUPerc}}",
       ]);
       const lines = statsOut.trim().split("\n").filter(Boolean);
+      const parsed = lines.map((line) => {
+        const [name, memUsage] = line.split("|");
+        return { name, ...parseMemUsage(memUsage) };
+      });
       memByName = new Map(
-        lines
-          .map((line) => {
-            const [name, memUsage] = line.split("|");
-            return [name, parseMemUsageMb(memUsage)] as const;
-          })
-          .filter((entry): entry is [string, number] => entry[1] !== null),
+        parsed
+          .filter((entry): entry is typeof entry & { usedMb: number } => entry.usedMb !== null)
+          .map((entry) => [entry.name, entry.usedMb]),
+      );
+      memLimitByName = new Map(
+        parsed
+          .filter((entry): entry is typeof entry & { limitMb: number } => entry.limitMb !== null)
+          .map((entry) => [entry.name, entry.limitMb]),
       );
       cpuByName = new Map(
         lines
@@ -124,6 +143,7 @@ async function getContainers(): Promise<ContainerSummary[]> {
       name: row.name,
       status: row.status,
       memUsageMb: memByName.get(row.name) ?? null,
+      memLimitMb: memLimitByName.get(row.name) ?? null,
       cpuPercent: cpuByName.get(row.name) ?? null,
     }));
   } catch {

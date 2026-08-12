@@ -1,5 +1,5 @@
 import { ExternalLink, GitBranch, Cpu, MemoryStick, HardDrive, History } from "lucide-react";
-import { CONTAINER_MEMORY_LIMIT_MB, type DetectedStack, type Project, type SystemMetrics } from "@korrelo/shared-types";
+import type { DetectedStack, Project, SystemMetrics } from "@korrelo/shared-types";
 import { authHeaderServer } from "../../../../lib/auth-cookie-server";
 import { getRequestHostServer } from "../../../../lib/get-request-host-server";
 import { DomainCard } from "./domain-card";
@@ -197,7 +197,7 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
           <p className="mt-1 text-[12px] text-muted-foreground">
             {t.projectDetail.memoryLimitDetail.replace(
               "{limit}",
-              String(metrics ? CONTAINER_MEMORY_LIMIT_MB[metrics.tier] : "-"),
+              String(container?.memLimitMb ?? "-"),
             )}
           </p>
         </div>

@@ -76,6 +76,7 @@ export interface ContainerSummary {
   name: string;
   status: string;
   memUsageMb: number | null;
+  memLimitMb: number | null;
   cpuPercent: number | null;
 }
 
