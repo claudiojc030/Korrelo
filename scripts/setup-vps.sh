@@ -216,9 +216,12 @@ log "Rodando migrations do banco (produção, não-interativo)"
 
 log "Configurando firewall (ufw)"
 sudo ufw allow OpenSSH
-sudo ufw allow "Nginx Full"  # 80/443, pros domínios dos projetos e/ou do Korrelo
-sudo ufw allow 3000/tcp      # Web do Korrelo direto pelo IP
-sudo ufw allow 3001/tcp      # API do Korrelo direto pelo IP
+sudo ufw allow "Nginx Full"  # 80/443 - único jeito de entrar, tanto por domínio quanto por IP direto (site padrão acima)
+# 3000/3001 (Web/API do Korrelo) e as portas de cada projeto NÃO são liberadas
+# aqui de propósito: o Nginx já fala com elas via 127.0.0.1, e os containers
+# publicam suas portas com bind em 127.0.0.1 (ver docker-compose-file-builder.ts)
+# - então nem chegam a passar pelo ufw pra começo de conversa. Abrir aqui só
+# criaria uma porta de entrada pública redundante, sem TLS, pulando o Nginx.
 sudo ufw --force enable
 
 log "Hardening de acesso SSH"
@@ -345,6 +348,49 @@ else
   echo "Pulado. Pra ligar depois: instale o rclone, rode 'rclone config' criando um remote"
   echo "chamado 'gdrive' (ou outro nome), e adicione BACKUP_RCLONE_REMOTE=<nome> em apps/api/.env."
 fi
+
+log "Configurando site padrão do Korrelo (acesso direto por IP)"
+# Sem domínio configurado, esse é o ÚNICO jeito de acessar o painel: cai pra
+# HTTP puro (não dá pra emitir certificado TLS pra um IP sem dono via Let's
+# Encrypt), mas passa pelo Nginx em vez de expor 3000/3001 crus - a porta 80
+# já é liberada no ufw de qualquer forma. Se um domínio for configurado depois,
+# o site específico dele (abaixo) atende esse hostname; esse aqui continua
+# como default_server, só pra quem bater direto no IP.
+NGINX_DEFAULT_SITE=/etc/nginx/sites-available/korrelo-default
+sudo tee "$NGINX_DEFAULT_SITE" > /dev/null <<'NGINXCONF'
+server {
+  listen 80 default_server;
+  server_name _;
+
+  location /socket.io/ {
+    proxy_pass http://127.0.0.1:3001/socket.io/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  location /api/ {
+    proxy_pass http://127.0.0.1:3001/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+NGINXCONF
+sudo ln -sf "$NGINX_DEFAULT_SITE" /etc/nginx/sites-enabled/korrelo-default
+[ -f /etc/nginx/sites-enabled/default ] && sudo rm /etc/nginx/sites-enabled/default
+sudo nginx -t
+sudo systemctl reload nginx
 
 if [ -n "$DOMAIN" ]; then
   log "Configurando site + TLS do Korrelo (${DOMAIN})"

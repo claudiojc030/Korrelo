@@ -1,11 +1,15 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../../infrastructure/prisma/prisma.service";
+import { EnvVarCipher } from "../../../infrastructure/crypto/env-var-cipher";
 import { ManagedDatabase, type DatabaseType } from "../domain/managed-database.entity";
 import type { ManagedDatabaseRepository } from "../domain/managed-database.repository";
 
 @Injectable()
 export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepository {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cipher: EnvVarCipher,
+  ) {}
 
   async findByProjectId(projectId: string): Promise<ManagedDatabase | null> {
     const row = await this.prisma.managedDatabase.findUnique({ where: { projectId } });
@@ -13,6 +17,11 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
   }
 
   async save(db: ManagedDatabase): Promise<ManagedDatabase> {
+    // Senha do banco gerenciado e connection string externa ("custom") são
+    // segredos de verdade tanto quanto env vars de projeto - cifradas em
+    // repouso pelo mesmo motivo (ver EnvVarCipher).
+    const password = db.password ? this.cipher.encrypt(db.password) : db.password;
+    const connectionString = db.connectionString ? this.cipher.encrypt(db.connectionString) : db.connectionString;
     const row = await this.prisma.managedDatabase.upsert({
       where: { projectId: db.projectId },
       create: {
@@ -20,9 +29,9 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
         projectId: db.projectId,
         type: db.type,
         username: db.username,
-        password: db.password,
+        password,
         databaseName: db.databaseName,
-        connectionString: db.connectionString,
+        connectionString,
         envVarKey: db.envVarKey,
         persistent: db.persistent,
         createdAt: db.createdAt,
@@ -30,9 +39,9 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
       update: {
         type: db.type,
         username: db.username,
-        password: db.password,
+        password,
         databaseName: db.databaseName,
-        connectionString: db.connectionString,
+        connectionString,
         envVarKey: db.envVarKey,
         persistent: db.persistent,
       },
@@ -61,9 +70,9 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
       row.projectId,
       row.type as DatabaseType,
       row.username,
-      row.password,
+      row.password ? this.cipher.decrypt(row.password) : row.password,
       row.databaseName,
-      row.connectionString,
+      row.connectionString ? this.cipher.decrypt(row.connectionString) : row.connectionString,
       row.envVarKey,
       row.persistent,
       row.createdAt,

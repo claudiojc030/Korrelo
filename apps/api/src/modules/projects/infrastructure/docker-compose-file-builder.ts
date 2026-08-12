@@ -50,7 +50,12 @@ export class DockerComposeFileBuilder {
       "    environment:",
       `      NODE_OPTIONS: "${nodeOptions}"`,
       "    ports:",
-      `      - "${config.hostPort}:${config.containerPort}"`,
+      // Bind só em 127.0.0.1: sem isso o Docker publica em 0.0.0.0 e
+      // IGNORA o ufw pra portas mapeadas via -p/ports (o Docker mexe direto
+      // no iptables, por fora do ufw) - a porta ficava acessível pela
+      // internet direto por IP:porta, em HTTP puro, pulando o Nginx (TLS +
+      // domínio). O Nginx já fala com o container por 127.0.0.1 mesmo.
+      `      - "127.0.0.1:${config.hostPort}:${config.containerPort}"`,
       "    volumes:",
       `      - ${UPLOADS_VOLUME}:${UPLOADS_MOUNT_PATH}`,
       `    mem_limit: ${config.memoryLimitMb}m`,
@@ -68,7 +73,7 @@ export class DockerComposeFileBuilder {
       "    environment:",
       `      NODE_OPTIONS: "${nodeOptions}"`,
       "    ports:",
-      `      - "${config.staging.hostPort}:${config.containerPort}"`,
+      `      - "127.0.0.1:${config.staging.hostPort}:${config.containerPort}"`,
       "    volumes:",
       `      - ${UPLOADS_VOLUME}:${UPLOADS_MOUNT_PATH}`,
       `    mem_limit: ${config.memoryLimitMb}m`,
