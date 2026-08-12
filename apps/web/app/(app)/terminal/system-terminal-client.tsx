@@ -75,12 +75,21 @@ export function SystemTerminalClient() {
       // shell em vez de colar - xterm não intercepta paste do teclado sozinho,
       // só via clique direito (que exige o menu nativo do navegador aparecer).
       term.attachCustomKeyEventHandler((event) => {
-        const isPasteShortcut = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v";
-        if (isPasteShortcut && event.type === "keydown") {
+        const key = event.key.toLowerCase();
+        const withModifier = event.ctrlKey || event.metaKey;
+        if (withModifier && key === "v" && event.type === "keydown") {
           navigator.clipboard
             ?.readText()
             .then((text) => socket?.emit("input", text))
             .catch(() => {});
+          return false;
+        }
+        // Igual Windows Terminal/iTerm: com texto selecionado, Ctrl+C copia
+        // em vez de mandar SIGINT - sem selecionar nada, continua cancelando
+        // o comando rodando normalmente (comportamento padrão de terminal).
+        if (withModifier && key === "c" && event.type === "keydown" && term?.hasSelection()) {
+          const selection = term.getSelection();
+          navigator.clipboard?.writeText(selection).catch(() => {});
           return false;
         }
         return true;
