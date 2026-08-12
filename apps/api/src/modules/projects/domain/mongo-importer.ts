@@ -11,6 +11,13 @@ export interface MongoImportStatus {
 }
 
 export interface MongoImporter {
-  start(projectId: string, containerName: string, sourceUri: string, targetUri: string): Promise<{ alreadyRunning: boolean }>;
+  start(
+    projectId: string,
+    containerName: string,
+    sourceUri: string,
+    targetUri: string,
+    sourceDb: string,
+    targetDb: string,
+  ): Promise<{ alreadyRunning: boolean }>;
   getStatus(projectId: string): Promise<MongoImportStatus>;
 }

@@ -19,6 +19,8 @@ fail() {
 : "${SOURCE_URI:?}"
 : "${TARGET_URI:?}"
 : "${CONTAINER_NAME:?}"
+: "${SOURCE_DB:?}"
+: "${TARGET_DB:?}"
 
 DUMP_FILE="/tmp/korrelo-mongo-import-$$.archive"
 
@@ -28,11 +30,18 @@ if ! command -v mongodump &> /dev/null || ! command -v mongorestore &> /dev/null
 fi
 
 step 15 "Exportando dados do MongoDB de origem"
-mongodump --uri="$SOURCE_URI" --archive="$DUMP_FILE" --quiet \
+# --db limita o dump a UM banco (o da connection string informada). Sem
+# isso, uma connection string sem nome de banco no path baixava o cluster
+# inteiro, e o restore recriava cada banco com o nome ORIGINAL - nunca no
+# banco do projeto de verdade.
+mongodump --uri="$SOURCE_URI" --db="$SOURCE_DB" --archive="$DUMP_FILE" --quiet \
   || fail "Não foi possível conectar ou exportar do MongoDB de origem. Verifique a connection string."
 
 step 70 "Importando dados para o banco do projeto"
-docker exec -i "$CONTAINER_NAME" mongorestore --uri="$TARGET_URI" --archive --drop --quiet < "$DUMP_FILE" \
+# --nsFrom/--nsTo remapeia o banco de origem pro banco do projeto mesmo que
+# tenham nomes diferentes (o dump preserva o nome original de origem).
+docker exec -i "$CONTAINER_NAME" mongorestore --uri="$TARGET_URI" --archive --drop \
+  --nsFrom="$SOURCE_DB.*" --nsTo="$TARGET_DB.*" --quiet < "$DUMP_FILE" \
   || fail "Não foi possível importar os dados para o banco do projeto."
 
 step 95 "Limpando arquivos temporários"

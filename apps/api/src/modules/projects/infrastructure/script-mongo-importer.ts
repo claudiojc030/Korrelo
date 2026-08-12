@@ -34,6 +34,8 @@ export class ScriptMongoImporter implements MongoImporter {
     containerName: string,
     sourceUri: string,
     targetUri: string,
+    sourceDb: string,
+    targetDb: string,
   ): Promise<{ alreadyRunning: boolean }> {
     const current = await this.getStatus(projectId);
     if (current.running) {
@@ -53,7 +55,14 @@ export class ScriptMongoImporter implements MongoImporter {
       cwd: this.repoDir,
       detached: true,
       stdio: ["ignore", out, out],
-      env: { ...process.env, SOURCE_URI: sourceUri, TARGET_URI: targetUri, CONTAINER_NAME: containerName },
+      env: {
+        ...process.env,
+        SOURCE_URI: sourceUri,
+        TARGET_URI: targetUri,
+        CONTAINER_NAME: containerName,
+        SOURCE_DB: sourceDb,
+        TARGET_DB: targetDb,
+      },
     });
     child.unref();
     fs.closeSync(out);

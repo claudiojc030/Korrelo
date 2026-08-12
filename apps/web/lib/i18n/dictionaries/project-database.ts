@@ -132,7 +132,7 @@ export const projectDatabaseEn: ProjectDatabaseDict = {
   importMongoButton: "Import from external MongoDB",
   importMongoModalTitle: "Import from external MongoDB",
   importMongoModalDescription:
-    "Paste the connection string of the MongoDB you want to copy data from (e.g. MongoDB Atlas). Korrelo exports everything from there and imports it into this project's own database.",
+    "Paste the connection string of the MongoDB you want to copy data from (e.g. MongoDB Atlas). Korrelo exports everything from there and imports it into this project's own database. Make sure the connection string includes the database name (the part after the last /), not just the cluster address - Atlas often omits it by default.",
   importMongoSourceLabel: "Source connection string",
   importMongoSourcePlaceholder: "mongodb+srv://user:password@cluster.mongodb.net/mydb",
   importMongoWarning: "This replaces all data currently in this project's database. This can't be undone.",
@@ -208,7 +208,7 @@ export const projectDatabasePt: ProjectDatabaseDict = {
   importMongoButton: "Importar de outro MongoDB",
   importMongoModalTitle: "Importar de outro MongoDB",
   importMongoModalDescription:
-    "Cole a connection string do MongoDB de onde você quer copiar os dados (ex.: MongoDB Atlas). O Korrelo exporta tudo de lá e importa pro banco de dados deste projeto.",
+    "Cole a connection string do MongoDB de onde você quer copiar os dados (ex.: MongoDB Atlas). O Korrelo exporta tudo de lá e importa pro banco de dados deste projeto. Confirme que a connection string inclui o nome do banco (a parte depois da última /), não só o endereço do cluster - o Atlas costuma omitir isso por padrão.",
   importMongoSourceLabel: "Connection string de origem",
   importMongoSourcePlaceholder: "mongodb+srv://usuario:senha@cluster.mongodb.net/meubanco",
   importMongoWarning: "Isso substitui todos os dados que já estão no banco deste projeto. Não pode ser desfeito.",

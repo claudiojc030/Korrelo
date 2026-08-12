@@ -38,8 +38,33 @@ export class StartMongoImportUseCase {
       throw new BadRequestException(apiError("SOURCE_URI_REQUIRED", "Informe a connection string do MongoDB de origem."));
     }
 
+    // Sem o nome do banco na connection string, o mongodump baixa TODOS os
+    // bancos do cluster de origem, e o mongorestore recria cada um com o
+    // nome ORIGINAL dentro do container - ignorando completamente o banco
+    // do projeto. Os dados pareciam importar com sucesso mas nunca apareciam
+    // (foram parar num banco "solto" que ninguém lê).
+    const sourceDb = this.extractDbName(trimmedSourceUri);
+    if (!sourceDb) {
+      throw new BadRequestException(
+        apiError(
+          "SOURCE_DATABASE_NAME_REQUIRED",
+          "A connection string precisa incluir o nome do banco (ex.: .../meubanco?...), não só o cluster.",
+        ),
+      );
+    }
+
     const containerName = `${project.containerName}-db-1`;
     const targetUri = `mongodb://${database.username}:${database.password}@localhost:27017/${database.databaseName}?authSource=admin`;
-    return this.mongoImporter.start(projectId, containerName, trimmedSourceUri, targetUri);
+    return this.mongoImporter.start(projectId, containerName, trimmedSourceUri, targetUri, sourceDb, database.databaseName as string);
+  }
+
+  private extractDbName(uri: string): string | null {
+    try {
+      const pathname = new URL(uri).pathname;
+      const dbName = pathname.replace(/^\//, "").trim();
+      return dbName || null;
+    } catch {
+      return null;
+    }
   }
 }
