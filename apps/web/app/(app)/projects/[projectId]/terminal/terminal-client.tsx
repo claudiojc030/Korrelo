@@ -3,8 +3,7 @@
 import { useEffect, useRef } from "react";
 import "@xterm/xterm/css/xterm.css";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+import { SOCKET_URL } from "../../../../../lib/api-client";
 
 export function TerminalClient({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
@@ -48,7 +47,7 @@ export function TerminalClient({ projectId }: { projectId: string }) {
 
       // withCredentials manda o cookie httpOnly de auth junto do handshake,
       // o gateway valida lendo esse cookie (ver terminal.gateway.ts).
-      socket = io(`${API_URL}/terminal`, { withCredentials: true });
+      socket = io(`${SOCKET_URL}/terminal`, { withCredentials: true });
       socket.on("connect", () => {
         socket?.emit("start", { projectId });
         socket?.emit("resize", { cols: term!.cols, rows: term!.rows });
