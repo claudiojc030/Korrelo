@@ -7,6 +7,6 @@ export class ListDeployRecordsUseCase {
   constructor(@Inject(DEPLOY_RECORD_REPOSITORY) private readonly repository: DeployRecordRepository) {}
 
   execute(projectId: string, offset = 0): Promise<DeployRecord[]> {
-    return this.repository.findByProjectId(projectId, 20, offset);
+    return this.repository.findByProjectId(projectId, 5, offset);
   }
 }

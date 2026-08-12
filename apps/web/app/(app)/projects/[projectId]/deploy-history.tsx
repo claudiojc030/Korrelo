@@ -19,7 +19,7 @@ interface DeployRecord {
 
 const POLL_MS = 2000;
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 5;
 
 export function DeployHistory({ projectId, initialRecords }: { projectId: string; initialRecords: DeployRecord[] }) {
   const { t } = useTranslation();

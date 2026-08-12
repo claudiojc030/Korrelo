@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Logger, Param, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { ListProjectsUseCase } from "../application/list-projects.use-case";
 import { GetProjectUseCase } from "../application/get-project.use-case";
@@ -36,6 +36,8 @@ import { AttachDomainDto } from "./attach-domain.dto";
 
 @Controller("projects")
 export class ProjectsController {
+  private readonly logger = new Logger(ProjectsController.name);
+
   constructor(
     private readonly listProjects: ListProjectsUseCase,
     private readonly getProject: GetProjectUseCase,
@@ -183,8 +185,18 @@ export class ProjectsController {
   }
 
   @Post(":id/deploy")
+  @HttpCode(202)
   deploy(@Param("id") id: string) {
-    return this.deployProject.execute(id, "manual");
+    // Não espera o deploy inteiro terminar (pode levar minutos: build + health
+    // check + promote) - sem isso, a requisição do botão "Deploy" ficava
+    // pendurada o tempo todo, e a UI só sabia atualizar QUALQUER COISA (logs,
+    // status) depois que a resposta chegasse no fim. O deploy em si já grava
+    // seu progresso via DeployRecord, e o polling do histórico (2s enquanto
+    // houver um registro "running") já cobre o resto - mesmo padrão do
+    // auto-deploy por webhook (ver HandleGithubPushWebhookUseCase).
+    this.deployProject.execute(id, "manual").catch((error) => {
+      this.logger.error(`Deploy manual falhou pro projeto ${id}: ${error}`);
+    });
   }
 
   @Get(":id/deploys")

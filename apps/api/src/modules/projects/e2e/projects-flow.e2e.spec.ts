@@ -68,6 +68,35 @@ class FakeHealthChecker {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// /deploy agora não espera o deploy inteiro terminar antes de responder (ver
+// ProjectsController.deploy) - mesma mudança que corrigiu a UI ficar "parada"
+// durante deploys de minutos. Os fakes daqui resolvem quase instantaneamente,
+// mas ainda passam por alguns ticks do event loop antes do DeployRecord virar
+// "success"/"failed", então os testes esperam isso em vez de checar a
+// resposta do POST direto.
+async function waitForDeployResult(
+  app: INestApplication,
+  projectId: string,
+  cookie: string,
+): Promise<{ status: string; log: string; errorMessage: string | null }> {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const res = await request(app.getHttpServer())
+      .get(`/projects/${projectId}/deploys`)
+      .set("Cookie", [cookie]);
+    const latest = res.body[0];
+    if (latest && latest.status !== "running") {
+      return latest;
+    }
+    await sleep(20);
+  }
+  throw new Error(`Deploy do projeto ${projectId} não terminou a tempo`);
+}
+
 class FakeLogReader {
   async readLogs(containerName: string): Promise<string> {
     return `fake logs for ${containerName}`;
@@ -416,21 +445,22 @@ describe("Projects flow (e2e)", () => {
       const res = await request(app.getHttpServer())
         .post(`/projects/${projectId}/deploy`)
         .set("Cookie", [authCookieHeader()]);
+      expect(res.status).toBe(202);
 
-      expect(res.status).toBe(201);
-      expect(res.body.status).toBe("running");
-      expect(res.body.containerName).toEqual(expect.any(String));
-      expect(res.body.assignedPort).toBe(39999);
+      const deployResult = await waitForDeployResult(app, projectId, authCookieHeader());
+      expect(deployResult.status).toBe("success");
+
+      const project = await request(app.getHttpServer())
+        .get(`/projects/${projectId}`)
+        .set("Cookie", [authCookieHeader()]);
+      expect(project.body.status).toBe("running");
+      expect(project.body.containerName).toEqual(expect.any(String));
+      expect(project.body.assignedPort).toBe(39999);
 
       const projectWorkspace = path.join(tempWorkspaceDir, projectId);
       expect(fs.existsSync(path.join(projectWorkspace, "Dockerfile"))).toBe(true);
       expect(fs.existsSync(path.join(projectWorkspace, "docker-compose.korrelo.yml"))).toBe(true);
       expect(fs.existsSync(path.join(projectWorkspace, ".env.korrelo"))).toBe(true);
-
-      const deploys = await request(app.getHttpServer())
-        .get(`/projects/${projectId}/deploys`)
-        .set("Cookie", [authCookieHeader()]);
-      expect(deploys.body[0].status).toBe("success");
     });
 
     it("faz rollback quando o orchestrator falha ao subir o container", async () => {
@@ -450,9 +480,12 @@ describe("Projects flow (e2e)", () => {
       const res = await request(app.getHttpServer())
         .post(`/projects/${failingId}/deploy`)
         .set("Cookie", [authCookieHeader()]);
+      expect(res.status).toBe(202);
+
+      const deployResult = await waitForDeployResult(app, failingId, authCookieHeader());
       fakeOrchestrator.shouldFailDeploy = false;
 
-      expect(res.status).toBe(500);
+      expect(deployResult.status).toBe("failed");
       // Falhou já na instância de teste: limpa ela (removeStaging), mas nunca
       // chega a promover pra produção (promote não é chamado).
       expect(fakeOrchestrator.removeStagingCalls.length).toBe(removeStagingCallsBefore + 1);
@@ -462,11 +495,6 @@ describe("Projects flow (e2e)", () => {
         .get(`/projects/${failingId}`)
         .set("Cookie", [authCookieHeader()]);
       expect(project.body.status).toBe("failed");
-
-      const deploys = await request(app.getHttpServer())
-        .get(`/projects/${failingId}/deploys`)
-        .set("Cookie", [authCookieHeader()]);
-      expect(deploys.body[0].status).toBe("failed");
     });
 
     it("faz rollback quando o health check nunca fica saudável", async () => {
@@ -484,9 +512,12 @@ describe("Projects flow (e2e)", () => {
       const res = await request(app.getHttpServer())
         .post(`/projects/${unhealthyId}/deploy`)
         .set("Cookie", [authCookieHeader()]);
+      expect(res.status).toBe(202);
+
+      const deployResult = await waitForDeployResult(app, unhealthyId, authCookieHeader());
       fakeHealthChecker.shouldBeHealthy = true;
 
-      expect(res.status).toBe(500);
+      expect(deployResult.status).toBe("failed");
 
       const project = await request(app.getHttpServer())
         .get(`/projects/${unhealthyId}`)
