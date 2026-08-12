@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, use } from "react";
-import { Loader2, RefreshCw, ScrollText } from "lucide-react";
+import { Loader2, RefreshCw, ScrollText, Search } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../../../lib/api-error";
@@ -19,6 +19,10 @@ export default function LogsPage(props: { params: Promise<{ projectId: string }>
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
+  // Filtro é só de exibição: nunca descarta nada do log de verdade, só
+  // esconde da tela as linhas que não batem enquanto o filtro está ativo -
+  // limpar a busca mostra tudo de novo.
+  const [filter, setFilter] = useState("");
   const scrollRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => {
@@ -68,6 +72,13 @@ export default function LogsPage(props: { params: Promise<{ projectId: string }>
     }
   }, [content, autoScroll]);
 
+  const filteredContent = filter.trim()
+    ? content
+        ?.split("\n")
+        .filter((line) => line.toLowerCase().includes(filter.trim().toLowerCase()))
+        .join("\n") ?? null
+    : content;
+
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-8 py-6">
       <div className="mb-3 flex items-center justify-between">
@@ -92,6 +103,16 @@ export default function LogsPage(props: { params: Promise<{ projectId: string }>
         </div>
 
         <div className="flex items-center gap-3">
+          <div className="relative">
+            <Search size={12} strokeWidth={1.75} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              type="text"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={t.projectLogs.filterPlaceholder}
+              className="w-48 rounded-md border border-border-subtle bg-surface py-1.5 pl-7 pr-2 text-[12.5px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+          </div>
           <label className="flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
             <input
               type="checkbox"
@@ -115,7 +136,7 @@ export default function LogsPage(props: { params: Promise<{ projectId: string }>
           ref={scrollRef}
           className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded-xl border border-border-subtle bg-surface p-4 font-mono text-[12px] leading-relaxed text-foreground"
         >
-          {content || t.projectLogs.noLogsYet}
+          {filteredContent || (filter.trim() ? t.projectLogs.noMatchingLogs : t.projectLogs.noLogsYet)}
         </pre>
       )}
 

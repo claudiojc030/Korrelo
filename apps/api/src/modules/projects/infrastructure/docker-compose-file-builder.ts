@@ -169,11 +169,6 @@ export class DockerComposeFileBuilder {
         "  db:",
         "    image: mongo:7",
         "    restart: unless-stopped",
-        // Sem --quiet o mongod loga toda conexão aceita/encerrada e evento de
-        // autenticação - com o driver do app reconectando com frequência, isso
-        // enche a aba de Logs com centenas de linhas irrelevantes pra quem só
-        // quer ver se o banco está de pé.
-        '    command: ["mongod", "--quiet"]',
         "    environment:",
         `      MONGO_INITDB_ROOT_USERNAME: ${db.username}`,
         `      MONGO_INITDB_ROOT_PASSWORD: ${db.password}`,
