@@ -51,6 +51,12 @@ else
   echo "Node já instalado: $(node -v)"
 fi
 
+# node-pty (terminal com PTY de verdade) não tem prebuild pra toda plataforma
+# e cai pra compilar na hora do npm install - sem isso o self-update quebra
+# com "not found: make".
+log "Instalando build-essential (compilar dependências nativas como node-pty)"
+sudo apt-get install -y build-essential
+
 log "Instalando Docker"
 if ! command -v docker &> /dev/null; then
   curl -fsSL https://get.docker.com | sudo sh
