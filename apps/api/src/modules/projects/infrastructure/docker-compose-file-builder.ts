@@ -19,12 +19,25 @@ const LOGGING_BLOCK = [
 const UPLOADS_VOLUME = "uploads-data";
 const UPLOADS_MOUNT_PATH = "/app/uploads";
 
+// O V8 (motor JS do Node) decide sozinho o tamanho do heap baseado na RAM
+// TOTAL da VPS que ele enxerga, não no mem_limit do container (o cgroup não
+// é considerado pra esse cálculo por padrão). Numa VPS de 3.8GB com container
+// limitado a 512MB, o V8 podia tentar crescer o heap além do que o container
+// realmente tem, morrendo com "heap out of memory" antes do Docker sequer
+// precisar matar o processo por estourar o cgroup. Reserva ~25% pra
+// stack/buffers/módulos nativos fora do heap do V8.
+function nodeOptionsFor(memoryLimitMb: number): string {
+  const heapMb = Math.max(128, Math.round(memoryLimitMb * 0.75));
+  return `--max-old-space-size=${heapMb}`;
+}
+
 @Injectable()
 export class DockerComposeFileBuilder {
   build(config: DeployConfig): string {
     const volumeNames = [UPLOADS_VOLUME];
 
     const dependsOnDb = config.database ? ["    depends_on:", "      - db"] : [];
+    const nodeOptions = nodeOptionsFor(config.memoryLimitMb);
 
     const lines = [
       "services:",
@@ -34,6 +47,8 @@ export class DockerComposeFileBuilder {
       "    restart: unless-stopped",
       "    env_file:",
       `      - ${ENV_FILENAME}`,
+      "    environment:",
+      `      NODE_OPTIONS: "${nodeOptions}"`,
       "    ports:",
       `      - "${config.hostPort}:${config.containerPort}"`,
       "    volumes:",
@@ -50,6 +65,8 @@ export class DockerComposeFileBuilder {
       "    restart: unless-stopped",
       "    env_file:",
       `      - ${ENV_FILENAME}`,
+      "    environment:",
+      `      NODE_OPTIONS: "${nodeOptions}"`,
       "    ports:",
       `      - "${config.staging.hostPort}:${config.containerPort}"`,
       "    volumes:",
