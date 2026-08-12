@@ -53,6 +53,12 @@ export function SystemTerminalClient() {
       socket.on("output", (data: string) => term?.write(data));
       socket.on("error", (message: string) => term?.write(`\r\n\x1b[31m${t.projectTerminal.connectionErrorPrefix} ${message}\x1b[0m\r\n`));
       socket.on("exit", () => term?.write(`\r\n\x1b[33m${t.projectTerminal.sessionEnded}\x1b[0m\r\n`));
+      // Sem isso, uma falha no handshake do WebSocket (API fora do ar, CORS,
+      // timeout) deixava a tela preta e muda pra sempre - nenhum dos handlers
+      // acima dispara se a conexão nem chega a ser estabelecida.
+      socket.on("connect_error", (error: Error) => {
+        term?.write(`\r\n\x1b[31m${t.projectTerminal.connectionErrorPrefix} ${error.message}\x1b[0m\r\n`);
+      });
 
       term.onData((data) => socket?.emit("input", data));
 
