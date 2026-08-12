@@ -129,7 +129,7 @@ export class DeployProjectUseCase {
     const containerName = sanitizeContainerName(project.id, project.name);
     const stagingContainerName = `${containerName}-staging`;
     const stagingHostPort = await this.portAllocator.allocate(hostPort + 1);
-    const memoryLimitMb = this.resourceBudget.getContainerMemoryLimitMb();
+    const memoryLimitMb = await this.resourceBudget.getContainerMemoryLimitMb(project.id);
 
     const managedDatabase = await this.managedDatabaseRepository.findByProjectId(project.id);
     // Bancos "custom" são externos (o usuário cola a própria connection string),
