@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Cpu, MemoryStick, HardDrive, Clock, Box, Server, ExternalLink, SquareTerminal } from "lucide-react";
-import { CONTAINER_MEMORY_LIMIT_MB, type ContainerSummary, type Project, type SystemMetrics } from "@korrelo/shared-types";
+import type { ContainerSummary, Project, SystemMetrics } from "@korrelo/shared-types";
 import { MetricTile } from "./metric-tile";
 import { MetricsHistoryChart } from "./metrics-history-chart";
 import { OnboardingChecklist } from "./onboarding-checklist";
@@ -115,7 +115,6 @@ export default async function DashboardPage() {
   const runningProjects = projects.filter((p) => p.status === "running" && p.containerName);
   const projectContainerNames = new Set(runningProjects.map((p) => p.containerName));
   const otherContainers = metrics?.containers.filter((c) => !projectContainerNames.has(c.name)) ?? [];
-  const memLimitMb = metrics ? CONTAINER_MEMORY_LIMIT_MB[metrics.tier] : null;
 
   function findContainer(name: string | null): ContainerSummary | undefined {
     return metrics?.containers.find((c) => c.name === name);
@@ -201,8 +200,8 @@ export default async function DashboardPage() {
                 {runningProjects.map((project, i) => {
                   const container = findContainer(project.containerName);
                   const memPercent =
-                    container?.memUsageMb != null && memLimitMb
-                      ? Math.min(Math.round((container.memUsageMb / memLimitMb) * 100), 100)
+                    container?.memUsageMb != null && container?.memLimitMb
+                      ? Math.min(Math.round((container.memUsageMb / container.memLimitMb) * 100), 100)
                       : null;
 
                   return (
@@ -251,7 +250,9 @@ export default async function DashboardPage() {
                         <div className="flex w-28 flex-col items-end gap-1">
                           <span>
                             {container?.memUsageMb != null ? `${container.memUsageMb} MB` : "-"}
-                            {memLimitMb && <span className="text-muted-foreground/60"> / {memLimitMb} MB</span>}
+                            {container?.memLimitMb != null && (
+                              <span className="text-muted-foreground/60"> / {container.memLimitMb} MB</span>
+                            )}
                           </span>
                           {memPercent !== null && (
                             <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
