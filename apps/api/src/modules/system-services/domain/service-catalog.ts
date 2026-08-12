@@ -115,6 +115,16 @@ export const SERVICE_CATALOG: SystemServiceDefinition[] = [
     riskNote: "Nenhum impacto esperado.",
   },
   {
+    id: "sysstat",
+    unitName: "sysstat",
+    displayName: "sysstat (sar/sadc - histórico de CPU/disco do sistema)",
+    category: "Diagnóstico",
+    description:
+      "Coleta amostras de CPU, memória e disco a cada 10 minutos pra manter histórico consultável via `sar`. O Korrelo já tem seu próprio coletor de métricas (o gráfico do dashboard), então é redundante - e a coleta em si gera picos periódicos de CPU visíveis no gráfico.",
+    riskLevel: "baixo",
+    riskNote: "Nenhum impacto no Korrelo nem nos projetos hospedados. Só perde o histórico do `sar`, que quase ninguém usa numa VPS gerenciada pelo Korrelo.",
+  },
+  {
     id: "vm-guest-agent",
     unitName: "qemu-guest-agent",
     displayName: "QEMU/VMware Guest Agent",
