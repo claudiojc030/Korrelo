@@ -40,6 +40,8 @@ export interface ProjectDetailDict {
   diskSpaceUnavailable: string;
   deployHistory: string;
   noDeploysYet: string;
+  loadMoreDeploys: string;
+  loadingMoreDeploys: string;
   deployStatusSuccess: string;
   deployStatusFailed: string;
   deployStatusInProgress: string;
@@ -103,6 +105,8 @@ export const projectDetailEn: ProjectDetailDict = {
   diskSpaceUnavailable: "free space unavailable",
   deployHistory: "Deploy history",
   noDeploysYet: "No deploys recorded yet.",
+  loadMoreDeploys: "Load more",
+  loadingMoreDeploys: "Loading...",
   deployStatusSuccess: "Success",
   deployStatusFailed: "Failed",
   deployStatusInProgress: "In progress",
@@ -166,6 +170,8 @@ export const projectDetailPt: ProjectDetailDict = {
   diskSpaceUnavailable: "espaço livre indisponível",
   deployHistory: "Histórico de deploys",
   noDeploysYet: "Nenhum deploy registrado ainda.",
+  loadMoreDeploys: "Carregar mais",
+  loadingMoreDeploys: "Carregando...",
   deployStatusSuccess: "Sucesso",
   deployStatusFailed: "Falhou",
   deployStatusInProgress: "Em andamento",

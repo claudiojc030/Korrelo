@@ -19,9 +19,15 @@ interface DeployRecord {
 
 const POLL_MS = 2000;
 
+const PAGE_SIZE = 20;
+
 export function DeployHistory({ projectId, initialRecords }: { projectId: string; initialRecords: DeployRecord[] }) {
   const { t } = useTranslation();
   const [records, setRecords] = useState(initialRecords);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Só existe "mais" pra carregar se a última página veio cheia - uma página
+  // parcial (ou vazia) já é o fim do histórico, sem precisar de outra ida ao servidor pra descobrir isso.
+  const [hasMore, setHasMore] = useState(initialRecords.length >= PAGE_SIZE);
 
   useEffect(() => {
     if (!records.some((r) => r.status === "running")) return;
@@ -29,10 +35,27 @@ export function DeployHistory({ projectId, initialRecords }: { projectId: string
     // visibilidade de andamento igual o histórico do Render.
     const interval = setInterval(async () => {
       const res = await apiFetch(`/projects/${projectId}/deploys`);
-      if (res.ok) setRecords(await res.json());
+      if (res.ok) {
+        const latest = (await res.json()) as DeployRecord[];
+        setRecords((prev) => [...latest, ...prev.slice(latest.length)]);
+      }
     }, POLL_MS);
     return () => clearInterval(interval);
   }, [projectId, records]);
+
+  async function loadMore() {
+    setLoadingMore(true);
+    try {
+      const res = await apiFetch(`/projects/${projectId}/deploys?offset=${records.length}`);
+      if (res.ok) {
+        const older = (await res.json()) as DeployRecord[];
+        setRecords((prev) => [...prev, ...older]);
+        setHasMore(older.length >= PAGE_SIZE);
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   if (records.length === 0) {
     return <p className="text-[13px] text-muted-foreground">{t.projectDetail.noDeploysYet}</p>;
@@ -91,6 +114,16 @@ export function DeployHistory({ projectId, initialRecords }: { projectId: string
           </details>
         );
       })}
+      {hasMore && (
+        <button
+          type="button"
+          onClick={loadMore}
+          disabled={loadingMore}
+          className="w-full px-4 py-2.5 text-[12.5px] font-medium text-muted-foreground hover:text-foreground disabled:opacity-50"
+        >
+          {loadingMore ? t.projectDetail.loadingMoreDeploys : t.projectDetail.loadMoreDeploys}
+        </button>
+      )}
     </div>
   );
 }

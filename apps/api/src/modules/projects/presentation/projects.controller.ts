@@ -188,8 +188,8 @@ export class ProjectsController {
   }
 
   @Get(":id/deploys")
-  getDeploys(@Param("id") id: string) {
-    return this.listDeployRecords.execute(id);
+  getDeploys(@Param("id") id: string, @Query("offset") offset?: string) {
+    return this.listDeployRecords.execute(id, offset ? Number(offset) : 0);
   }
 
   @Delete(":id")

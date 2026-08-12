@@ -7,10 +7,11 @@ import type { DeployRecordRepository } from "../domain/deploy-record.repository"
 export class PrismaDeployRecordRepository implements DeployRecordRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findByProjectId(projectId: string, limit: number): Promise<DeployRecord[]> {
+  async findByProjectId(projectId: string, limit: number, offset = 0): Promise<DeployRecord[]> {
     const rows = await this.prisma.deployRecord.findMany({
       where: { projectId },
       orderBy: { startedAt: "desc" },
+      skip: offset,
       take: limit,
     });
     return rows.map(this.toDomain);

@@ -6,7 +6,7 @@ import type { DeployRecord } from "../domain/deploy-record.entity";
 export class ListDeployRecordsUseCase {
   constructor(@Inject(DEPLOY_RECORD_REPOSITORY) private readonly repository: DeployRecordRepository) {}
 
-  execute(projectId: string): Promise<DeployRecord[]> {
-    return this.repository.findByProjectId(projectId, 20);
+  execute(projectId: string, offset = 0): Promise<DeployRecord[]> {
+    return this.repository.findByProjectId(projectId, 20, offset);
   }
 }
