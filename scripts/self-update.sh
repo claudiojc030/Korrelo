@@ -10,6 +10,14 @@ set -uo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
+# Esse script é spawnado como filho do processo da API (pm2), que roda com
+# NODE_OPTIONS=--max-old-space-size=192 pro Korrelo não competir por RAM com
+# os projetos hospedados. Herdado aqui, esse teto mata o tsc/nest build (que
+# precisa de bem mais heap pra compilar), travando o self-update com
+# "heap out of memory". Build é processo curto e único, sem motivo pra ficar
+# limitado ao teto pensado pro servidor de produção rodando o tempo todo.
+unset NODE_OPTIONS
+
 step() {
   # Formato consumido pelo ScriptSelfUpdater ao parsear o log: percentual e
   # rótulo legível, um por linha, sempre a versão mais recente é a que vale.
