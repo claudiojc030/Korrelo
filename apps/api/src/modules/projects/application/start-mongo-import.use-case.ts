@@ -54,7 +54,11 @@ export class StartMongoImportUseCase {
     }
 
     const containerName = `${project.containerName}-db-1`;
-    const targetUri = `mongodb://${database.username}:${database.password}@localhost:27017/${database.databaseName}?authSource=admin`;
+    // Sem nome de banco na URI de propósito: com --nsFrom/--nsTo (usados pro
+    // remapeamento no mongo-import.sh), o mongorestore trata um banco no path
+    // da URI como modo legado de banco único e restaura 0 documentos, ignorando
+    // o remapeamento por completo. authSource=admin já basta pra autenticar.
+    const targetUri = `mongodb://${database.username}:${database.password}@localhost:27017/?authSource=admin`;
     return this.mongoImporter.start(projectId, containerName, trimmedSourceUri, targetUri, sourceDb, database.databaseName as string);
   }
 
