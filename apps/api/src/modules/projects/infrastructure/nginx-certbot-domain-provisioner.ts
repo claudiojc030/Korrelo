@@ -31,6 +31,12 @@ function buildServerBlock(domain: string, port: number): string {
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
+    # HSTS: depois da primeira visita em HTTPS, o navegador do visitante nunca
+    # mais tenta HTTP puro pra esse domínio de novo (nem se um proxy de
+    # operadora de celular tentar interceptar a conexão HTTP antes do redirect
+    # pro HTTPS acontecer). O certbot clona esse location pro bloco 443 que
+    # ele mesmo cria, então o header vale pra ambos.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
   }
 }
 `;
