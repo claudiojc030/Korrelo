@@ -36,7 +36,12 @@ function buildServerBlock(domain: string, port: number): string {
     # operadora de celular tentar interceptar a conexão HTTP antes do redirect
     # pro HTTPS acontecer). O certbot clona esse location pro bloco 443 que
     # ele mesmo cria, então o header vale pra ambos.
-    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # SEM includeSubDomains: só existe certificado/vhost pro domínio exato -
+    # com includeSubDomains, o navegador passa a exigir HTTPS válido também
+    # pra "www.<domínio>" (ou qualquer outro subdomínio), que não tem nem
+    # certificado nem configuração nenhuma, travando o acesso com um erro de
+    # HSTS sem nenhum jeito de contornar pelo navegador.
+    add_header Strict-Transport-Security "max-age=31536000" always;
   }
 }
 `;
