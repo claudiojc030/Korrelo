@@ -63,6 +63,11 @@ export interface ProjectDetailDict {
   domainAliasPlaceholder: string;
   addDomainAlias: string;
   removeDomainAlias: string;
+  domainHelpTitle: string;
+  domainHelpStep1: string;
+  domainHelpStep2: string;
+  domainHelpStep3: string;
+  domainHelpStep4: string;
   unknownError: string;
   domainStatusNone: string;
   domainStatusPending: string;
@@ -132,6 +137,11 @@ export const projectDetailEn: ProjectDetailDict = {
   domainAliasPlaceholder: "www.myapp.com",
   addDomainAlias: "Add",
   removeDomainAlias: "Remove domain",
+  domainHelpTitle: "How to link a domain",
+  domainHelpStep1: "Buy/own a domain at any registrar (Registro.br, GoDaddy, Cloudflare, etc).",
+  domainHelpStep2: "In the registrar's DNS settings, create an A record pointing to this VPS's IP:",
+  domainHelpStep3: "Wait a few minutes for DNS propagation (can take up to a few hours).",
+  domainHelpStep4: "Paste the domain in the field on the left and click Attach. Korrelo issues the TLS certificate automatically once DNS resolves here.",
   unknownError: "Unknown error",
   domainStatusNone: "-",
   domainStatusPending: "Issuing certificate...",
@@ -201,6 +211,11 @@ export const projectDetailPt: ProjectDetailDict = {
   domainAliasPlaceholder: "www.meuapp.com",
   addDomainAlias: "Adicionar",
   removeDomainAlias: "Remover domínio",
+  domainHelpTitle: "Como vincular um domínio",
+  domainHelpStep1: "Compre/tenha um domínio em qualquer registrador (Registro.br, GoDaddy, Cloudflare, etc).",
+  domainHelpStep2: "Nas configurações de DNS do registrador, crie um registro do tipo A apontando pro IP desta VPS:",
+  domainHelpStep3: "Espera alguns minutos pra propagar (pode levar até algumas horas).",
+  domainHelpStep4: "Cola o domínio no campo ao lado e clica em Anexar. O Korrelo emite o certificado TLS sozinho assim que o DNS resolver pra cá.",
   unknownError: "Erro desconhecido",
   domainStatusNone: "-",
   domainStatusPending: "Emitindo certificado...",

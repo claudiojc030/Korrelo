@@ -1,4 +1,4 @@
-import { ExternalLink, GitBranch, Cpu, MemoryStick, HardDrive, History } from "lucide-react";
+import { ExternalLink, GitBranch, Cpu, MemoryStick, HardDrive, History, Globe } from "lucide-react";
 import type { DetectedStack, Project, SystemMetrics } from "@korrelo/shared-types";
 import { authHeaderServer } from "../../../../lib/auth-cookie-server";
 import { getRequestHostServer } from "../../../../lib/get-request-host-server";
@@ -181,6 +181,28 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
           domainSslStatus={project.domainSslStatus}
           initialAliases={domainAliases}
         />
+
+        <div className="rounded-xl border border-border-subtle bg-surface p-4">
+          <h2 className="mb-2 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+            <Globe size={14} strokeWidth={1.75} />
+            {t.projectDetail.domainHelpTitle}
+          </h2>
+          <ol className="flex flex-col gap-2.5 text-[12.5px] text-muted-foreground">
+            <li>
+              <span className="font-medium text-foreground">1.</span> {t.projectDetail.domainHelpStep1}
+            </li>
+            <li>
+              <span className="font-medium text-foreground">2.</span> {t.projectDetail.domainHelpStep2}{" "}
+              <code className="rounded bg-background px-1.5 py-0.5 font-mono text-accent">{host.split(":")[0]}</code>
+            </li>
+            <li>
+              <span className="font-medium text-foreground">3.</span> {t.projectDetail.domainHelpStep3}
+            </li>
+            <li>
+              <span className="font-medium text-foreground">4.</span> {t.projectDetail.domainHelpStep4}
+            </li>
+          </ol>
+        </div>
       </div>
 
       <h2 className="mb-2.5 mt-6 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
