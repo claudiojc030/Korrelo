@@ -365,7 +365,11 @@ NGINX_DEFAULT_SITE=/etc/nginx/sites-available/korrelo-default
 sudo tee "$NGINX_DEFAULT_SITE" > /dev/null <<'NGINXCONF'
 server {
   listen 80 default_server;
-  server_name _;
+  # NUNCA "server_name _;" (casa qualquer Host, inclusive domínio de projeto
+  # que por algum motivo perdeu o vhost próprio - nesse caso o certo é dar
+  # erro alto, não silenciosamente mostrar o painel do Korrelo pro domínio de
+  # outra pessoa). Só responde pelo IP puro, do jeito que o admin acessa direto.
+  server_name __KORRELO_PUBLIC_IP__;
 
   location /socket.io/ {
     proxy_pass http://127.0.0.1:3001/socket.io/;
@@ -392,6 +396,9 @@ server {
   }
 }
 NGINXCONF
+# Heredoc é quoted (protege os $host/$scheme/etc do nginx de expansão do bash),
+# então o IP entra depois, com sed, em vez de interpolado direto no heredoc.
+sudo sed -i "s/__KORRELO_PUBLIC_IP__/${PUBLIC_IP}/" "$NGINX_DEFAULT_SITE"
 sudo ln -sf "$NGINX_DEFAULT_SITE" /etc/nginx/sites-enabled/korrelo-default
 [ -f /etc/nginx/sites-enabled/default ] && sudo rm /etc/nginx/sites-enabled/default
 sudo nginx -t
