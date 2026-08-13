@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Globe, Loader2 } from "lucide-react";
+import { Globe, Loader2, X } from "lucide-react";
 import type { DomainSslStatus } from "@korrelo/shared-types";
 import { apiFetch } from "../../../../lib/api-client";
 import { useTranslation } from "../../../../lib/i18n/locale-provider";
@@ -13,11 +13,13 @@ export function DomainCard({
   isDeployed,
   customDomain,
   domainSslStatus,
+  initialAliases,
 }: {
   projectId: string;
   isDeployed: boolean;
   customDomain: string | null;
   domainSslStatus: DomainSslStatus;
+  initialAliases: string[];
 }) {
   const router = useRouter();
   const { t } = useTranslation();
@@ -65,6 +67,49 @@ export function DomainCard({
     }
   }
 
+  const [aliases, setAliases] = useState(initialAliases);
+  const [aliasInput, setAliasInput] = useState("");
+  const [addingAlias, setAddingAlias] = useState(false);
+  const [removingAlias, setRemovingAlias] = useState<string | null>(null);
+  const [aliasError, setAliasError] = useState<string | null>(null);
+
+  async function handleAddAlias(event: React.FormEvent) {
+    event.preventDefault();
+    setAddingAlias(true);
+    setAliasError(null);
+    try {
+      const res = await apiFetch(`/projects/${projectId}/domain/aliases`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ domain: aliasInput }),
+      });
+      const body: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(translateApiError(t, body, t.projectDetail.attachFailedError));
+      }
+      setAliases(body as string[]);
+      setAliasInput("");
+    } catch (err) {
+      setAliasError(err instanceof Error ? err.message : t.projectDetail.unknownError);
+    } finally {
+      setAddingAlias(false);
+    }
+  }
+
+  async function handleRemoveAlias(alias: string) {
+    setRemovingAlias(alias);
+    try {
+      const res = await apiFetch(`/projects/${projectId}/domain/aliases/${encodeURIComponent(alias)}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setAliases((await res.json()) as string[]);
+      }
+    } finally {
+      setRemovingAlias(null);
+    }
+  }
+
   const status = STATUS_LABEL[domainSslStatus];
 
   return (
@@ -101,6 +146,46 @@ export function DomainCard({
             {removing && <Loader2 size={14} className="animate-spin" />}
             {t.projectDetail.removeDomain}
           </button>
+
+          <div className="mt-4 border-t border-border-subtle pt-3">
+            <p className="mb-2 text-[12.5px] font-medium text-muted-foreground">{t.projectDetail.domainAliasesTitle}</p>
+            {aliases.length > 0 && (
+              <ul className="mb-2 flex flex-col gap-1.5">
+                {aliases.map((alias) => (
+                  <li key={alias} className="flex items-center justify-between gap-2 text-[13px]">
+                    <a href={`https://${alias}`} target="_blank" rel="noreferrer" className="text-accent hover:opacity-85">
+                      {alias}
+                    </a>
+                    <button
+                      onClick={() => handleRemoveAlias(alias)}
+                      disabled={removingAlias === alias}
+                      className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                      aria-label={t.projectDetail.removeDomainAlias}
+                    >
+                      {removingAlias === alias ? <Loader2 size={13} className="animate-spin" /> : <X size={13} strokeWidth={1.75} />}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <form onSubmit={handleAddAlias} className="flex gap-2">
+              <input
+                value={aliasInput}
+                onChange={(e) => setAliasInput(e.target.value)}
+                placeholder={t.projectDetail.domainAliasPlaceholder}
+                className="min-w-0 flex-1 rounded-md border border-border-subtle bg-transparent px-3 py-1.5 font-mono text-[12.5px] text-foreground outline-none focus:border-accent"
+              />
+              <button
+                type="submit"
+                disabled={addingAlias || !aliasInput.trim()}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border-subtle px-3 py-1.5 text-[12.5px] font-medium text-foreground transition-opacity hover:opacity-85 disabled:opacity-50"
+              >
+                {addingAlias && <Loader2 size={13} className="animate-spin" />}
+                {t.projectDetail.addDomainAlias}
+              </button>
+            </form>
+            {aliasError && <p className="mt-1.5 text-[12px] text-destructive">{aliasError}</p>}
+          </div>
         </>
       ) : (
         <form onSubmit={handleAttach} className="mt-2 flex flex-col gap-2">

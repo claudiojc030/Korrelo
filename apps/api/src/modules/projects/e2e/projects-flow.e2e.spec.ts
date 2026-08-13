@@ -104,13 +104,17 @@ class FakeLogReader {
 }
 
 class FakeDomainProvisioner {
-  attachCalls: { domain: string; port: number; adminEmail: string }[] = [];
-  detachCalls: { domain: string }[] = [];
-  async attach(domain: string, port: number, adminEmail: string): Promise<void> {
-    this.attachCalls.push({ domain, port, adminEmail });
+  attachCalls: { domains: string[]; port: number }[] = [];
+  detachCalls: { domains: string[] }[] = [];
+  updateServerNamesCalls: { domains: string[] }[] = [];
+  async attach(domains: string[], port: number): Promise<void> {
+    this.attachCalls.push({ domains, port });
   }
-  async detach(domain: string): Promise<void> {
-    this.detachCalls.push({ domain });
+  async detach(domains: string[]): Promise<void> {
+    this.detachCalls.push({ domains });
+  }
+  async updateServerNames(domains: string[]): Promise<void> {
+    this.updateServerNamesCalls.push({ domains });
   }
 }
 
@@ -547,6 +551,38 @@ describe("Projects flow (e2e)", () => {
         .set("Cookie", [authCookieHeader()]);
       expect(detach.status).toBe(200);
       expect(fakeDomainProvisioner.detachCalls).toHaveLength(1);
+    });
+
+    it("adiciona e remove um alias de domínio (ex.: www) sobre o domínio principal", async () => {
+      await request(app.getHttpServer())
+        .post(`/projects/${projectId}/domain`)
+        .set("Cookie", [authCookieHeader()])
+        .send({ domain: "meuapp.exemplo.com" });
+
+      const add = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/domain/aliases`)
+        .set("Cookie", [authCookieHeader()])
+        .send({ domain: "www.meuapp.exemplo.com" });
+      expect(add.status).toBe(201);
+      expect(add.body).toEqual(["www.meuapp.exemplo.com"]);
+      const lastAttach = fakeDomainProvisioner.attachCalls.at(-1);
+      expect(lastAttach?.domains).toEqual(["meuapp.exemplo.com", "www.meuapp.exemplo.com"]);
+
+      const list = await request(app.getHttpServer())
+        .get(`/projects/${projectId}/domain/aliases`)
+        .set("Cookie", [authCookieHeader()]);
+      expect(list.body).toEqual(["www.meuapp.exemplo.com"]);
+
+      const remove = await request(app.getHttpServer())
+        .delete(`/projects/${projectId}/domain/aliases/www.meuapp.exemplo.com`)
+        .set("Cookie", [authCookieHeader()]);
+      expect(remove.status).toBe(200);
+      expect(remove.body).toEqual([]);
+      expect(fakeDomainProvisioner.updateServerNamesCalls.at(-1)?.domains).toEqual(["meuapp.exemplo.com"]);
+
+      await request(app.getHttpServer())
+        .delete(`/projects/${projectId}/domain`)
+        .set("Cookie", [authCookieHeader()]);
     });
 
     it("navega o banco de dados de um projeto implantado (via DATABASE_QUERY_RUNNER fake)", async () => {

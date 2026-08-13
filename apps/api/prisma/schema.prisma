@@ -27,6 +27,19 @@ model Project {
   managedDatabase  ManagedDatabase?
   cronJobs         CronJob[]
   deployRecords    DeployRecord[]
+  domainAliases    ProjectDomainAlias[]
+}
+
+// Hostnames extras que servem o MESMO projeto (mesma porta), no mesmo
+// certificado do domínio principal (ex.: www.exemplo.com apontando pro mesmo
+// lugar que exemplo.com). Domínio principal continua em Project.customDomain -
+// essa tabela só existe pros ALÉM do principal.
+model ProjectDomainAlias {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  domain    String   @unique
+  createdAt DateTime @default(now())
 }
 
 model DeployRecord {

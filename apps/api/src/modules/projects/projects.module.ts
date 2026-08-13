@@ -23,6 +23,9 @@ import { UpdateProjectSettingsUseCase } from "./application/update-project-setti
 import { GetProjectLogsUseCase } from "./application/get-project-logs.use-case";
 import { AttachDomainUseCase } from "./application/attach-domain.use-case";
 import { DetachDomainUseCase } from "./application/detach-domain.use-case";
+import { AddDomainAliasUseCase } from "./application/add-domain-alias.use-case";
+import { RemoveDomainAliasUseCase } from "./application/remove-domain-alias.use-case";
+import { ListDomainAliasesUseCase } from "./application/list-domain-aliases.use-case";
 import { ListDeployRecordsUseCase } from "./application/list-deploy-records.use-case";
 import { ListDatabaseTablesUseCase } from "./application/list-database-tables.use-case";
 import { RunDatabaseQueryUseCase } from "./application/run-database-query.use-case";
@@ -43,6 +46,7 @@ import { WriteProjectFileUseCase } from "./application/write-project-file.use-ca
 import { PrismaProjectRepository } from "./infrastructure/prisma-project.repository";
 import { PrismaEnvVarRepository } from "./infrastructure/prisma-env-var.repository";
 import { PrismaManagedDatabaseRepository } from "./infrastructure/prisma-managed-database.repository";
+import { PrismaProjectDomainAliasRepository } from "./infrastructure/prisma-project-domain-alias.repository";
 import { PrismaDeployRecordRepository } from "./infrastructure/prisma-deploy-record.repository";
 import { FileBasedStackDetector } from "./infrastructure/file-based-stack-detector";
 import { SimpleGitRepositoryCloner } from "./infrastructure/simple-git-repository-cloner";
@@ -73,6 +77,7 @@ import { EnvVarCipher } from "../../infrastructure/crypto/env-var-cipher";
 import { PROJECT_REPOSITORY } from "./domain/project.repository";
 import { ENV_VAR_REPOSITORY } from "./domain/env-var.repository";
 import { MANAGED_DATABASE_REPOSITORY } from "./domain/managed-database.repository";
+import { PROJECT_DOMAIN_ALIAS_REPOSITORY } from "./domain/project-domain-alias.repository";
 import { STACK_DETECTOR } from "./domain/stack-detector";
 import { REPOSITORY_CLONER } from "./domain/repository-cloner";
 import { DOCKERFILE_GENERATOR } from "./domain/dockerfile-generator";
@@ -121,6 +126,9 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     GetProjectLogsUseCase,
     AttachDomainUseCase,
     DetachDomainUseCase,
+    AddDomainAliasUseCase,
+    RemoveDomainAliasUseCase,
+    ListDomainAliasesUseCase,
     ListDeployRecordsUseCase,
     ListDatabaseTablesUseCase,
     RunDatabaseQueryUseCase,
@@ -144,6 +152,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: PROJECT_REPOSITORY, useClass: PrismaProjectRepository },
     { provide: ENV_VAR_REPOSITORY, useClass: PrismaEnvVarRepository },
     { provide: MANAGED_DATABASE_REPOSITORY, useClass: PrismaManagedDatabaseRepository },
+    { provide: PROJECT_DOMAIN_ALIAS_REPOSITORY, useClass: PrismaProjectDomainAliasRepository },
     { provide: STACK_DETECTOR, useClass: FileBasedStackDetector },
     { provide: REPOSITORY_CLONER, useClass: SimpleGitRepositoryCloner },
     { provide: DOCKERFILE_GENERATOR, useClass: DockerfileGeneratorRegistry },

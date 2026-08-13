@@ -6,17 +6,17 @@ import {
   PROJECT_DOMAIN_ALIAS_REPOSITORY,
   type ProjectDomainAliasRepository,
 } from "../domain/project-domain-alias.repository";
-import type { Project } from "../domain/project.entity";
 
 @Injectable()
-export class DetachDomainUseCase {
+export class RemoveDomainAliasUseCase {
   constructor(
     @Inject(PROJECT_REPOSITORY) private readonly projectRepository: ProjectRepository,
     @Inject(DOMAIN_PROVISIONER) private readonly domainProvisioner: DomainProvisioner,
     @Inject(PROJECT_DOMAIN_ALIAS_REPOSITORY) private readonly aliasRepository: ProjectDomainAliasRepository,
   ) {}
 
-  async execute(projectId: string): Promise<Project> {
+  async execute(projectId: string, domain: string): Promise<string[]> {
+    const normalizedDomain = domain.trim().toLowerCase();
     const project = await this.projectRepository.findById(projectId);
     if (!project) {
       throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
@@ -25,12 +25,15 @@ export class DetachDomainUseCase {
       throw new BadRequestException(apiError("DOMAIN_NOT_ATTACHED", "Este projeto não tem domínio anexado."));
     }
 
-    // Aliases (ex.: www) não fazem sentido sem o domínio principal por trás -
-    // remover o principal derruba todo mundo, não só ele.
-    await this.domainProvisioner.detach([project.customDomain]);
-    await this.aliasRepository.removeAllByProjectId(projectId);
+    const existingAliases = await this.aliasRepository.findByProjectId(projectId);
+    if (!existingAliases.includes(normalizedDomain)) {
+      throw new BadRequestException(apiError("DOMAIN_ALIAS_NOT_FOUND", `"${normalizedDomain}" não é um domínio extra deste projeto.`));
+    }
 
-    const updated = project.withDomain(null, "none");
-    return this.projectRepository.save(updated);
+    const remainingAliases = existingAliases.filter((alias) => alias !== normalizedDomain);
+    await this.domainProvisioner.updateServerNames([project.customDomain, ...remainingAliases]);
+    await this.aliasRepository.remove(projectId, normalizedDomain);
+
+    return remainingAliases;
   }
 }

@@ -17,6 +17,9 @@ import { UpdateProjectSettingsUseCase } from "../application/update-project-sett
 import { GetProjectLogsUseCase, type LogTarget } from "../application/get-project-logs.use-case";
 import { AttachDomainUseCase } from "../application/attach-domain.use-case";
 import { DetachDomainUseCase } from "../application/detach-domain.use-case";
+import { AddDomainAliasUseCase } from "../application/add-domain-alias.use-case";
+import { RemoveDomainAliasUseCase } from "../application/remove-domain-alias.use-case";
+import { ListDomainAliasesUseCase } from "../application/list-domain-aliases.use-case";
 import { ListDeployRecordsUseCase } from "../application/list-deploy-records.use-case";
 import { ListDatabaseTablesUseCase } from "../application/list-database-tables.use-case";
 import { RunDatabaseQueryUseCase } from "../application/run-database-query.use-case";
@@ -56,6 +59,9 @@ export class ProjectsController {
     private readonly getProjectLogs: GetProjectLogsUseCase,
     private readonly attachDomain: AttachDomainUseCase,
     private readonly detachDomain: DetachDomainUseCase,
+    private readonly addDomainAlias: AddDomainAliasUseCase,
+    private readonly removeDomainAlias: RemoveDomainAliasUseCase,
+    private readonly listDomainAliases: ListDomainAliasesUseCase,
     private readonly listDeployRecords: ListDeployRecordsUseCase,
     private readonly listDatabaseTables: ListDatabaseTablesUseCase,
     private readonly runDatabaseQuery: RunDatabaseQueryUseCase,
@@ -116,6 +122,21 @@ export class ProjectsController {
   @Delete(":id/domain")
   detachDomainEndpoint(@Param("id") id: string) {
     return this.detachDomain.execute(id);
+  }
+
+  @Get(":id/domain/aliases")
+  getDomainAliases(@Param("id") id: string) {
+    return this.listDomainAliases.execute(id);
+  }
+
+  @Post(":id/domain/aliases")
+  addDomainAliasEndpoint(@Param("id") id: string, @Body() dto: AttachDomainDto) {
+    return this.addDomainAlias.execute(id, dto.domain);
+  }
+
+  @Delete(":id/domain/aliases/:domain")
+  removeDomainAliasEndpoint(@Param("id") id: string, @Param("domain") domain: string) {
+    return this.removeDomainAlias.execute(id, domain);
   }
 
   @Get(":id/database")

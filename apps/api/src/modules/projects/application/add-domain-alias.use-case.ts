@@ -6,27 +6,25 @@ import {
   PROJECT_DOMAIN_ALIAS_REPOSITORY,
   type ProjectDomainAliasRepository,
 } from "../domain/project-domain-alias.repository";
-import type { Project } from "../domain/project.entity";
 
-// Hostname simples (sem protocolo, sem porta, sem wildcard). É o mesmo formato
-// que entra no "-d" do certbot e no "server_name" do nginx.
+// Mesmo formato usado pro domínio principal (ver AttachDomainUseCase).
 const DOMAIN_PATTERN = /^(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))+$/;
 
 @Injectable()
-export class AttachDomainUseCase {
+export class AddDomainAliasUseCase {
   constructor(
     @Inject(PROJECT_REPOSITORY) private readonly projectRepository: ProjectRepository,
     @Inject(DOMAIN_PROVISIONER) private readonly domainProvisioner: DomainProvisioner,
     @Inject(PROJECT_DOMAIN_ALIAS_REPOSITORY) private readonly aliasRepository: ProjectDomainAliasRepository,
   ) {}
 
-  async execute(projectId: string, domain: string): Promise<Project> {
+  async execute(projectId: string, domain: string): Promise<string[]> {
     const normalizedDomain = domain.trim().toLowerCase();
     if (!DOMAIN_PATTERN.test(normalizedDomain)) {
       throw new BadRequestException(
         apiError(
           "INVALID_DOMAIN",
-          `Domínio inválido: "${domain}". Use um hostname real, ex: meuapp.com (sem http://, sem porta).`,
+          `Domínio inválido: "${domain}". Use um hostname real, ex: www.meuapp.com (sem http://, sem porta).`,
         ),
       );
     }
@@ -35,20 +33,17 @@ export class AttachDomainUseCase {
     if (!project) {
       throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
-    if (!project.assignedPort) {
+    if (!project.customDomain || !project.assignedPort) {
       throw new BadRequestException(
         apiError(
-          "PROJECT_NOT_DEPLOYED",
-          "Este projeto ainda não foi implantado. Faça o deploy antes de anexar um domínio.",
+          "DOMAIN_NOT_ATTACHED",
+          "Anexe o domínio principal antes de adicionar domínios extras (ex.: www).",
         ),
       );
     }
-    if (project.customDomain) {
+    if (normalizedDomain === project.customDomain) {
       throw new ConflictException(
-        apiError(
-          "DOMAIN_ALREADY_ATTACHED",
-          "Este projeto já tem um domínio anexado. Remova antes de trocar por outro.",
-        ),
+        apiError("DOMAIN_ALREADY_IN_USE", `"${normalizedDomain}" já é o domínio principal deste projeto.`),
       );
     }
 
@@ -60,9 +55,11 @@ export class AttachDomainUseCase {
       );
     }
 
-    await this.domainProvisioner.attach([normalizedDomain], project.assignedPort);
+    const existingAliases = await this.aliasRepository.findByProjectId(projectId);
+    const allDomains = [project.customDomain, ...existingAliases, normalizedDomain];
+    await this.domainProvisioner.attach(allDomains, project.assignedPort);
+    await this.aliasRepository.add(projectId, normalizedDomain);
 
-    const updated = project.withDomain(normalizedDomain, "active");
-    return this.projectRepository.save(updated);
+    return [...existingAliases, normalizedDomain];
   }
 }

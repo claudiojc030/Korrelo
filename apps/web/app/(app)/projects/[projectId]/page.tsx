@@ -63,6 +63,19 @@ async function getDeployRecords(projectId: string): Promise<DeployRecord[]> {
   }
 }
 
+async function getDomainAliases(projectId: string): Promise<string[]> {
+  try {
+    const res = await fetch(`${API_URL}/projects/${projectId}/domain/aliases`, {
+      cache: "no-store",
+      headers: await authHeaderServer(),
+    });
+    if (!res.ok) return [];
+    return res.json();
+  } catch {
+    return [];
+  }
+}
+
 async function getSystemMetrics(): Promise<SystemMetrics | null> {
   try {
     const res = await fetch(`${API_URL}/monitoring/system`, {
@@ -98,11 +111,12 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
   const params = await props.params;
   const t = getDictionary(await getLocaleServer());
   const host = await getRequestHostServer();
-  const [project, diskUsageMb, metrics, deployRecords] = await Promise.all([
+  const [project, diskUsageMb, metrics, deployRecords, domainAliases] = await Promise.all([
     getProject(params.projectId),
     getDiskUsage(params.projectId),
     getSystemMetrics(),
     getDeployRecords(params.projectId),
+    getDomainAliases(params.projectId),
   ]);
 
   if (!project) return null;
@@ -165,6 +179,7 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
           isDeployed={project.assignedPort != null}
           customDomain={project.customDomain}
           domainSslStatus={project.domainSslStatus}
+          initialAliases={domainAliases}
         />
       </div>
 

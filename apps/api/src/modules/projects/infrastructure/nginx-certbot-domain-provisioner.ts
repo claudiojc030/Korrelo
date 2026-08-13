@@ -14,14 +14,17 @@ const execFile = promisify(execFileCallback);
 // sudo (regra restrita em /etc/sudoers.d/korrelo, ver scripts/setup-vps.sh).
 const SITES_DIR = process.env.NGINX_SITES_DIR ?? "/etc/nginx/korrelo-sites";
 
-function siteFilePath(domain: string): string {
-  return path.join(SITES_DIR, `${domain}.conf`);
+// Um arquivo por projeto, nomeado pelo domínio PRINCIPAL (domains[0]) - os
+// demais (aliases, ex.: www) entram no mesmo arquivo, no mesmo server_name,
+// compartilhando o mesmo certificado.
+function siteFilePath(primaryDomain: string): string {
+  return path.join(SITES_DIR, `${primaryDomain}.conf`);
 }
 
-function buildServerBlock(domain: string, port: number): string {
+function buildServerBlock(domains: string[], port: number): string {
   return `server {
   listen 80;
-  server_name ${domain};
+  server_name ${domains.join(" ")};
 
   location / {
     proxy_pass http://127.0.0.1:${port};
@@ -36,11 +39,9 @@ function buildServerBlock(domain: string, port: number): string {
     # operadora de celular tentar interceptar a conexão HTTP antes do redirect
     # pro HTTPS acontecer). O certbot clona esse location pro bloco 443 que
     # ele mesmo cria, então o header vale pra ambos.
-    # SEM includeSubDomains: só existe certificado/vhost pro domínio exato -
-    # com includeSubDomains, o navegador passa a exigir HTTPS válido também
-    # pra "www.<domínio>" (ou qualquer outro subdomínio), que não tem nem
-    # certificado nem configuração nenhuma, travando o acesso com um erro de
-    # HSTS sem nenhum jeito de contornar pelo navegador.
+    # SEM includeSubDomains: um subdomínio que não esteja na lista acima (sem
+    # certificado nem configuração) travaria o navegador com um erro de HSTS
+    # sem nenhum jeito de contornar.
     add_header Strict-Transport-Security "max-age=31536000" always;
   }
 }
@@ -51,14 +52,15 @@ function buildServerBlock(domain: string, port: number): string {
 export class NginxCertbotDomainProvisioner implements DomainProvisioner {
   private readonly logger = new Logger(NginxCertbotDomainProvisioner.name);
 
-  async attach(domain: string, port: number): Promise<void> {
+  async attach(domains: string[], port: number): Promise<void> {
+    const primaryDomain = domains[0];
     await fs.mkdir(SITES_DIR, { recursive: true });
-    await fs.writeFile(siteFilePath(domain), buildServerBlock(domain, port), "utf-8");
+    await fs.writeFile(siteFilePath(primaryDomain), buildServerBlock(domains, port), "utf-8");
 
     try {
       await execFile("sudo", ["systemctl", "reload", "nginx"], { timeout: 15_000 });
     } catch (error) {
-      await this.removeSiteFile(domain);
+      await this.removeSiteFile(primaryDomain);
       const message = error instanceof Error ? error.message : String(error);
       throw new InternalServerErrorException(
         apiError("NGINX_RELOAD_FAILED", `nginx recusou a config do domínio: ${message}`),
@@ -67,35 +69,51 @@ export class NginxCertbotDomainProvisioner implements DomainProvisioner {
 
     try {
       // --nginx edita esse mesmo server block pra adicionar o 443 + redirect
-      // automaticamente depois de emitir o certificado. Sem e-mail (o Korrelo
-      // não coleta um de verdade do administrador): --register-unsafely-without-email
-      // é a forma suportada de pular isso, diferente de inventar um endereço
+      // automaticamente depois de emitir o certificado, já cobrindo TODOS os
+      // domínios passados (--expand reaproveita/expande o certificado
+      // existente em vez de criar um separado quando o conjunto de domínios
+      // muda, ex.: adicionar www depois). Sem e-mail (o Korrelo não coleta um
+      // de verdade do administrador): --register-unsafely-without-email é a
+      // forma suportada de pular isso, diferente de inventar um endereço
       // fake tipo "admin@localhost", que o Let's Encrypt passou a rejeitar.
+      const domainArgs = domains.flatMap((domain) => ["-d", domain]);
       await execFile(
         "sudo",
-        ["certbot", "--nginx", "-d", domain, "--register-unsafely-without-email", "--agree-tos", "--redirect", "-n"],
+        ["certbot", "--nginx", ...domainArgs, "--expand", "--register-unsafely-without-email", "--agree-tos", "--redirect", "-n"],
         { timeout: 2 * 60 * 1000 },
       );
     } catch (error) {
-      await this.removeSiteFile(domain);
+      await this.removeSiteFile(primaryDomain);
       await this.reloadNginxIgnoringErrors();
       const message = error instanceof Error ? error.message : String(error);
       throw new InternalServerErrorException(
         apiError(
           "TLS_CERTIFICATE_ISSUANCE_FAILED",
-          `Falha ao emitir certificado TLS pro domínio "${domain}": ${message}`,
+          `Falha ao emitir certificado TLS pro domínio "${primaryDomain}": ${message}`,
         ),
       );
     }
   }
 
-  async detach(domain: string): Promise<void> {
-    await this.removeSiteFile(domain);
+  // Só troca a(s) linha(s) "server_name ...;" mantendo o resto do arquivo
+  // intacto - inclusive o bloco 443 (cert, redirect) que o certbot já escreveu
+  // por cima do nosso template original. Reescrever com o template puro aqui
+  // apagaria esse bloco inteiro.
+  async updateServerNames(domains: string[]): Promise<void> {
+    const filePath = siteFilePath(domains[0]);
+    const current = await fs.readFile(filePath, "utf-8");
+    const updated = current.replace(/server_name\s+[^;]+;/g, `server_name ${domains.join(" ")};`);
+    await fs.writeFile(filePath, updated, "utf-8");
     await execFile("sudo", ["systemctl", "reload", "nginx"], { timeout: 15_000 });
   }
 
-  private async removeSiteFile(domain: string): Promise<void> {
-    await fs.rm(siteFilePath(domain), { force: true });
+  async detach(domains: string[]): Promise<void> {
+    await this.removeSiteFile(domains[0]);
+    await execFile("sudo", ["systemctl", "reload", "nginx"], { timeout: 15_000 });
+  }
+
+  private async removeSiteFile(primaryDomain: string): Promise<void> {
+    await fs.rm(siteFilePath(primaryDomain), { force: true });
   }
 
   private async reloadNginxIgnoringErrors(): Promise<void> {

@@ -59,6 +59,10 @@ export interface ProjectDetailDict {
   domainPlaceholder: string;
   attachDomain: string;
   attachFailedError: string;
+  domainAliasesTitle: string;
+  domainAliasPlaceholder: string;
+  addDomainAlias: string;
+  removeDomainAlias: string;
   unknownError: string;
   domainStatusNone: string;
   domainStatusPending: string;
@@ -124,6 +128,10 @@ export const projectDetailEn: ProjectDetailDict = {
   domainPlaceholder: "myapp.com",
   attachDomain: "Attach",
   attachFailedError: "Failed to attach domain.",
+  domainAliasesTitle: "Extra domains (e.g. www)",
+  domainAliasPlaceholder: "www.myapp.com",
+  addDomainAlias: "Add",
+  removeDomainAlias: "Remove domain",
   unknownError: "Unknown error",
   domainStatusNone: "-",
   domainStatusPending: "Issuing certificate...",
@@ -189,6 +197,10 @@ export const projectDetailPt: ProjectDetailDict = {
   domainPlaceholder: "meuapp.com",
   attachDomain: "Anexar",
   attachFailedError: "Falha ao anexar domínio.",
+  domainAliasesTitle: "Domínios extras (ex.: www)",
+  domainAliasPlaceholder: "www.meuapp.com",
+  addDomainAlias: "Adicionar",
+  removeDomainAlias: "Remover domínio",
   unknownError: "Erro desconhecido",
   domainStatusNone: "-",
   domainStatusPending: "Emitindo certificado...",
