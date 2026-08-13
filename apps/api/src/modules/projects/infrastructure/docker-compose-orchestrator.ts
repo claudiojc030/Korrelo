@@ -58,9 +58,14 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       // a imagem já foi buildada no deployStaging e fica em cache. Esse é o
       // único momento em que a versão em produção troca, então é a única
       // janela de indisponibilidade real (poucos segundos, não o build inteiro).
+      // --force-recreate garante um container NOVO a cada deploy mesmo que o
+      // compose ache que nada mudou (ex.: rebuild produzindo a mesma imagem) -
+      // sem isso o container antigo só seria substituído às vezes, e a aba de
+      // Logs (que lê via `docker logs` do container atual) ficaria com log
+      // misturado de versões diferentes do app.
       const { stdout, stderr } = await execFile(
         "docker",
-        ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "up", "-d", "--build", "--no-deps", "app"],
+        ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "up", "-d", "--build", "--force-recreate", "--no-deps", "app"],
         { cwd: config.projectPath, timeout: 60 * 1000 },
       );
       output = combineOutput(stdout, stderr);
