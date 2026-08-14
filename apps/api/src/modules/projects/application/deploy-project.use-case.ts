@@ -106,66 +106,83 @@ export class DeployProjectUseCase {
     const stack = JSON.parse(project.detectedStack) as DetectedStack;
     const projectPath = getProjectWorkspacePath(project.id);
 
-    // Sem isso o deploy só reconstruía a imagem em cima do código já clonado
-    // no /import, nunca pegando commits novos - webhook e deploy manual
-    // ficavam presos pra sempre na versão importada originalmente.
-    const accessToken = await this.resolveGithubAccessToken();
-    await this.cloner.cloneOrUpdate(project.repoUrl, projectPath, accessToken);
-    const lastCommit = await this.cloner.getLastCommit(projectPath);
-    if (lastCommit) {
-      deployRecord = await this.deployRecordRepository.save(deployRecord.withCommit(lastCommit.hash, lastCommit.message));
+    let containerName: string;
+    let hostPort: number;
+    let stagingHostPort: number;
+    let stagingContainerName: string;
+    let memoryLimitMb: number;
+    let deployConfig: DeployConfig;
+    try {
+      // Sem isso o deploy só reconstruía a imagem em cima do código já clonado
+      // no /import, nunca pegando commits novos - webhook e deploy manual
+      // ficavam presos pra sempre na versão importada originalmente.
+      const accessToken = await this.resolveGithubAccessToken();
+      await this.cloner.cloneOrUpdate(project.repoUrl, projectPath, accessToken);
+      const lastCommit = await this.cloner.getLastCommit(projectPath);
+      if (lastCommit) {
+        deployRecord = await this.deployRecordRepository.save(deployRecord.withCommit(lastCommit.hash, lastCommit.message));
+      }
+
+      const { dockerfile, dockerignore } = this.dockerfileGenerator.generate(stack);
+      await fs.writeFile(path.join(projectPath, "Dockerfile"), dockerfile, "utf-8");
+      await fs.writeFile(path.join(projectPath, ".dockerignore"), dockerignore, "utf-8");
+
+      const containerPort = stack.recommendedPort ?? 3000;
+      // Porta estável entre redeploys: sem isso, cada deploy corria o risco de
+      // cair numa porta diferente (a porta atual do projeto conta como "em uso"
+      // pelo próprio container antigo ainda rodando), quebrando silenciosamente
+      // um domínio personalizado já anexado.
+      hostPort = project.assignedPort ?? (await this.portAllocator.allocate(containerPort));
+      containerName = sanitizeContainerName(project.id, project.name);
+      stagingContainerName = `${containerName}-staging`;
+      stagingHostPort = await this.portAllocator.allocate(hostPort + 1);
+      memoryLimitMb = await this.resourceBudget.getContainerMemoryLimitMb(project.id);
+
+      const managedDatabase = await this.managedDatabaseRepository.findByProjectId(project.id);
+      // Bancos "custom" são externos (o usuário cola a própria connection string),
+      // então o Korrelo nunca sobe container pra eles, só injeta a env var.
+      const managedContainerDatabase =
+        managedDatabase && managedDatabase.type !== "custom" ? managedDatabase : null;
+
+      deployConfig = {
+        projectPath,
+        containerName,
+        hostPort,
+        containerPort,
+        memoryLimitMb,
+        staging: { containerName: stagingContainerName, hostPort: stagingHostPort },
+        database: managedContainerDatabase
+          ? {
+              type: managedContainerDatabase.type as "postgres" | "redis" | "mongodb",
+              username: managedContainerDatabase.username as string,
+              password: managedContainerDatabase.password as string,
+              databaseName: managedContainerDatabase.databaseName as string,
+              // Metade do orçamento do app: bancos gerenciados são um extra, não
+              // podem competir igualmente pela RAM já apertada de uma VPS pequena.
+              memoryLimitMb: Math.round(memoryLimitMb / 2),
+              persistent: managedContainerDatabase.persistent,
+            }
+          : undefined,
+      };
+
+      const composeContent = this.composeFileBuilder.build(deployConfig);
+      await fs.writeFile(path.join(projectPath, COMPOSE_FILENAME), composeContent, "utf-8");
+
+      // O compose sempre referencia esse arquivo via env_file, então precisa existir
+      // mesmo vazio, ou o `docker compose up` falha procurando um arquivo que não está lá.
+      const envVars = await this.envVarRepository.findByProjectId(project.id);
+      const envFileContent = envVars.map((v) => `${v.key}=${v.value}`).join("\n") + "\n";
+      await fs.writeFile(path.join(projectPath, ENV_FILENAME), envFileContent, "utf-8");
+    } catch (error) {
+      // Sem esse catch, qualquer falha aqui (clone, geração de Dockerfile,
+      // alocação de porta) derrubava a exceção direto pro caller sem NUNCA
+      // marcar o DeployRecord como "failed" - ele ficava "Em andamento" pra
+      // sempre na tela, mesmo com o deploy de verdade já morto.
+      await this.repository.save(project.withFailedDeployment());
+      const message = error instanceof Error ? error.message : String(error);
+      await this.deployRecordRepository.save(deployRecord.appendLog(message).withResult("failed", message));
+      throw error;
     }
-
-    const { dockerfile, dockerignore } = this.dockerfileGenerator.generate(stack);
-    await fs.writeFile(path.join(projectPath, "Dockerfile"), dockerfile, "utf-8");
-    await fs.writeFile(path.join(projectPath, ".dockerignore"), dockerignore, "utf-8");
-
-    const containerPort = stack.recommendedPort ?? 3000;
-    // Porta estável entre redeploys: sem isso, cada deploy corria o risco de
-    // cair numa porta diferente (a porta atual do projeto conta como "em uso"
-    // pelo próprio container antigo ainda rodando), quebrando silenciosamente
-    // um domínio personalizado já anexado.
-    const hostPort = project.assignedPort ?? (await this.portAllocator.allocate(containerPort));
-    const containerName = sanitizeContainerName(project.id, project.name);
-    const stagingContainerName = `${containerName}-staging`;
-    const stagingHostPort = await this.portAllocator.allocate(hostPort + 1);
-    const memoryLimitMb = await this.resourceBudget.getContainerMemoryLimitMb(project.id);
-
-    const managedDatabase = await this.managedDatabaseRepository.findByProjectId(project.id);
-    // Bancos "custom" são externos (o usuário cola a própria connection string),
-    // então o Korrelo nunca sobe container pra eles, só injeta a env var.
-    const managedContainerDatabase =
-      managedDatabase && managedDatabase.type !== "custom" ? managedDatabase : null;
-
-    const deployConfig: DeployConfig = {
-      projectPath,
-      containerName,
-      hostPort,
-      containerPort,
-      memoryLimitMb,
-      staging: { containerName: stagingContainerName, hostPort: stagingHostPort },
-      database: managedContainerDatabase
-        ? {
-            type: managedContainerDatabase.type as "postgres" | "redis" | "mongodb",
-            username: managedContainerDatabase.username as string,
-            password: managedContainerDatabase.password as string,
-            databaseName: managedContainerDatabase.databaseName as string,
-            // Metade do orçamento do app: bancos gerenciados são um extra, não
-            // podem competir igualmente pela RAM já apertada de uma VPS pequena.
-            memoryLimitMb: Math.round(memoryLimitMb / 2),
-            persistent: managedContainerDatabase.persistent,
-          }
-        : undefined,
-    };
-
-    const composeContent = this.composeFileBuilder.build(deployConfig);
-    await fs.writeFile(path.join(projectPath, COMPOSE_FILENAME), composeContent, "utf-8");
-
-    // O compose sempre referencia esse arquivo via env_file, então precisa existir
-    // mesmo vazio, ou o `docker compose up` falha procurando um arquivo que não está lá.
-    const envVars = await this.envVarRepository.findByProjectId(project.id);
-    const envFileContent = envVars.map((v) => `${v.key}=${v.value}`).join("\n") + "\n";
-    await fs.writeFile(path.join(projectPath, ENV_FILENAME), envFileContent, "utf-8");
 
     // Fase 1: builda e sobe só a instância de teste. A versão em produção (se
     // já existir) continua no ar o tempo todo, sem ser tocada.

@@ -28,6 +28,13 @@ export class SimpleGitRepositoryCloner implements RepositoryCloner {
       // já que a que estava salva no clone anterior pode ter expirado.
       const git = simpleGit(destPath);
       await git.remote(["set-url", "origin", authenticatedUrl]);
+      // O próprio Korrelo deixa Dockerfile/.dockerignore/docker-compose.korrelo.yml
+      // sem estarem rastreados no repo do projeto (gerados a cada deploy, ver
+      // DeployProjectUseCase) - se um commit novo mexer nesses mesmos caminhos,
+      // o "git pull" recusa por cima de arquivo untracked e o deploy inteiro
+      // falha. Como esses arquivos são sempre regravados do zero logo depois
+      // do pull de qualquer forma, é seguro descartar qualquer untracked antes.
+      await git.raw(["clean", "-fd"]);
       await git.pull();
       return;
     }
