@@ -30,6 +30,11 @@ export class NodeDockerfileGenerator implements DockerfileGenerator {
     const port = stack.recommendedPort ?? 3000;
     const lines = [
       `FROM ${NODE_BASE_IMAGE}`,
+      // node:alpine só traz a libssl que o próprio Node usa internamente, não
+      // o binário "openssl" de linha de comando - apps que chamam openssl via
+      // shell (comum em assinatura de certificado digital, ex.: NFC-e) falham
+      // com "Could not find openssl on your system" sem isso.
+      "RUN apk add --no-cache openssl",
       "WORKDIR /app",
       "COPY . .",
       installCommand(stack.packageManager),
