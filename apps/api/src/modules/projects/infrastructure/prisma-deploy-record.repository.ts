@@ -44,6 +44,14 @@ export class PrismaDeployRecordRepository implements DeployRecordRepository {
     return this.toDomain(row);
   }
 
+  async failAllRunning(message: string): Promise<number> {
+    const result = await this.prisma.deployRecord.updateMany({
+      where: { status: "running" },
+      data: { status: "failed", errorMessage: message, finishedAt: new Date() },
+    });
+    return result.count;
+  }
+
   private toDomain(row: {
     id: string;
     projectId: string;

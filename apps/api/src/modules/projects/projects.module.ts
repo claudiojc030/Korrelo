@@ -73,6 +73,7 @@ import { ScriptMongoImporter } from "./infrastructure/script-mongo-importer";
 import { ScriptDatabaseExporter } from "./infrastructure/script-database-exporter";
 import { CronSchedulerService } from "./infrastructure/cron-scheduler.service";
 import { DiskUsageAlertScheduler } from "./infrastructure/disk-usage-alert.scheduler";
+import { DeployRecoveryService } from "./infrastructure/deploy-recovery.service";
 import { EnvVarCipher } from "../../infrastructure/crypto/env-var-cipher";
 import { PROJECT_REPOSITORY } from "./domain/project.repository";
 import { ENV_VAR_REPOSITORY } from "./domain/env-var.repository";
@@ -109,6 +110,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     RunCronJobNowUseCase,
     CronSchedulerService,
     DiskUsageAlertScheduler,
+    DeployRecoveryService,
     ListProjectsUseCase,
     GetProjectUseCase,
     CreateProjectUseCase,
