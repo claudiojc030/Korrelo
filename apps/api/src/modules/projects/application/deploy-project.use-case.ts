@@ -41,6 +41,15 @@ import { getProjectWorkspacePath } from "../infrastructure/workspace-paths";
 
 const HEALTH_CHECK_TIMEOUT_MS = 30_000;
 
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function sanitizeContainerName(projectId: string, projectName: string): string {
   const slug = projectName.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
   return `korrelo-${slug || "project"}-${projectId.slice(0, 8)}`;
@@ -123,9 +132,19 @@ export class DeployProjectUseCase {
         deployRecord = await this.deployRecordRepository.save(deployRecord.withCommit(lastCommit.hash, lastCommit.message));
       }
 
-      const { dockerfile, dockerignore } = this.dockerfileGenerator.generate(stack);
-      await fs.writeFile(path.join(projectPath, "Dockerfile"), dockerfile, "utf-8");
-      await fs.writeFile(path.join(projectPath, ".dockerignore"), dockerignore, "utf-8");
+      // Se o próprio repositório já traz um Dockerfile versionado, é ele que
+      // vale - sobrescrever sempre com o gerado automaticamente jogava fora
+      // qualquer customização que o dono do projeto tivesse commitado (ex.:
+      // bundle de certificado extra pra assinatura fiscal), a cada deploy,
+      // silenciosamente.
+      const hasCustomDockerfile = await fileExists(path.join(projectPath, "Dockerfile"));
+      if (!hasCustomDockerfile) {
+        const { dockerfile, dockerignore } = this.dockerfileGenerator.generate(stack);
+        await fs.writeFile(path.join(projectPath, "Dockerfile"), dockerfile, "utf-8");
+        if (!(await fileExists(path.join(projectPath, ".dockerignore")))) {
+          await fs.writeFile(path.join(projectPath, ".dockerignore"), dockerignore, "utf-8");
+        }
+      }
 
       const containerPort = stack.recommendedPort ?? 3000;
       // Porta estável entre redeploys: sem isso, cada deploy corria o risco de

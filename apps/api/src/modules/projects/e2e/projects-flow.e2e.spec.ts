@@ -467,6 +467,21 @@ describe("Projects flow (e2e)", () => {
       expect(fs.existsSync(path.join(projectWorkspace, ".env.korrelo"))).toBe(true);
     });
 
+    it("respeita um Dockerfile já versionado no repositório, sem sobrescrever com o gerado", async () => {
+      const projectWorkspace = path.join(tempWorkspaceDir, projectId);
+      const customDockerfile = "FROM node:20-alpine\n# customizado pelo dono do projeto\n";
+      fs.writeFileSync(path.join(projectWorkspace, "Dockerfile"), customDockerfile);
+
+      const res = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/deploy`)
+        .set("Cookie", [authCookieHeader()]);
+      expect(res.status).toBe(202);
+
+      const deployResult = await waitForDeployResult(app, projectId, authCookieHeader());
+      expect(deployResult.status).toBe("success");
+      expect(fs.readFileSync(path.join(projectWorkspace, "Dockerfile"), "utf-8")).toBe(customDockerfile);
+    });
+
     it("faz rollback quando o orchestrator falha ao subir o container", async () => {
       const failing = await request(app.getHttpServer())
         .post("/projects")
