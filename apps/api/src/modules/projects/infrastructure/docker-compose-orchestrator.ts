@@ -105,7 +105,10 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       // e o cache cresce sem limite (visto em produção: 12GB+ de build cache,
       // boa parte do disco da VPS). --keep-storage força um teto real,
       // descartando as entradas mais antigas quando passa disso.
-      await execFile("docker", ["builder", "prune", "-f", "--keep-storage", "2GB"], { timeout: 60 * 1000 });
+      // --keep-storage foi renomeado pra --reserved-space em versões mais
+      // novas do Docker (visto em produção: a flag antiga é aceita mas
+      // ignorada com um aviso de "deprecated", sem realmente limitar nada).
+      await execFile("docker", ["builder", "prune", "-f", "--reserved-space", "2GB"], { timeout: 60 * 1000 });
     } catch (error) {
       this.logger.warn(`Falha ao limpar imagens/cache de build não usados: ${error}`);
     }
