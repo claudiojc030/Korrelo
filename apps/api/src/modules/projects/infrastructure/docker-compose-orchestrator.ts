@@ -98,7 +98,14 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
   private async pruneUnusedBuildArtifacts(): Promise<void> {
     try {
       await execFile("docker", ["image", "prune", "-f"], { timeout: 60 * 1000 });
-      await execFile("docker", ["builder", "prune", "-f"], { timeout: 60 * 1000 });
+      // Sem --keep-storage, "docker builder prune -f" só remove cache que o
+      // BuildKit já considera 100% sem referência - numa VPS que só faz
+      // deploy sequencial (nunca dois builds em paralelo), a cadeia de
+      // camadas de builds antigos fica presa como "em uso" indefinidamente,
+      // e o cache cresce sem limite (visto em produção: 12GB+ de build cache,
+      // boa parte do disco da VPS). --keep-storage força um teto real,
+      // descartando as entradas mais antigas quando passa disso.
+      await execFile("docker", ["builder", "prune", "-f", "--keep-storage", "2GB"], { timeout: 60 * 1000 });
     } catch (error) {
       this.logger.warn(`Falha ao limpar imagens/cache de build não usados: ${error}`);
     }
