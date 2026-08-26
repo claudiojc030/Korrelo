@@ -19,6 +19,15 @@ const LOGGING_BLOCK = [
 const UPLOADS_VOLUME = "uploads-data";
 const UPLOADS_MOUNT_PATH = "/app/uploads";
 
+// Rede externa compartilhada por TODOS os projetos, criada uma vez pelo
+// orchestrator antes do deploy (ver DockerComposeOrchestrator.ensureSharedNetwork).
+// Cada projeto continua com sua rede "default" isolada (pro app falar com o
+// próprio banco), mas "app"/"app_staging" entram também nessa rede compartilhada -
+// assim um projeto consegue chamar outro pelo nome do container, sem precisar
+// expor porta pra internet só pra comunicação interna entre dois projetos do
+// mesmo Korrelo.
+export const SHARED_NETWORK = "korrelo-shared";
+
 // O V8 (motor JS do Node) decide sozinho o tamanho do heap baseado na RAM
 // TOTAL da VPS que ele enxerga, não no mem_limit do container (o cgroup não
 // é considerado pra esse cálculo por padrão). Numa VPS de 3.8GB com container
@@ -62,6 +71,9 @@ export class DockerComposeFileBuilder {
       "    volumes:",
       `      - ${UPLOADS_VOLUME}:${UPLOADS_MOUNT_PATH}`,
       `    mem_limit: ${config.memoryLimitMb}m`,
+      "    networks:",
+      "      - default",
+      `      - ${SHARED_NETWORK}`,
       ...dependsOnDb,
       ...LOGGING_BLOCK,
       // Instância de teste (deploy sem downtime, ver DeployProjectUseCase):
@@ -80,6 +92,9 @@ export class DockerComposeFileBuilder {
       "    volumes:",
       `      - ${UPLOADS_VOLUME}:${UPLOADS_MOUNT_PATH}`,
       `    mem_limit: ${config.memoryLimitMb}m`,
+      "    networks:",
+      "      - default",
+      `      - ${SHARED_NETWORK}`,
       ...dependsOnDb,
       ...LOGGING_BLOCK,
     ];
@@ -94,6 +109,13 @@ export class DockerComposeFileBuilder {
     for (const name of volumeNames) {
       lines.push(`  ${name}:`);
     }
+
+    lines.push(
+      "networks:",
+      "  default:",
+      `  ${SHARED_NETWORK}:`,
+      "    external: true",
+    );
 
     lines.push("");
     return lines.join("\n");

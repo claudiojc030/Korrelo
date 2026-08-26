@@ -8,6 +8,7 @@ import type {
   TeardownConfig,
 } from "../domain/container-orchestrator";
 import { COMPOSE_FILENAME } from "../domain/container-orchestrator";
+import { SHARED_NETWORK } from "./docker-compose-file-builder";
 
 const execFile = promisify(execFileCallback);
 
@@ -29,7 +30,24 @@ function execOutputOf(error: unknown): string {
 export class DockerComposeOrchestrator implements ContainerOrchestrator {
   private readonly logger = new Logger(DockerComposeOrchestrator.name);
 
+  // A rede é "external: true" no compose de todo projeto (ver
+  // docker-compose-file-builder.ts) - se ela não existir ainda no host, o
+  // primeiro "docker compose up" de qualquer projeto falha com "network
+  // korrelo-shared declared as external, but could not be found". Idempotente:
+  // ignora o erro de "já existe" numa corrida entre deploys simultâneos.
+  private async ensureSharedNetwork(): Promise<void> {
+    try {
+      await execFile("docker", ["network", "create", SHARED_NETWORK], { timeout: 15_000 });
+    } catch (error) {
+      const message = execOutputOf(error) || (error instanceof Error ? error.message : String(error));
+      if (!message.includes("already exists")) {
+        this.logger.warn(`Falha ao garantir a rede compartilhada "${SHARED_NETWORK}": ${message}`);
+      }
+    }
+  }
+
   async deployStaging(config: DeployConfig): Promise<string> {
+    await this.ensureSharedNetwork();
     try {
       // execFile (não exec/shell): os argumentos vão direto pro processo, sem
       // passar por interpretação de shell. Isso protege contra command injection
