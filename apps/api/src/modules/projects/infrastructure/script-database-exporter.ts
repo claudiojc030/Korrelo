@@ -46,11 +46,17 @@ export class ScriptDatabaseExporter implements DatabaseExporter {
     }
 
     fs.mkdirSync(this.stateDir, { recursive: true });
-    fs.mkdirSync(this.exportsDir, { recursive: true });
     const logPath = this.logPath(projectId);
     fs.writeFileSync(logPath, "");
 
-    const outFile = this.outFilePath(projectId, options.dbType);
+    let outFile: string;
+    if (options.destDir && options.fileName) {
+      fs.mkdirSync(options.destDir, { recursive: true });
+      outFile = path.join(options.destDir, options.fileName);
+    } else {
+      fs.mkdirSync(this.exportsDir, { recursive: true });
+      outFile = this.outFilePath(projectId, options.dbType);
+    }
     fs.rmSync(outFile, { force: true });
 
     const scriptPath = path.join(this.repoDir, "scripts", "export-database.sh");

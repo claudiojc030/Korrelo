@@ -15,6 +15,12 @@ export interface StartExportOptions {
   username: string | null;
   password: string | null;
   databaseName: string | null;
+  // Quando informados, o dump vai pra destDir/fileName em vez do caminho
+  // padrão em exports/<projectId>.<ext> - usado pelo backup manual (ver
+  // StartProjectBackupUseCase), que precisa do arquivo no mesmo formato de
+  // pasta que o backup diário automático, pra cair na mesma listagem.
+  destDir?: string;
+  fileName?: string;
 }
 
 export interface DatabaseExporter {

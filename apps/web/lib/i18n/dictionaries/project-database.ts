@@ -69,6 +69,24 @@ export interface ProjectDatabaseDict {
   importMongoCloseButton: string;
   importMongoAlreadyRunning: string;
   importMongoDisabledHint: string;
+  backupsTitle: string;
+  backupsSubtitle: string;
+  backupNowButton: string;
+  backupRunningLabel: string;
+  backupNoneYet: string;
+  backupDownloadButton: string;
+  backupRestoreButton: string;
+  backupStartError: string;
+  backupAlreadyRunning: string;
+  restoreConfirmTitle: string;
+  restoreConfirmBody: string;
+  restoreConfirmButton: string;
+  restoreRunningTitle: string;
+  restoreDoneTitle: string;
+  restoreFailedTitle: string;
+  restoreCloseButton: string;
+  restoreLogLabel: string;
+  restoreStartError: string;
 }
 
 export const projectDatabaseEn: ProjectDatabaseDict = {
@@ -145,6 +163,24 @@ export const projectDatabaseEn: ProjectDatabaseDict = {
   importMongoCloseButton: "Close",
   importMongoAlreadyRunning: "An import is already running for this project.",
   importMongoDisabledHint: "The database container hasn't started yet. Deploy the project first.",
+  backupsTitle: "Backups",
+  backupsSubtitle: "Automatic daily backup, plus any you run manually. Kept for 7 days.",
+  backupNowButton: "Back up now",
+  backupRunningLabel: "Backing up...",
+  backupNoneYet: "No backups yet.",
+  backupDownloadButton: "Download",
+  backupRestoreButton: "Restore",
+  backupStartError: "Failed to start the backup.",
+  backupAlreadyRunning: "A backup is already running for this project.",
+  restoreConfirmTitle: "Restore this backup?",
+  restoreConfirmBody: "This replaces all data currently in this project's database with the contents of this backup. This can't be undone.",
+  restoreConfirmButton: "Restore, replacing current data",
+  restoreRunningTitle: "Restoring...",
+  restoreDoneTitle: "Restore complete",
+  restoreFailedTitle: "Restore failed",
+  restoreCloseButton: "Close",
+  restoreLogLabel: "Log",
+  restoreStartError: "Failed to start the restore.",
 };
 
 export const projectDatabasePt: ProjectDatabaseDict = {
@@ -221,4 +257,22 @@ export const projectDatabasePt: ProjectDatabaseDict = {
   importMongoCloseButton: "Fechar",
   importMongoAlreadyRunning: "Já tem uma importação rodando pra este projeto.",
   importMongoDisabledHint: "O container do banco ainda não subiu. Faça o deploy do projeto primeiro.",
+  backupsTitle: "Backups",
+  backupsSubtitle: "Backup diário automático, mais qualquer um que você rodar manualmente. Fica guardado por 7 dias.",
+  backupNowButton: "Fazer backup agora",
+  backupRunningLabel: "Fazendo backup...",
+  backupNoneYet: "Nenhum backup ainda.",
+  backupDownloadButton: "Baixar",
+  backupRestoreButton: "Restaurar",
+  backupStartError: "Falha ao iniciar o backup.",
+  backupAlreadyRunning: "Já tem um backup rodando pra este projeto.",
+  restoreConfirmTitle: "Restaurar esse backup?",
+  restoreConfirmBody: "Isso substitui todos os dados que já estão no banco deste projeto pelo conteúdo desse backup. Não pode ser desfeito.",
+  restoreConfirmButton: "Restaurar, substituindo os dados atuais",
+  restoreRunningTitle: "Restaurando...",
+  restoreDoneTitle: "Restauração concluída",
+  restoreFailedTitle: "Restauração falhou",
+  restoreCloseButton: "Fechar",
+  restoreLogLabel: "Log",
+  restoreStartError: "Falha ao iniciar a restauração.",
 };

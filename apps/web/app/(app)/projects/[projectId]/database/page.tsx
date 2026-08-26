@@ -8,6 +8,7 @@ import { useTranslation } from "../../../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../../../lib/api-error";
 import type { ProjectDatabaseDict } from "../../../../../lib/i18n/dictionaries/project-database";
 import { MongoImportModal } from "./mongo-import-modal";
+import { BackupsPanel } from "./backups-panel";
 import { DeployButton } from "../../deploy-button";
 
 type DatabaseType = "postgres" | "redis" | "mongodb" | "custom";
@@ -324,6 +325,8 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
           onContainerStatusChange={setDbContainerNotRunning}
         />
       )}
+
+      {!isCustom && <BackupsPanel projectId={params.projectId} />}
 
       <div className="mt-5 flex items-center gap-4">
         {db.type === "mongodb" && (

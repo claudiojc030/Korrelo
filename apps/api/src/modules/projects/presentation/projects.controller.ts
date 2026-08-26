@@ -28,6 +28,11 @@ import { GetMongoImportStatusUseCase } from "../application/get-mongo-import-sta
 import { StartDatabaseExportUseCase } from "../application/start-database-export.use-case";
 import { GetDatabaseExportStatusUseCase } from "../application/get-database-export-status.use-case";
 import { GetDatabaseExportFileUseCase } from "../application/get-database-export-file.use-case";
+import { ListProjectBackupsUseCase } from "../application/list-project-backups.use-case";
+import { StartProjectBackupUseCase } from "../application/start-project-backup.use-case";
+import { DownloadProjectBackupUseCase } from "../application/download-project-backup.use-case";
+import { StartDatabaseRestoreUseCase } from "../application/start-database-restore.use-case";
+import { GetDatabaseRestoreStatusUseCase } from "../application/get-database-restore-status.use-case";
 import { CreateProjectDto } from "./create-project.dto";
 import { DetectStackDto } from "./detect-stack.dto";
 import { SetEnvVarsDto } from "./set-env-vars.dto";
@@ -70,6 +75,11 @@ export class ProjectsController {
     private readonly startDatabaseExport: StartDatabaseExportUseCase,
     private readonly getDatabaseExportStatus: GetDatabaseExportStatusUseCase,
     private readonly getDatabaseExportFile: GetDatabaseExportFileUseCase,
+    private readonly listProjectBackups: ListProjectBackupsUseCase,
+    private readonly startProjectBackup: StartProjectBackupUseCase,
+    private readonly downloadProjectBackup: DownloadProjectBackupUseCase,
+    private readonly startDatabaseRestore: StartDatabaseRestoreUseCase,
+    private readonly getDatabaseRestoreStatus: GetDatabaseRestoreStatusUseCase,
   ) {}
 
   @Get()
@@ -193,6 +203,35 @@ export class ProjectsController {
   async downloadDatabaseExportEndpoint(@Param("id") id: string, @Res() res: Response) {
     const { filePath, fileName } = await this.getDatabaseExportFile.execute(id);
     res.download(filePath, fileName);
+  }
+
+  @Get(":id/database/backups")
+  listBackupsEndpoint(@Param("id") id: string) {
+    return this.listProjectBackups.execute(id);
+  }
+
+  @Post(":id/database/backups")
+  startBackupEndpoint(@Param("id") id: string) {
+    // Reaproveita o status do export existente (:id/database/export/status)
+    // pra acompanhar o andamento - é a mesma máquina por baixo (ver
+    // StartProjectBackupUseCase), só muda pra onde o dump vai.
+    return this.startProjectBackup.execute(id);
+  }
+
+  @Get(":id/database/backups/:backupId/download")
+  async downloadBackupEndpoint(@Param("id") id: string, @Param("backupId") backupId: string, @Res() res: Response) {
+    const { filePath, fileName } = await this.downloadProjectBackup.execute(id, backupId);
+    res.download(filePath, fileName);
+  }
+
+  @Post(":id/database/backups/:backupId/restore")
+  startRestoreEndpoint(@Param("id") id: string, @Param("backupId") backupId: string) {
+    return this.startDatabaseRestore.execute(id, backupId);
+  }
+
+  @Get(":id/database/restore/status")
+  getRestoreStatusEndpoint(@Param("id") id: string) {
+    return this.getDatabaseRestoreStatus.execute(id);
   }
 
   @Post(":id/detect-stack")
