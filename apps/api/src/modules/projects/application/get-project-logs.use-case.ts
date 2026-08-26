@@ -5,6 +5,7 @@ import {
   MANAGED_DATABASE_REPOSITORY,
   type ManagedDatabaseRepository,
 } from "../domain/managed-database.repository";
+import { pickPrimaryDatabase } from "../domain/managed-database.entity";
 import { LOG_READER, type LogReader } from "../domain/log-reader";
 
 export type LogTarget = "app" | "database";
@@ -30,8 +31,9 @@ export class GetProjectLogsUseCase {
 
     let containerName = project.containerName;
     if (target === "database") {
-      const managedDatabase = await this.managedDatabaseRepository.findByProjectId(projectId);
-      if (!managedDatabase || managedDatabase.type === "custom") {
+      const all = await this.managedDatabaseRepository.findAllByProjectId(projectId);
+      const managedDatabase = pickPrimaryDatabase(all.filter((db) => db.type !== "custom"));
+      if (!managedDatabase) {
         throw new BadRequestException(
           apiError(
             "NO_MANAGED_DATABASE_LOGS",
@@ -39,7 +41,7 @@ export class GetProjectLogsUseCase {
           ),
         );
       }
-      containerName = `${project.containerName}-db-1`;
+      containerName = `${project.containerName}-${managedDatabase.serviceName}-1`;
     }
 
     const content = await this.logReader.readLogs(containerName, tailLines);

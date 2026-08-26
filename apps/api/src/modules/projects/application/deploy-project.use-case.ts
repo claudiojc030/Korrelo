@@ -157,11 +157,15 @@ export class DeployProjectUseCase {
       stagingHostPort = await this.portAllocator.allocate(hostPort + 1);
       memoryLimitMb = await this.resourceBudget.getContainerMemoryLimitMb(project.id);
 
-      const managedDatabase = await this.managedDatabaseRepository.findByProjectId(project.id);
+      const allManagedDatabases = await this.managedDatabaseRepository.findAllByProjectId(project.id);
       // Bancos "custom" são externos (o usuário cola a própria connection string),
       // então o Korrelo nunca sobe container pra eles, só injeta a env var.
-      const managedContainerDatabase =
-        managedDatabase && managedDatabase.type !== "custom" ? managedDatabase : null;
+      const managedContainerDatabases = allManagedDatabases.filter((db) => db.type !== "custom");
+      // Orçamento dividido entre o app e cada banco gerenciado: com 1 banco só
+      // (o caso mais comum), cada um fica com metade do orçamento total, igual
+      // sempre foi. Com mais bancos no mesmo projeto (ex.: Postgres + Redis),
+      // a fatia de cada um encolhe pra caber todo mundo sem estourar a RAM.
+      const dbMemoryLimitMb = Math.round(memoryLimitMb / (managedContainerDatabases.length + 1));
 
       deployConfig = {
         projectPath,
@@ -170,18 +174,15 @@ export class DeployProjectUseCase {
         containerPort,
         memoryLimitMb,
         staging: { containerName: stagingContainerName, hostPort: stagingHostPort },
-        database: managedContainerDatabase
-          ? {
-              type: managedContainerDatabase.type as "postgres" | "redis" | "mongodb",
-              username: managedContainerDatabase.username as string,
-              password: managedContainerDatabase.password as string,
-              databaseName: managedContainerDatabase.databaseName as string,
-              // Metade do orçamento do app: bancos gerenciados são um extra, não
-              // podem competir igualmente pela RAM já apertada de uma VPS pequena.
-              memoryLimitMb: Math.round(memoryLimitMb / 2),
-              persistent: managedContainerDatabase.persistent,
-            }
-          : undefined,
+        databases: managedContainerDatabases.map((db) => ({
+          type: db.type as "postgres" | "redis" | "mongodb",
+          serviceName: db.serviceName as string,
+          username: db.username as string,
+          password: db.password as string,
+          databaseName: db.databaseName as string,
+          memoryLimitMb: dbMemoryLimitMb,
+          persistent: db.persistent,
+        })),
       };
 
       const composeContent = this.composeFileBuilder.build(deployConfig);

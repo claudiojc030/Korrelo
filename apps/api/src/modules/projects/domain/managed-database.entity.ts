@@ -5,6 +5,11 @@ export class ManagedDatabase {
     public readonly id: string,
     public readonly projectId: string,
     public readonly type: DatabaseType,
+    // Nome do serviço/host dentro do docker-compose do projeto - "db" pro
+    // primeiro banco gerenciado (compatibilidade com todo projeto criado
+    // antes de existir suporte a mais de um), "db-<tipo>" pra qualquer banco
+    // adicional. Null pra "custom" (não sobe container, não tem serviço).
+    public readonly serviceName: string | null,
     public readonly username: string | null,
     public readonly password: string | null,
     public readonly databaseName: string | null,
@@ -20,6 +25,7 @@ export class ManagedDatabase {
   static createManaged(
     projectId: string,
     type: "postgres" | "redis" | "mongodb",
+    serviceName: string,
     password: string,
     persistent = false,
   ): ManagedDatabase {
@@ -27,6 +33,7 @@ export class ManagedDatabase {
       crypto.randomUUID(),
       projectId,
       type,
+      serviceName,
       "korrelo",
       password,
       "korrelo",
@@ -45,10 +52,20 @@ export class ManagedDatabase {
       null,
       null,
       null,
+      null,
       connectionString,
       envVarKey,
       false,
       new Date(),
     );
   }
+}
+
+// Entre vários bancos do mesmo projeto, o "principal" é o mais antigo - é o
+// que features que ainda só lidam com um banco por vez (navegador de dados,
+// logs, backup manual) usam por padrão. Ordenar por createdAt em vez de
+// depender de alguma flag garante que o comportamento de projeto com 1 banco
+// só nunca muda, mesmo depois de virar multi-banco.
+export function pickPrimaryDatabase(databases: ManagedDatabase[]): ManagedDatabase | undefined {
+  return [...databases].sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
 }

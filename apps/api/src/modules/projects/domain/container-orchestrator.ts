@@ -4,6 +4,10 @@ export const ENV_FILENAME = ".env.korrelo";
 
 export interface DatabaseServiceConfig {
   type: "postgres" | "redis" | "mongodb";
+  // Nome do serviço no compose (também o hostname que o app usa pra
+  // conectar) - "db" pro primeiro banco do projeto, "db-<tipo>" pra
+  // qualquer banco adicional. Ver ManagedDatabase.serviceName.
+  serviceName: string;
   username: string;
   password: string;
   databaseName: string;
@@ -23,7 +27,7 @@ export interface DeployConfig {
   hostPort: number;
   containerPort: number;
   memoryLimitMb: number;
-  database?: DatabaseServiceConfig;
+  databases: DatabaseServiceConfig[];
   // Deploy sem downtime: builda e testa numa instância de teste (porta e
   // container à parte) ANTES de mexer na versão em produção. Ver
   // DeployProjectUseCase e deployStaging/promote abaixo.

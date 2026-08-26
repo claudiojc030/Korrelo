@@ -6,6 +6,7 @@ import {
   MANAGED_DATABASE_REPOSITORY,
   type ManagedDatabaseRepository,
 } from "../domain/managed-database.repository";
+import { pickPrimaryDatabase } from "../domain/managed-database.entity";
 import { DATABASE_EXPORTER, type DatabaseExporter } from "../domain/database-exporter";
 import { ProjectBackupsService, backupFileName } from "../infrastructure/project-backups.service";
 
@@ -29,14 +30,15 @@ export class StartProjectBackupUseCase {
       );
     }
 
-    const database = await this.databaseRepository.findByProjectId(projectId);
-    if (!database || database.type === "custom") {
+    const all = await this.databaseRepository.findAllByProjectId(projectId);
+    const database = pickPrimaryDatabase(all.filter((db) => db.type !== "custom"));
+    if (!database) {
       throw new BadRequestException(
         apiError("MANAGED_DATABASE_REQUIRED", "Este projeto não tem um banco gerenciado pelo Korrelo."),
       );
     }
 
-    const containerName = `${project.containerName}-db-1`;
+    const containerName = `${project.containerName}-${database.serviceName}-1`;
     // Mesmo formato de pasta/nome do backup diário automático (timestamp ISO
     // + nome do projeto) - assim esse backup manual cai na mesma listagem,
     // sem precisar de um sistema paralelo só pra ele.
@@ -45,12 +47,12 @@ export class StartProjectBackupUseCase {
 
     return this.databaseExporter.start(projectId, {
       containerName,
-      dbType: database.type,
+      dbType: database.type as "postgres" | "redis" | "mongodb",
       username: database.username,
       password: database.password,
       databaseName: database.databaseName,
       destDir,
-      fileName: backupFileName(project, database.type),
+      fileName: backupFileName(project, database.type as "postgres" | "redis" | "mongodb"),
     });
   }
 }

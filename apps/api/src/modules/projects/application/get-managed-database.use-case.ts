@@ -11,7 +11,7 @@ export class GetManagedDatabaseUseCase {
     @Inject(MANAGED_DATABASE_REPOSITORY) private readonly databaseRepository: ManagedDatabaseRepository,
   ) {}
 
-  execute(projectId: string): Promise<ManagedDatabase | null> {
-    return this.databaseRepository.findByProjectId(projectId);
+  execute(projectId: string): Promise<ManagedDatabase[]> {
+    return this.databaseRepository.findAllByProjectId(projectId);
   }
 }

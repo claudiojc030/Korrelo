@@ -26,8 +26,9 @@ export class StartMongoImportUseCase {
       );
     }
 
-    const database = await this.databaseRepository.findByProjectId(projectId);
-    if (!database || database.type !== "mongodb") {
+    const all = await this.databaseRepository.findAllByProjectId(projectId);
+    const database = all.find((db) => db.type === "mongodb");
+    if (!database) {
       throw new BadRequestException(
         apiError("MONGODB_NOT_PROVISIONED", "Provisione um banco MongoDB neste projeto antes de importar dados externos."),
       );
@@ -53,7 +54,7 @@ export class StartMongoImportUseCase {
       );
     }
 
-    const containerName = `${project.containerName}-db-1`;
+    const containerName = `${project.containerName}-${database.serviceName}-1`;
     // Sem nome de banco na URI de propósito: com --nsFrom/--nsTo (usados pro
     // remapeamento no mongo-import.sh), o mongorestore trata um banco no path
     // da URI como modo legado de banco único e restaura 0 documentos, ignorando

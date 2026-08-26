@@ -5,6 +5,7 @@ import {
   MANAGED_DATABASE_REPOSITORY,
   type ManagedDatabaseRepository,
 } from "../domain/managed-database.repository";
+import { pickPrimaryDatabase } from "../domain/managed-database.entity";
 import { DATABASE_EXPORTER, type DatabaseExporter } from "../domain/database-exporter";
 
 @Injectable()
@@ -26,17 +27,18 @@ export class StartDatabaseExportUseCase {
       );
     }
 
-    const database = await this.databaseRepository.findByProjectId(projectId);
-    if (!database || database.type === "custom") {
+    const all = await this.databaseRepository.findAllByProjectId(projectId);
+    const database = pickPrimaryDatabase(all.filter((db) => db.type !== "custom"));
+    if (!database) {
       throw new BadRequestException(
         apiError("MANAGED_DATABASE_REQUIRED", "Este projeto não tem um banco gerenciado pelo Korrelo pra exportar."),
       );
     }
 
-    const containerName = `${project.containerName}-db-1`;
+    const containerName = `${project.containerName}-${database.serviceName}-1`;
     return this.databaseExporter.start(projectId, {
       containerName,
-      dbType: database.type,
+      dbType: database.type as "postgres" | "redis" | "mongodb",
       username: database.username,
       password: database.password,
       databaseName: database.databaseName,

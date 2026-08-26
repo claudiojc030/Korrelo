@@ -17,6 +17,7 @@ interface ManagedDatabase {
   id: string;
   projectId: string;
   type: DatabaseType;
+  serviceName: string | null;
   username: string | null;
   password: string | null;
   databaseName: string | null;
@@ -24,6 +25,10 @@ interface ManagedDatabase {
   envVarKey: string | null;
   persistent: boolean;
   createdAt: string;
+}
+
+function pickPrimary(databases: ManagedDatabase[]): ManagedDatabase | undefined {
+  return [...databases].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
 }
 
 function getTypeLabels(t: ProjectDatabaseDict): Record<DatabaseType, string> {
@@ -54,12 +59,12 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
   const router = useRouter();
   const { t } = useTranslation();
   const TYPE_LABEL = getTypeLabels(t.projectDatabase);
-  const [db, setDb] = useState<ManagedDatabase | null | undefined>(undefined);
+  const [databases, setDatabases] = useState<ManagedDatabase[] | undefined>(undefined);
   const [databaseEnabled, setDatabaseEnabled] = useState(true);
   const [provisioning, setProvisioning] = useState<DatabaseType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
-  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState<DatabaseType | null>(null);
   const [removing, setRemoving] = useState(false);
   const [customOpen, setCustomOpen] = useState(false);
   const [customEnvVarKey, setCustomEnvVarKey] = useState("DATABASE_URL");
@@ -71,9 +76,9 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
 
   function load() {
     apiFetch(`/projects/${params.projectId}/database`)
-      .then((res) => (res.status === 200 ? res.json() : null))
-      .then(setDb)
-      .catch(() => setDb(null));
+      .then((res) => (res.status === 200 ? res.json() : []))
+      .then(setDatabases)
+      .catch(() => setDatabases([]));
     apiFetch(`/projects/${params.projectId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((p) => setDatabaseEnabled(p ? p.databaseEnabled : true))
@@ -108,10 +113,11 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
   }
 
   async function handleRemove() {
+    if (!confirmRemove) return;
     setRemoving(true);
     try {
-      await apiFetch(`/projects/${params.projectId}/database`, { method: "DELETE" });
-      setConfirmRemove(false);
+      await apiFetch(`/projects/${params.projectId}/database?type=${confirmRemove}`, { method: "DELETE" });
+      setConfirmRemove(null);
       load();
       router.refresh();
     } finally {
@@ -119,7 +125,7 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
     }
   }
 
-  if (db === undefined) {
+  if (databases === undefined) {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 py-6">
         <p className="text-[13px] text-muted-foreground">{t.common.loading}</p>
@@ -137,13 +143,19 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
     );
   }
 
-  if (db === null) {
+  const nonCustom = databases.filter((d) => d.type !== "custom");
+  const primary = pickPrimary(nonCustom);
+  const provisionedTypes = new Set(databases.map((d) => d.type));
+  const availableTypes = (["postgres", "redis", "mongodb"] as DatabaseType[]).filter((type) => !provisionedTypes.has(type));
+  const removeTarget = databases.find((d) => d.type === confirmRemove);
+
+  if (databases.length === 0) {
     return (
       <div className="mx-auto w-full max-w-5xl px-8 py-6">
         <p className="mb-4 text-[13.5px] text-muted-foreground">{t.projectDatabase.emptyState}</p>
         {error && <p className="mb-3 text-[13px] text-destructive">{error}</p>}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {(["postgres", "redis", "mongodb"] as DatabaseType[]).map((type) => (
+          {availableTypes.map((type) => (
             <div key={type} className="rounded-xl border border-border-subtle bg-surface p-4">
               <div className="flex items-center gap-2 text-foreground">
                 <Database size={15} strokeWidth={1.75} />
@@ -246,90 +258,143 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
     );
   }
 
-  const isCustom = db.type === "custom";
-  const connectionString = isCustom
-    ? (reveal ? db.connectionString : "••••••••") ?? ""
-    : db.type === "postgres"
-      ? `postgresql://${db.username}:${reveal ? db.password : "••••••••"}@db:5432/${db.databaseName}`
-      : db.type === "mongodb"
-        ? `mongodb://${db.username}:${reveal ? db.password : "••••••••"}@db:27017/${db.databaseName}?authSource=admin`
-        : `redis://:${reveal ? db.password : "••••••••"}@db:6379`;
+  const hasMongo = provisionedTypes.has("mongodb");
 
   return (
     <div className="mx-auto w-full max-w-5xl px-8 py-6">
-      <div className="mb-4 flex items-center justify-between">
-        <p className="flex items-center gap-2 text-[13.5px] font-medium text-foreground">
-          <Database size={15} strokeWidth={1.75} />
-          {TYPE_LABEL[db.type]}
-        </p>
-        <button
-          onClick={() => setReveal((v) => !v)}
-          className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
-        >
-          {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
-          {reveal ? t.projectDatabase.hidePassword : t.projectDatabase.showPassword}
-        </button>
+      {error && <p className="mb-3 text-[13px] text-destructive">{error}</p>}
+
+      <div className="flex flex-col gap-3">
+        {databases.map((entry) => (
+          <DatabaseCard
+            key={entry.id}
+            db={entry}
+            typeLabel={TYPE_LABEL[entry.type]}
+            reveal={reveal}
+            onToggleReveal={() => setReveal((v) => !v)}
+            onRemove={() => setConfirmRemove(entry.type)}
+          />
+        ))}
       </div>
 
-      <div className="rounded-xl border border-border-subtle bg-surface p-4">
-        {isCustom ? (
-          <>
-            <InfoRow label={t.projectDatabase.envVarLabel} value={db.envVarKey} />
-            <InfoRow label={t.projectDatabase.connectionStringLabel} value={<span className="break-all">{connectionString}</span>} />
-          </>
-        ) : (
-          <>
-            <InfoRow label={t.projectDatabase.hostLabel} value="db" />
-            <InfoRow label={t.projectDatabase.portLabel} value={TYPE_PORT[db.type as "postgres" | "redis" | "mongodb"]} />
-            {db.type !== "redis" && <InfoRow label={t.projectDatabase.usernameLabel} value={db.username} />}
-            {db.type !== "redis" && <InfoRow label={t.projectDatabase.databaseNameLabel} value={db.databaseName} />}
-            <InfoRow label={t.projectDatabase.passwordLabel} value={reveal ? db.password : "••••••••"} />
-            <InfoRow label={t.projectDatabase.connectionStringLabel} value={<span className="break-all">{connectionString}</span>} />
-            {db.type === "redis" && (
-              <InfoRow
-                label={t.projectDatabase.persistenceLabel}
-                value={
-                  db.persistent ? (
-                    <span className="text-accent">{t.projectDatabase.persistenceEnabled}</span>
-                  ) : (
-                    <span className="text-muted-foreground">{t.projectDatabase.persistenceDisabled}</span>
-                  )
-                }
-              />
-            )}
-          </>
-        )}
-      </div>
+      {availableTypes.length > 0 && (
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {availableTypes.map((type) => (
+            <div key={type} className="rounded-xl border border-dashed border-border-subtle bg-surface p-4">
+              <div className="flex items-center gap-2 text-foreground">
+                <Database size={15} strokeWidth={1.75} />
+                <span className="text-[13.5px] font-medium">{TYPE_LABEL[type]}</span>
+              </div>
+              <p className="mt-1 text-[12px] text-muted-foreground">
+                {type === "postgres" && t.projectDatabase.postgresDescription}
+                {type === "redis" && t.projectDatabase.redisDescription}
+                {type === "mongodb" && t.projectDatabase.mongodbDescription}
+              </p>
 
-      <p className="mt-3 text-[12.5px] text-muted-foreground">
-        {isCustom ? (
-          <>
-            {t.projectDatabase.externalInfoPrefix}{" "}
-            <span className="font-mono text-foreground">{db.envVarKey}</span> {t.projectDatabase.externalInfoSuffix}
-          </>
-        ) : (
-          <>
-            {t.projectDatabase.configuredInfoPrefix}
-            {db.type === "postgres" ? "DATABASE_URL" : db.type === "mongodb" ? "MONGODB_URI" : "REDIS_URL"}
-            {t.projectDatabase.configuredInfoMiddle}{" "}
-            <span className="font-mono text-foreground">Deploy</span> {t.projectDatabase.configuredInfoSuffix}
-          </>
-        )}
-      </p>
+              {type === "redis" && (
+                <label className="mt-2.5 flex items-start gap-2 text-[12px] text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={redisPersistent}
+                    onChange={(e) => setRedisPersistent(e.target.checked)}
+                    className="mt-0.5 accent-accent"
+                  />
+                  <span>{t.projectDatabase.redisPersistentLabel}</span>
+                </label>
+              )}
 
-      {!isCustom && (
+              <button
+                onClick={() => handleProvision(type, type === "redis" ? { persistRedis: redisPersistent } : {})}
+                disabled={provisioning !== null}
+                className="mt-3 inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                {provisioning === type && <Loader2 size={14} className="animate-spin" />}
+                {t.projectDatabase.provisionButtonTemplate.replace("{type}", TYPE_LABEL[type])}
+              </button>
+            </div>
+          ))}
+
+          {!provisionedTypes.has("custom") && (
+            <div className="rounded-xl border border-dashed border-border-subtle bg-surface p-4 sm:col-span-3">
+              <div className="flex items-center gap-2 text-foreground">
+                <DatabaseZap size={15} strokeWidth={1.75} />
+                <span className="text-[13.5px] font-medium">{TYPE_LABEL.custom}</span>
+              </div>
+              <p className="mt-1 text-[12px] text-muted-foreground">{t.projectDatabase.customDescription}</p>
+
+              {!customOpen ? (
+                <button
+                  onClick={() => setCustomOpen(true)}
+                  className="mt-3 rounded-md border border-border-subtle px-3.5 py-2 text-[13px] font-medium text-foreground transition-colors hover:bg-muted"
+                >
+                  {t.projectDatabase.connectExternalButton}
+                </button>
+              ) : (
+                <div className="mt-3 flex flex-col gap-3">
+                  <div>
+                    <label className="mb-1 block text-[12px] text-muted-foreground">
+                      {t.projectDatabase.envVarNameLabel}
+                    </label>
+                    <input
+                      value={customEnvVarKey}
+                      onChange={(e) => setCustomEnvVarKey(e.target.value)}
+                      placeholder={t.projectDatabase.envVarNamePlaceholder}
+                      className="w-full rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-[12px] text-muted-foreground">
+                      {t.projectDatabase.connectionStringLabel}
+                    </label>
+                    <textarea
+                      value={customConnectionString}
+                      onChange={(e) => setCustomConnectionString(e.target.value)}
+                      placeholder={t.projectDatabase.connectionStringPlaceholder}
+                      rows={2}
+                      className="w-full resize-none rounded-md border border-border-subtle bg-transparent px-3 py-2 font-mono text-[13px] text-foreground outline-none focus:border-accent"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() =>
+                        handleProvision("custom", {
+                          envVarKey: customEnvVarKey,
+                          connectionString: customConnectionString,
+                        })
+                      }
+                      disabled={provisioning !== null || !customConnectionString.trim()}
+                      className="inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+                    >
+                      {provisioning === "custom" && <Loader2 size={14} className="animate-spin" />}
+                      {t.projectDatabase.connectButton}
+                    </button>
+                    <button
+                      onClick={() => setCustomOpen(false)}
+                      className="rounded-md px-3.5 py-2 text-[13px] font-medium text-muted-foreground hover:bg-muted"
+                    >
+                      {t.common.cancel}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {primary && (
         <DatabaseBrowser
           key={importVersion}
           projectId={params.projectId}
-          type={db.type as "postgres" | "redis" | "mongodb"}
+          type={primary.type as "postgres" | "redis" | "mongodb"}
           onContainerStatusChange={setDbContainerNotRunning}
         />
       )}
 
-      {!isCustom && <BackupsPanel projectId={params.projectId} />}
+      {primary && <BackupsPanel projectId={params.projectId} />}
 
-      <div className="mt-5 flex items-center gap-4">
-        {db.type === "mongodb" && (
+      {hasMongo && (
+        <div className="mt-5 flex items-center gap-4">
           <button
             onClick={() => setImportMongoOpen(true)}
             disabled={dbContainerNotRunning}
@@ -338,14 +403,8 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
           >
             {t.projectDatabase.importMongoButton}
           </button>
-        )}
-        <button
-          onClick={() => setConfirmRemove(true)}
-          className="text-[13px] font-medium text-destructive hover:opacity-85"
-        >
-          {t.projectDatabase.removeDatabaseButton}
-        </button>
-      </div>
+        </div>
+      )}
 
       {importMongoOpen && (
         <MongoImportModal
@@ -355,12 +414,12 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
         />
       )}
 
-      {confirmRemove && (
+      {confirmRemove && removeTarget && (
         <div
           role="dialog"
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
-          onClick={() => !removing && setConfirmRemove(false)}
+          onClick={() => !removing && setConfirmRemove(null)}
         >
           <div
             onClick={(e) => e.stopPropagation()}
@@ -373,7 +432,7 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
               <div>
                 <p className="text-[14.5px] font-semibold text-foreground">{t.projectDatabase.confirmRemoveTitle}</p>
                 <p className="mt-1 text-[13px] text-muted-foreground">
-                  {isCustom
+                  {removeTarget.type === "custom"
                     ? t.projectDatabase.confirmRemoveCustomBody
                     : t.projectDatabase.confirmRemoveBody}
                 </p>
@@ -381,7 +440,7 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button
-                onClick={() => setConfirmRemove(false)}
+                onClick={() => setConfirmRemove(null)}
                 disabled={removing}
                 className="rounded-md px-3.5 py-2 text-[13px] font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
               >
@@ -399,6 +458,98 @@ export default function DatabasePage(props: { params: Promise<{ projectId: strin
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function DatabaseCard({
+  db,
+  typeLabel,
+  reveal,
+  onToggleReveal,
+  onRemove,
+}: {
+  db: ManagedDatabase;
+  typeLabel: string;
+  reveal: boolean;
+  onToggleReveal: () => void;
+  onRemove: () => void;
+}) {
+  const { t } = useTranslation();
+  const isCustom = db.type === "custom";
+  const host = db.serviceName ?? "db";
+  const connectionString = isCustom
+    ? (reveal ? db.connectionString : "••••••••") ?? ""
+    : db.type === "postgres"
+      ? `postgresql://${db.username}:${reveal ? db.password : "••••••••"}@${host}:5432/${db.databaseName}`
+      : db.type === "mongodb"
+        ? `mongodb://${db.username}:${reveal ? db.password : "••••••••"}@${host}:27017/${db.databaseName}?authSource=admin`
+        : `redis://:${reveal ? db.password : "••••••••"}@${host}:6379`;
+
+  return (
+    <div className="rounded-xl border border-border-subtle bg-surface p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <p className="flex items-center gap-2 text-[13.5px] font-medium text-foreground">
+          <Database size={15} strokeWidth={1.75} />
+          {typeLabel}
+        </p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onToggleReveal}
+            className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
+          >
+            {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
+            {reveal ? t.projectDatabase.hidePassword : t.projectDatabase.showPassword}
+          </button>
+          <button onClick={onRemove} className="text-[12.5px] font-medium text-destructive hover:opacity-85">
+            {t.projectDatabase.removeDatabaseButton}
+          </button>
+        </div>
+      </div>
+
+      {isCustom ? (
+        <>
+          <InfoRow label={t.projectDatabase.envVarLabel} value={db.envVarKey} />
+          <InfoRow label={t.projectDatabase.connectionStringLabel} value={<span className="break-all">{connectionString}</span>} />
+        </>
+      ) : (
+        <>
+          <InfoRow label={t.projectDatabase.hostLabel} value={host} />
+          <InfoRow label={t.projectDatabase.portLabel} value={TYPE_PORT[db.type as "postgres" | "redis" | "mongodb"]} />
+          {db.type !== "redis" && <InfoRow label={t.projectDatabase.usernameLabel} value={db.username} />}
+          {db.type !== "redis" && <InfoRow label={t.projectDatabase.databaseNameLabel} value={db.databaseName} />}
+          <InfoRow label={t.projectDatabase.passwordLabel} value={reveal ? db.password : "••••••••"} />
+          <InfoRow label={t.projectDatabase.connectionStringLabel} value={<span className="break-all">{connectionString}</span>} />
+          {db.type === "redis" && (
+            <InfoRow
+              label={t.projectDatabase.persistenceLabel}
+              value={
+                db.persistent ? (
+                  <span className="text-accent">{t.projectDatabase.persistenceEnabled}</span>
+                ) : (
+                  <span className="text-muted-foreground">{t.projectDatabase.persistenceDisabled}</span>
+                )
+              }
+            />
+          )}
+        </>
+      )}
+
+      <p className="mt-3 text-[12.5px] text-muted-foreground">
+        {isCustom ? (
+          <>
+            {t.projectDatabase.externalInfoPrefix}{" "}
+            <span className="font-mono text-foreground">{db.envVarKey}</span> {t.projectDatabase.externalInfoSuffix}
+          </>
+        ) : (
+          <>
+            {t.projectDatabase.configuredInfoPrefix}
+            {db.type === "postgres" ? "DATABASE_URL" : db.type === "mongodb" ? "MONGODB_URI" : "REDIS_URL"}
+            {t.projectDatabase.configuredInfoMiddle}{" "}
+            <span className="font-mono text-foreground">Deploy</span> {t.projectDatabase.configuredInfoSuffix}
+          </>
+        )}
+      </p>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   MANAGED_DATABASE_REPOSITORY,
   type ManagedDatabaseRepository,
 } from "../domain/managed-database.repository";
+import { pickPrimaryDatabase } from "../domain/managed-database.entity";
 import {
   DATABASE_QUERY_RUNNER,
   type DatabaseQueryResult,
@@ -30,12 +31,13 @@ export class RunDatabaseQueryUseCase {
       );
     }
 
-    const database = await this.databaseRepository.findByProjectId(projectId);
-    if (!database || database.type === "custom") {
+    const all = await this.databaseRepository.findAllByProjectId(projectId);
+    const database = pickPrimaryDatabase(all.filter((db) => db.type !== "custom"));
+    if (!database) {
       throw new BadRequestException(apiError("NO_MANAGED_DATABASE", "Este projeto não tem um banco de dados gerenciado com container."));
     }
 
-    const containerName = `${project.containerName}-db-1`;
+    const containerName = `${project.containerName}-${database.serviceName}-1`;
     return this.queryRunner.runQuery(containerName, database, query);
   }
 }

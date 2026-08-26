@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { DeployConfig } from "../domain/container-orchestrator";
+import type { DeployConfig, DatabaseServiceConfig } from "../domain/container-orchestrator";
 import { ENV_FILENAME } from "../domain/container-orchestrator";
 
 const LOGGING_BLOCK = [
@@ -36,7 +36,10 @@ export class DockerComposeFileBuilder {
   build(config: DeployConfig): string {
     const volumeNames = [UPLOADS_VOLUME];
 
-    const dependsOnDb = config.database ? ["    depends_on:", "      - db"] : [];
+    const dependsOnDb =
+      config.databases.length > 0
+        ? ["    depends_on:", ...config.databases.map((db) => `      - ${db.serviceName}`)]
+        : [];
     const nodeOptions = nodeOptionsFor(config.memoryLimitMb);
 
     const lines = [
@@ -81,8 +84,8 @@ export class DockerComposeFileBuilder {
       ...LOGGING_BLOCK,
     ];
 
-    if (config.database) {
-      const { serviceLines, volumeName } = this.buildDatabaseService(config.database);
+    for (const db of config.databases) {
+      const { serviceLines, volumeName } = this.buildDatabaseService(db);
       lines.push(...serviceLines);
       if (volumeName) volumeNames.push(volumeName);
     }
@@ -96,25 +99,28 @@ export class DockerComposeFileBuilder {
     return lines.join("\n");
   }
 
-  private buildDatabaseService(db: NonNullable<DeployConfig["database"]>): {
+  private buildDatabaseService(db: DatabaseServiceConfig): {
     serviceLines: string[];
     volumeName: string | null;
   } {
+    // Nome do volume derivado do serviço (não fixo "db-data" mais) - com
+    // vários bancos no mesmo projeto (ex.: Postgres + Redis), cada um precisa
+    // do próprio volume, senão um pisaria no dado do outro.
+    const volumeName = `${db.serviceName}-data`;
+
     if (db.type === "postgres") {
       return {
-        volumeName: "db-data",
+        volumeName,
         serviceLines: [
-          "  db:",
+          `  ${db.serviceName}:`,
           "    image: postgres:16-alpine",
-          // Nome de container fixo (não gerenciado pelo compose com container_name)
-          // pra manter o app resolvendo "db" via DNS interno do compose de qualquer forma.
           "    restart: unless-stopped",
           "    environment:",
           `      POSTGRES_USER: ${db.username}`,
           `      POSTGRES_PASSWORD: ${db.password}`,
           `      POSTGRES_DB: ${db.databaseName}`,
           "    volumes:",
-          "      - db-data:/var/lib/postgresql/data",
+          `      - ${volumeName}:/var/lib/postgresql/data`,
           `    mem_limit: ${db.memoryLimitMb}m`,
           ...LOGGING_BLOCK,
         ],
@@ -150,23 +156,23 @@ export class DockerComposeFileBuilder {
           ];
 
       return {
-        volumeName: db.persistent ? "db-data" : null,
+        volumeName: db.persistent ? volumeName : null,
         serviceLines: [
-          "  db:",
+          `  ${db.serviceName}:`,
           "    image: redis:7-alpine",
           "    restart: unless-stopped",
           `    command: [${command.map((c) => `"${c}"`).join(", ")}]`,
           `    mem_limit: ${db.memoryLimitMb}m`,
-          ...(db.persistent ? ["    volumes:", "      - db-data:/data"] : []),
+          ...(db.persistent ? ["    volumes:", `      - ${volumeName}:/data`] : []),
           ...LOGGING_BLOCK,
         ],
       };
     }
 
     return {
-      volumeName: "db-data",
+      volumeName,
       serviceLines: [
-        "  db:",
+        `  ${db.serviceName}:`,
         "    image: mongo:7",
         "    restart: unless-stopped",
         "    environment:",
@@ -174,7 +180,7 @@ export class DockerComposeFileBuilder {
         `      MONGO_INITDB_ROOT_PASSWORD: ${db.password}`,
         `      MONGO_INITDB_DATABASE: ${db.databaseName}`,
         "    volumes:",
-        "      - db-data:/data/db",
+        `      - ${volumeName}:/data/db`,
         `    mem_limit: ${db.memoryLimitMb}m`,
         ...LOGGING_BLOCK,
       ],

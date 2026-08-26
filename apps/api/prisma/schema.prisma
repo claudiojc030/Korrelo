@@ -24,7 +24,7 @@ model Project {
   diskLimitMb      Int?
   createdAt        DateTime @default(now())
   envVars          EnvVar[]
-  managedDatabase  ManagedDatabase?
+  managedDatabases ManagedDatabase[]
   cronJobs         CronJob[]
   deployRecords    DeployRecord[]
   domainAliases    ProjectDomainAlias[]
@@ -70,11 +70,18 @@ model CronJob {
   createdAt  DateTime  @default(now())
 }
 
+// Um projeto pode ter mais de um banco gerenciado (ex.: Postgres + Redis pro
+// mesmo app) - por isso @@unique é composto (projeto, tipo) em vez de único
+// por projeto. serviceName é o nome do serviço/host no docker-compose: o
+// primeiro banco de um projeto sempre fica "db" (compatibilidade com todo
+// projeto existente antes disso existir), qualquer banco adicional ganha
+// "db-<tipo>" pra não colidir.
 model ManagedDatabase {
   id               String   @id @default(uuid())
-  projectId        String   @unique
+  projectId        String
   project          Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   type             String
+  serviceName      String?
   username         String?
   password         String?
   databaseName     String?
@@ -82,6 +89,8 @@ model ManagedDatabase {
   envVarKey        String?
   persistent       Boolean  @default(false)
   createdAt        DateTime @default(now())
+
+  @@unique([projectId, type])
 }
 
 model EnvVar {

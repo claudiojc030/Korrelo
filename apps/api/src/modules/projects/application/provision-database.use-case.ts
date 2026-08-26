@@ -22,19 +22,20 @@ function buildConnectionEnvVar(db: ManagedDatabase): { key: string; value: strin
   if (db.type === "custom") {
     return { key: db.envVarKey ?? DEFAULT_CUSTOM_ENV_VAR_KEY, value: db.connectionString ?? "" };
   }
+  const host = db.serviceName as string;
   if (db.type === "postgres") {
     return {
       key: "DATABASE_URL",
-      value: `postgresql://${db.username}:${db.password}@db:5432/${db.databaseName}`,
+      value: `postgresql://${db.username}:${db.password}@${host}:5432/${db.databaseName}`,
     };
   }
   if (db.type === "mongodb") {
     return {
       key: "MONGODB_URI",
-      value: `mongodb://${db.username}:${db.password}@db:27017/${db.databaseName}?authSource=admin`,
+      value: `mongodb://${db.username}:${db.password}@${host}:27017/${db.databaseName}?authSource=admin`,
     };
   }
-  return { key: "REDIS_URL", value: `redis://:${db.password}@db:6379` };
+  return { key: "REDIS_URL", value: `redis://:${db.password}@${host}:6379` };
 }
 
 @Injectable()
@@ -51,10 +52,13 @@ export class ProvisionDatabaseUseCase {
       throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
 
-    const existing = await this.databaseRepository.findByProjectId(projectId);
-    if (existing) {
+    const existing = await this.databaseRepository.findAllByProjectId(projectId);
+    if (existing.some((db) => db.type === type)) {
       throw new ConflictException(
-        apiError("DATABASE_ALREADY_PROVISIONED", "Este projeto já tem um banco de dados provisionado. Remova antes de criar outro."),
+        apiError(
+          "DATABASE_ALREADY_PROVISIONED",
+          `Este projeto já tem um banco do tipo "${type}" provisionado. Remova antes de criar outro do mesmo tipo.`,
+        ),
       );
     }
 
@@ -76,7 +80,12 @@ export class ProvisionDatabaseUseCase {
       database = ManagedDatabase.createCustom(projectId, connectionString, envVarKey);
     } else {
       const password = crypto.randomBytes(16).toString("hex");
-      database = ManagedDatabase.createManaged(projectId, type, password, options.persistRedis ?? false);
+      // Primeiro banco gerenciado do projeto continua "db" (compatibilidade
+      // com todo projeto que já rodava antes de existir suporte a mais de
+      // um) - qualquer banco adicional ganha um nome de serviço próprio.
+      const hasManagedDatabase = existing.some((db) => db.type !== "custom");
+      const serviceName = hasManagedDatabase ? `db-${type}` : "db";
+      database = ManagedDatabase.createManaged(projectId, type, serviceName, password, options.persistRedis ?? false);
     }
 
     await this.databaseRepository.save(database);

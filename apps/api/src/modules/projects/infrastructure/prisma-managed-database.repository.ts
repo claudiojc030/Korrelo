@@ -11,9 +11,9 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
     private readonly cipher: EnvVarCipher,
   ) {}
 
-  async findByProjectId(projectId: string): Promise<ManagedDatabase | null> {
-    const row = await this.prisma.managedDatabase.findUnique({ where: { projectId } });
-    return row ? this.toDomain(row) : null;
+  async findAllByProjectId(projectId: string): Promise<ManagedDatabase[]> {
+    const rows = await this.prisma.managedDatabase.findMany({ where: { projectId }, orderBy: { createdAt: "asc" } });
+    return rows.map((row) => this.toDomain(row));
   }
 
   async save(db: ManagedDatabase): Promise<ManagedDatabase> {
@@ -23,11 +23,12 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
     const password = db.password ? this.cipher.encrypt(db.password) : db.password;
     const connectionString = db.connectionString ? this.cipher.encrypt(db.connectionString) : db.connectionString;
     const row = await this.prisma.managedDatabase.upsert({
-      where: { projectId: db.projectId },
+      where: { projectId_type: { projectId: db.projectId, type: db.type } },
       create: {
         id: db.id,
         projectId: db.projectId,
         type: db.type,
+        serviceName: db.serviceName,
         username: db.username,
         password,
         databaseName: db.databaseName,
@@ -37,7 +38,7 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
         createdAt: db.createdAt,
       },
       update: {
-        type: db.type,
+        serviceName: db.serviceName,
         username: db.username,
         password,
         databaseName: db.databaseName,
@@ -49,14 +50,15 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
     return this.toDomain(row);
   }
 
-  async delete(projectId: string): Promise<void> {
-    await this.prisma.managedDatabase.deleteMany({ where: { projectId } });
+  async delete(projectId: string, type: DatabaseType): Promise<void> {
+    await this.prisma.managedDatabase.deleteMany({ where: { projectId, type } });
   }
 
   private toDomain(row: {
     id: string;
     projectId: string;
     type: string;
+    serviceName: string | null;
     username: string | null;
     password: string | null;
     databaseName: string | null;
@@ -69,6 +71,7 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
       row.id,
       row.projectId,
       row.type as DatabaseType,
+      row.serviceName,
       row.username,
       row.password ? this.cipher.decrypt(row.password) : row.password,
       row.databaseName,

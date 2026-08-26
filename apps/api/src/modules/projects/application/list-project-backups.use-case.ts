@@ -5,6 +5,7 @@ import {
   MANAGED_DATABASE_REPOSITORY,
   type ManagedDatabaseRepository,
 } from "../domain/managed-database.repository";
+import { pickPrimaryDatabase } from "../domain/managed-database.entity";
 import { ProjectBackupsService, type ProjectBackupEntry } from "../infrastructure/project-backups.service";
 
 @Injectable()
@@ -21,13 +22,14 @@ export class ListProjectBackupsUseCase {
       throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
     }
 
-    const database = await this.databaseRepository.findByProjectId(projectId);
-    if (!database || database.type === "custom") {
+    const all = await this.databaseRepository.findAllByProjectId(projectId);
+    const database = pickPrimaryDatabase(all.filter((db) => db.type !== "custom"));
+    if (!database) {
       throw new BadRequestException(
         apiError("MANAGED_DATABASE_REQUIRED", "Este projeto não tem um banco gerenciado pelo Korrelo."),
       );
     }
 
-    return this.projectBackups.list(project, database.type);
+    return this.projectBackups.list(project, database.type as "postgres" | "redis" | "mongodb");
   }
 }

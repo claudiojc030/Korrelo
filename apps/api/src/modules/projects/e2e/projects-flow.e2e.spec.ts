@@ -321,20 +321,37 @@ describe("Projects flow (e2e)", () => {
         .send({ type: "postgres" });
       expect(res.status).toBe(201);
       expect(res.body.type).toBe("postgres");
+      expect(res.body.serviceName).toBe("db");
       expect(res.body.password).toEqual(expect.any(String));
     });
 
-    it("recusa provisionar um segundo banco pro mesmo projeto", async () => {
+    it("recusa provisionar de novo o mesmo tipo de banco", async () => {
+      const res = await request(app.getHttpServer())
+        .post(`/projects/${projectId}/database`)
+        .set("Cookie", [authCookieHeader()])
+        .send({ type: "postgres" });
+      expect(res.status).toBe(409);
+    });
+
+    it("permite provisionar um segundo banco de tipo diferente", async () => {
       const res = await request(app.getHttpServer())
         .post(`/projects/${projectId}/database`)
         .set("Cookie", [authCookieHeader()])
         .send({ type: "redis" });
-      expect(res.status).toBe(409);
+      expect(res.status).toBe(201);
+      expect(res.body.type).toBe("redis");
+      expect(res.body.serviceName).toBe("db-redis");
+
+      const get = await request(app.getHttpServer())
+        .get(`/projects/${projectId}/database`)
+        .set("Cookie", [authCookieHeader()]);
+      expect(get.status).toBe(200);
+      expect(get.body).toHaveLength(2);
     });
 
-    it("remove o banco gerenciado", async () => {
+    it("remove só o banco do tipo pedido", async () => {
       const del = await request(app.getHttpServer())
-        .delete(`/projects/${projectId}/database`)
+        .delete(`/projects/${projectId}/database?type=redis`)
         .set("Cookie", [authCookieHeader()]);
       expect(del.status).toBe(204);
 
@@ -342,7 +359,19 @@ describe("Projects flow (e2e)", () => {
         .get(`/projects/${projectId}/database`)
         .set("Cookie", [authCookieHeader()]);
       expect(get.status).toBe(200);
-      expect(get.body?.id).toBeUndefined();
+      expect(get.body).toHaveLength(1);
+      expect(get.body[0].type).toBe("postgres");
+
+      const del2 = await request(app.getHttpServer())
+        .delete(`/projects/${projectId}/database?type=postgres`)
+        .set("Cookie", [authCookieHeader()]);
+      expect(del2.status).toBe(204);
+
+      const get2 = await request(app.getHttpServer())
+        .get(`/projects/${projectId}/database`)
+        .set("Cookie", [authCookieHeader()]);
+      expect(get2.status).toBe(200);
+      expect(get2.body).toHaveLength(0);
     });
   });
 

@@ -13,6 +13,7 @@ import { GetProjectDiskUsageUseCase } from "../application/get-project-disk-usag
 import { ProvisionDatabaseUseCase } from "../application/provision-database.use-case";
 import { DeprovisionDatabaseUseCase } from "../application/deprovision-database.use-case";
 import { GetManagedDatabaseUseCase } from "../application/get-managed-database.use-case";
+import type { DatabaseType } from "../domain/managed-database.entity";
 import { UpdateProjectSettingsUseCase } from "../application/update-project-settings.use-case";
 import { GetProjectLogsUseCase, type LogTarget } from "../application/get-project-logs.use-case";
 import { AttachDomainUseCase } from "../application/attach-domain.use-case";
@@ -165,8 +166,8 @@ export class ProjectsController {
 
   @Delete(":id/database")
   @HttpCode(204)
-  async removeDatabase(@Param("id") id: string) {
-    await this.deprovisionDatabase.execute(id);
+  async removeDatabase(@Param("id") id: string, @Query("type") type: DatabaseType) {
+    await this.deprovisionDatabase.execute(id, type);
   }
 
   @Get(":id/database/tables")
