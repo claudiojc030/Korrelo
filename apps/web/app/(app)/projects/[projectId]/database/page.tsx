@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
-import { Database, DatabaseZap, Eye, EyeOff, Loader2, Play, TriangleAlert } from "lucide-react";
+import { Database, DatabaseZap, Eye, EyeOff, Loader2, Pencil, Play, Save, TriangleAlert, X } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../../../lib/api-error";
@@ -594,6 +594,16 @@ function DatabaseBrowser({
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<QueryResult | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
+  // Null quando o texto da query não veio de clicar numa tabela/coleção na
+  // lista (ex.: usuário digitou algo manualmente) - sem isso não dá pra saber
+  // com segurança em qual tabela gravar as edições.
+  const [sourceTable, setSourceTable] = useState<string | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [primaryKeyColumns, setPrimaryKeyColumns] = useState<string[] | null>(null);
+  const [pkLoading, setPkLoading] = useState(false);
+  const [edits, setEdits] = useState<Record<number, Record<string, string>>>({});
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   function loadTables() {
     setTablesError(null);
@@ -623,12 +633,17 @@ function DatabaseBrowser({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
-  async function handleRunQuery(queryOverride?: string) {
+  async function handleRunQuery(queryOverride?: string, tableOverride?: string | null) {
     const queryToRun = queryOverride ?? query;
     if (!queryToRun.trim()) return;
     setRunning(true);
     setQueryError(null);
     setResult(null);
+    setEditMode(false);
+    setEdits({});
+    setPrimaryKeyColumns(null);
+    setSaveError(null);
+    if (tableOverride !== undefined) setSourceTable(tableOverride);
     try {
       const res = await apiFetch(`/projects/${projectId}/database/query`, {
         method: "POST",
@@ -658,7 +673,84 @@ function DatabaseBrowser({
     // Mongo e Postgres têm dados "prontos pra ver" ao clicar (igual o Atlas);
     // Redis não, porque "name" ali é uma chave de amostra, não um comando -
     // GET só faz sentido se o usuário confirmar que é isso que quer rodar.
-    if (type !== "redis") handleRunQuery(q);
+    if (type !== "redis") handleRunQuery(q, name);
+  }
+
+  async function toggleEditMode() {
+    if (editMode) {
+      setEditMode(false);
+      setEdits({});
+      return;
+    }
+    if (!sourceTable) return;
+    setPkLoading(true);
+    setSaveError(null);
+    try {
+      const res = await apiFetch(`/projects/${projectId}/database/tables/${encodeURIComponent(sourceTable)}/primary-key`);
+      const body: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(translateApiError(t, body, t.projectDatabase.queryError));
+      const columns = (body as { columns: string[] }).columns;
+      if (columns.length === 0) {
+        setSaveError(t.projectDatabase.editNoPrimaryKey);
+        return;
+      }
+      setPrimaryKeyColumns(columns);
+      setEditMode(true);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : t.projectDatabase.unknownError);
+    } finally {
+      setPkLoading(false);
+    }
+  }
+
+  function setCellEdit(rowIndex: number, column: string, value: string) {
+    setEdits((prev) => ({ ...prev, [rowIndex]: { ...prev[rowIndex], [column]: value } }));
+  }
+
+  function cellValue(rowIndex: number, column: string, original: string): string {
+    return edits[rowIndex]?.[column] ?? original;
+  }
+
+  async function handleSaveEdits() {
+    if (!result || !sourceTable || !primaryKeyColumns) return;
+    const rowIndexes = Object.keys(edits).map(Number).filter((i) => Object.keys(edits[i]).length > 0);
+    if (rowIndexes.length === 0) return;
+
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const updates = rowIndexes.map((rowIndex) => {
+        const primaryKey: Record<string, string> = {};
+        for (const pkCol of primaryKeyColumns) {
+          const colIndex = result.columns.indexOf(pkCol);
+          primaryKey[pkCol] = colIndex >= 0 ? result.rows[rowIndex][colIndex] : "";
+        }
+        return { primaryKey, changes: edits[rowIndex] };
+      });
+
+      const res = await apiFetch(`/projects/${projectId}/database/rows`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table: sourceTable, updates }),
+      });
+      const body: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(translateApiError(t, body, t.projectDatabase.editSaveError));
+
+      const results = (body as { results: { error: string | null }[] }).results;
+      const firstError = results.find((r) => r.error)?.error;
+      if (firstError) {
+        setSaveError(firstError);
+        return;
+      }
+
+      setEditMode(false);
+      setEdits({});
+      await handleRunQuery(query, sourceTable);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : t.projectDatabase.unknownError);
+    } finally {
+      setSaving(false);
+    }
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -720,7 +812,12 @@ function DatabaseBrowser({
         <div className="flex flex-col gap-2">
           <textarea
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setSourceTable(null);
+              setEditMode(false);
+              setEdits({});
+            }}
             onKeyDown={handleKeyDown}
             placeholder={QUERY_PLACEHOLDER[type]}
             rows={3}
@@ -741,6 +838,40 @@ function DatabaseBrowser({
 
           {queryError && <p className="text-[13px] text-destructive">{queryError}</p>}
 
+          {result && result.columns.length > 0 && sourceTable && type !== "redis" && (
+            <div className="flex items-center justify-between">
+              <div>
+                {saveError && <p className="text-[12.5px] text-destructive">{saveError}</p>}
+              </div>
+              <div className="flex items-center gap-2">
+                {editMode && (
+                  <button
+                    onClick={handleSaveEdits}
+                    disabled={saving || Object.keys(edits).length === 0}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-[12.5px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+                  >
+                    {saving ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                    {t.projectDatabase.editSaveButton}
+                  </button>
+                )}
+                <button
+                  onClick={toggleEditMode}
+                  disabled={pkLoading}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border-subtle px-3 py-1.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-60"
+                >
+                  {pkLoading ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : editMode ? (
+                    <X size={13} />
+                  ) : (
+                    <Pencil size={13} />
+                  )}
+                  {editMode ? t.projectDatabase.editCancelButton : t.projectDatabase.editEnableButton}
+                </button>
+              </div>
+            </div>
+          )}
+
           {result && (
             <div className="rounded-xl border border-border-subtle bg-surface">
               {result.notice && (
@@ -748,7 +879,7 @@ function DatabaseBrowser({
                   {result.notice}
                 </p>
               )}
-              {result.columns.length > 0 && type === "mongodb" ? (
+              {result.columns.length > 0 && type === "mongodb" && !editMode ? (
                 <div className="flex max-h-96 flex-col gap-2 overflow-auto p-3">
                   {result.rows.map((row, i) => (
                     <pre
@@ -761,6 +892,26 @@ function DatabaseBrowser({
                         2,
                       )}
                     </pre>
+                  ))}
+                </div>
+              ) : result.columns.length > 0 && type === "mongodb" ? (
+                <div className="flex max-h-96 flex-col gap-3 overflow-auto p-3">
+                  {result.rows.map((row, i) => (
+                    <div key={i} className="rounded-md border border-border-subtle bg-background p-2">
+                      {result.columns.map((col, j) => (
+                        <div key={col} className="flex items-center gap-2 py-0.5">
+                          <span className="w-32 flex-none truncate font-mono text-[11.5px] text-muted-foreground" title={col}>
+                            {col}
+                          </span>
+                          <input
+                            value={cellValue(i, col, row[j])}
+                            onChange={(e) => setCellEdit(i, col, e.target.value)}
+                            disabled={primaryKeyColumns?.includes(col)}
+                            className="w-full rounded border border-border-subtle bg-transparent px-2 py-1 font-mono text-[12px] text-foreground outline-none focus:border-accent disabled:opacity-60"
+                          />
+                        </div>
+                      ))}
+                    </div>
                   ))}
                 </div>
               ) : result.columns.length > 0 ? (
@@ -781,11 +932,22 @@ function DatabaseBrowser({
                     <tbody>
                       {result.rows.map((row, i) => (
                         <tr key={i} className="border-b border-border-subtle last:border-0">
-                          {row.map((cell, j) => (
-                            <td key={j} className="whitespace-pre-wrap px-3 py-1.5 font-mono text-foreground">
-                              {cell}
-                            </td>
-                          ))}
+                          {row.map((cell, j) =>
+                            editMode ? (
+                              <td key={j} className="px-1.5 py-1">
+                                <input
+                                  value={cellValue(i, result.columns[j], cell)}
+                                  onChange={(e) => setCellEdit(i, result.columns[j], e.target.value)}
+                                  disabled={primaryKeyColumns?.includes(result.columns[j])}
+                                  className="w-full min-w-[80px] rounded border border-border-subtle bg-transparent px-1.5 py-1 font-mono text-[12.5px] text-foreground outline-none focus:border-accent disabled:opacity-60"
+                                />
+                              </td>
+                            ) : (
+                              <td key={j} className="whitespace-pre-wrap px-3 py-1.5 font-mono text-foreground">
+                                {cell}
+                              </td>
+                            ),
+                          )}
                         </tr>
                       ))}
                     </tbody>

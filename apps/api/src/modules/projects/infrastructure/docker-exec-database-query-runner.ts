@@ -11,6 +11,28 @@ const QUERY_TIMEOUT_MS = 15_000;
 const MAX_BUFFER_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 500;
 
+// psql -c manda a query como argumento único (sem shell no meio, via execFile),
+// então não tem risco de injeção de comando - mas o TEXTO da query em si
+// ainda pode ter aspas simples de dado do usuário, que precisam virar '' pra
+// não fechar o literal SQL mais cedo e injetar SQL arbitrário na query.
+function escapeSqlLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
+// Célula editada chega como texto puro do input do navegador de dados. Se
+// parece número/boolean/null, grava com o tipo real no Mongo (senão toda
+// edição viraria string, quebrando campo que já era number/boolean).
+function parseMongoEditValue(value: string): unknown {
+  if (value === "") return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed === "number" || typeof parsed === "boolean" || parsed === null) return parsed;
+  } catch {
+    // não é JSON válido - trata como string mesmo, cai no return abaixo.
+  }
+  return value;
+}
+
 function tokenizeShellLike(input: string): string[] {
   const tokens: string[] = [];
   const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
@@ -78,6 +100,69 @@ export class DockerExecDatabaseQueryRunner implements DatabaseQueryRunner {
 
     throw new BadRequestException(
       apiError("CUSTOM_DATABASE_NO_QUERY_CONSOLE", "Bancos externos (custom) não têm console de query, conecte com sua própria ferramenta."),
+    );
+  }
+
+  async getPrimaryKeyColumns(containerName: string, database: ManagedDatabase, table: string): Promise<string[]> {
+    if (database.type === "mongodb") {
+      // Mongo sempre identifica o documento pelo _id, não precisa consultar nada.
+      return ["_id"];
+    }
+
+    if (database.type === "postgres") {
+      const result = await this.runPostgresQuery(
+        containerName,
+        database,
+        `SELECT kcu.column_name FROM information_schema.table_constraints tc ` +
+          `JOIN information_schema.key_column_usage kcu ON kcu.constraint_name = tc.constraint_name ` +
+          `AND kcu.table_schema = tc.table_schema ` +
+          `WHERE tc.constraint_type = 'PRIMARY KEY' AND tc.table_name = ${escapeSqlLiteral(table)};`,
+      );
+      return result.rows.map((row) => row[0]);
+    }
+
+    throw new BadRequestException(
+      apiError("TABLE_EDIT_NOT_SUPPORTED", "Edição inline só é suportada em Postgres e MongoDB."),
+    );
+  }
+
+  async updateRow(
+    containerName: string,
+    database: ManagedDatabase,
+    table: string,
+    primaryKey: Record<string, string>,
+    changes: Record<string, string>,
+  ): Promise<void> {
+    if (database.type === "postgres") {
+      // Célula vazia grava NULL, não string vazia - convenção da edição inline
+      // (não dá pra distinguir "vazio" de "nulo" num input de texto simples).
+      const setClause = Object.entries(changes)
+        .map(([column, value]) => `"${column}" = ${value === "" ? "NULL" : escapeSqlLiteral(value)}`)
+        .join(", ");
+      const whereClause = Object.entries(primaryKey)
+        .map(([column, value]) => `"${column}" = ${escapeSqlLiteral(value)}`)
+        .join(" AND ");
+      await this.runPostgresQuery(containerName, database, `UPDATE "${table}" SET ${setClause} WHERE ${whereClause};`);
+      return;
+    }
+
+    if (database.type === "mongodb") {
+      const id = primaryKey["_id"];
+      if (!id) {
+        throw new BadRequestException(apiError("PRIMARY_KEY_REQUIRED", "_id da linha não informado."));
+      }
+      const setDoc = JSON.stringify(
+        Object.fromEntries(Object.entries(changes).map(([key, value]) => [key, parseMongoEditValue(value)])),
+      );
+      const evalScript =
+        `(function(){ var id; try { id = ObjectId(${JSON.stringify(id)}); } catch(e) { id = ${JSON.stringify(id)}; } ` +
+        `print(JSON.stringify(db.${table}.updateOne({_id: id}, {$set: ${setDoc}}))); })()`;
+      await this.runMongoEval(containerName, database, evalScript);
+      return;
+    }
+
+    throw new BadRequestException(
+      apiError("TABLE_EDIT_NOT_SUPPORTED", "Edição inline só é suportada em Postgres e MongoDB."),
     );
   }
 

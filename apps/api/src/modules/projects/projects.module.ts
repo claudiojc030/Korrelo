@@ -29,6 +29,8 @@ import { ListDomainAliasesUseCase } from "./application/list-domain-aliases.use-
 import { ListDeployRecordsUseCase } from "./application/list-deploy-records.use-case";
 import { ListDatabaseTablesUseCase } from "./application/list-database-tables.use-case";
 import { RunDatabaseQueryUseCase } from "./application/run-database-query.use-case";
+import { GetTablePrimaryKeyUseCase } from "./application/get-table-primary-key.use-case";
+import { UpdateDatabaseRowsUseCase } from "./application/update-database-rows.use-case";
 import { StartMongoImportUseCase } from "./application/start-mongo-import.use-case";
 import { GetMongoImportStatusUseCase } from "./application/get-mongo-import-status.use-case";
 import { StartDatabaseExportUseCase } from "./application/start-database-export.use-case";
@@ -142,6 +144,8 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     ListDeployRecordsUseCase,
     ListDatabaseTablesUseCase,
     RunDatabaseQueryUseCase,
+    GetTablePrimaryKeyUseCase,
+    UpdateDatabaseRowsUseCase,
     StartMongoImportUseCase,
     GetMongoImportStatusUseCase,
     StartDatabaseExportUseCase,

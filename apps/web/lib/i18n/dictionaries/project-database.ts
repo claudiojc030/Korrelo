@@ -87,6 +87,11 @@ export interface ProjectDatabaseDict {
   restoreCloseButton: string;
   restoreLogLabel: string;
   restoreStartError: string;
+  editEnableButton: string;
+  editCancelButton: string;
+  editSaveButton: string;
+  editNoPrimaryKey: string;
+  editSaveError: string;
 }
 
 export const projectDatabaseEn: ProjectDatabaseDict = {
@@ -181,6 +186,11 @@ export const projectDatabaseEn: ProjectDatabaseDict = {
   restoreCloseButton: "Close",
   restoreLogLabel: "Log",
   restoreStartError: "Failed to start the restore.",
+  editEnableButton: "Edit",
+  editCancelButton: "Cancel edit",
+  editSaveButton: "Save",
+  editNoPrimaryKey: "This table has no primary key, editing isn't supported.",
+  editSaveError: "Failed to save the changes.",
 };
 
 export const projectDatabasePt: ProjectDatabaseDict = {
@@ -275,4 +285,9 @@ export const projectDatabasePt: ProjectDatabaseDict = {
   restoreCloseButton: "Fechar",
   restoreLogLabel: "Log",
   restoreStartError: "Falha ao iniciar a restauração.",
+  editEnableButton: "Editar",
+  editCancelButton: "Cancelar edição",
+  editSaveButton: "Salvar",
+  editNoPrimaryKey: "Essa tabela não tem chave primária, edição não é suportada.",
+  editSaveError: "Falha ao salvar as alterações.",
 };

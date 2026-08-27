@@ -24,6 +24,8 @@ import { ListDomainAliasesUseCase } from "../application/list-domain-aliases.use
 import { ListDeployRecordsUseCase } from "../application/list-deploy-records.use-case";
 import { ListDatabaseTablesUseCase } from "../application/list-database-tables.use-case";
 import { RunDatabaseQueryUseCase } from "../application/run-database-query.use-case";
+import { GetTablePrimaryKeyUseCase } from "../application/get-table-primary-key.use-case";
+import { UpdateDatabaseRowsUseCase } from "../application/update-database-rows.use-case";
 import { StartMongoImportUseCase } from "../application/start-mongo-import.use-case";
 import { GetMongoImportStatusUseCase } from "../application/get-mongo-import-status.use-case";
 import { StartDatabaseExportUseCase } from "../application/start-database-export.use-case";
@@ -39,6 +41,7 @@ import { DetectStackDto } from "./detect-stack.dto";
 import { SetEnvVarsDto } from "./set-env-vars.dto";
 import { ProvisionDatabaseDto } from "./provision-database.dto";
 import { RunDatabaseQueryDto } from "./run-database-query.dto";
+import { UpdateDatabaseRowsDto } from "./update-database-rows.dto";
 import { StartMongoImportDto } from "./start-mongo-import.dto";
 import { UpdateProjectSettingsDto } from "./update-project-settings.dto";
 import { AttachDomainDto } from "./attach-domain.dto";
@@ -71,6 +74,8 @@ export class ProjectsController {
     private readonly listDeployRecords: ListDeployRecordsUseCase,
     private readonly listDatabaseTables: ListDatabaseTablesUseCase,
     private readonly runDatabaseQuery: RunDatabaseQueryUseCase,
+    private readonly getTablePrimaryKey: GetTablePrimaryKeyUseCase,
+    private readonly updateDatabaseRows: UpdateDatabaseRowsUseCase,
     private readonly startMongoImport: StartMongoImportUseCase,
     private readonly getMongoImportStatus: GetMongoImportStatusUseCase,
     private readonly startDatabaseExport: StartDatabaseExportUseCase,
@@ -178,6 +183,16 @@ export class ProjectsController {
   @Post(":id/database/query")
   runDatabaseQueryEndpoint(@Param("id") id: string, @Body() dto: RunDatabaseQueryDto) {
     return this.runDatabaseQuery.execute(id, dto.query);
+  }
+
+  @Get(":id/database/tables/:table/primary-key")
+  getTablePrimaryKeyEndpoint(@Param("id") id: string, @Param("table") table: string) {
+    return this.getTablePrimaryKey.execute(id, table).then((columns) => ({ columns }));
+  }
+
+  @Post(":id/database/rows")
+  updateDatabaseRowsEndpoint(@Param("id") id: string, @Body() dto: UpdateDatabaseRowsDto) {
+    return this.updateDatabaseRows.execute(id, dto.table, dto.updates).then((results) => ({ results }));
   }
 
   @Post(":id/database/mongo-import")
