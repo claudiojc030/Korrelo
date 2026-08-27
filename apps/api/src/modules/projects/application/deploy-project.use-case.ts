@@ -205,29 +205,38 @@ export class DeployProjectUseCase {
     }
 
     // Fase 1: builda e sobe só a instância de teste. A versão em produção (se
-    // já existir) continua no ar o tempo todo, sem ser tocada.
+    // já existir) continua no ar o tempo todo, sem ser tocada. Pulada quando
+    // skipStagingTest está ligado - pra projeto que segura conexão exclusiva
+    // com estado (ex.: sessão de WhatsApp), subir um segundo processo em
+    // paralelo apontando pro mesmo banco/sessão causa conflito com a versão
+    // em produção, então o teste faz mais mal que bem nesse caso.
     let record = deployRecord;
-    try {
-      const stagingLog = await this.orchestrator.deployStaging(deployConfig);
-      record = record.appendLog(`--- build/staging ---\n${stagingLog}`);
-      await this.deployRecordRepository.save(record);
-    } catch (error) {
-      await this.removeStagingIgnoringErrors(deployConfig);
-      await this.repository.save(project.withFailedDeployment());
-      const message = error instanceof Error ? error.message : String(error);
-      await this.deployRecordRepository.save(record.appendLog(message).withResult("failed", message));
-      throw error;
-    }
+    if (!project.skipStagingTest) {
+      try {
+        const stagingLog = await this.orchestrator.deployStaging(deployConfig);
+        record = record.appendLog(`--- build/staging ---\n${stagingLog}`);
+        await this.deployRecordRepository.save(record);
+      } catch (error) {
+        await this.removeStagingIgnoringErrors(deployConfig);
+        await this.repository.save(project.withFailedDeployment());
+        const message = error instanceof Error ? error.message : String(error);
+        await this.deployRecordRepository.save(record.appendLog(message).withResult("failed", message));
+        throw error;
+      }
 
-    const stagingHealthy = await this.healthChecker.waitUntilHealthy(stagingHostPort, HEALTH_CHECK_TIMEOUT_MS);
-    if (!stagingHealthy) {
-      await this.removeStagingIgnoringErrors(deployConfig);
-      await this.repository.save(project.withFailedDeployment());
-      const message = `Container de teste subiu mas não respondeu em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. A versão em produção não foi tocada.`;
-      await this.deployRecordRepository.save(record.withResult("failed", message));
-      throw new InternalServerErrorException(
-        apiError("DEPLOY_HEALTH_CHECK_FAILED", `Deploy cancelado: ${message}`),
-      );
+      const stagingHealthy = await this.healthChecker.waitUntilHealthy(stagingHostPort, HEALTH_CHECK_TIMEOUT_MS);
+      if (!stagingHealthy) {
+        await this.removeStagingIgnoringErrors(deployConfig);
+        await this.repository.save(project.withFailedDeployment());
+        const message = `Container de teste subiu mas não respondeu em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. A versão em produção não foi tocada.`;
+        await this.deployRecordRepository.save(record.withResult("failed", message));
+        throw new InternalServerErrorException(
+          apiError("DEPLOY_HEALTH_CHECK_FAILED", `Deploy cancelado: ${message}`),
+        );
+      }
+    } else {
+      record = record.appendLog("--- deploy direto (sem container de teste, configurado nas Configurações) ---");
+      await this.deployRecordRepository.save(record);
     }
 
     // Fase 2: já validado, agora sim troca a versão em produção. Reaproveita a

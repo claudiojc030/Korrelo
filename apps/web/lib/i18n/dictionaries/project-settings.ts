@@ -19,6 +19,10 @@ export interface ProjectSettingsDict {
   diskAlertLabel: string;
   diskAlertHint: string;
   diskAlertPlaceholder: string;
+  deployStrategyTitle: string;
+  deployStrategySubtitle: string;
+  skipStagingTitle: string;
+  skipStagingDescription: string;
 }
 
 export const projectSettingsEn: ProjectSettingsDict = {
@@ -43,6 +47,11 @@ export const projectSettingsEn: ProjectSettingsDict = {
   diskAlertLabel: "Alert threshold",
   diskAlertHint: "Leave empty to disable. Checked hourly, re-notifies at most once a day.",
   diskAlertPlaceholder: "5",
+  deployStrategyTitle: "Deploy strategy",
+  deployStrategySubtitle: "How a new deploy replaces the running version.",
+  skipStagingTitle: "Deploy directly, skip the test container",
+  skipStagingDescription:
+    "By default, deploy builds a test instance first and only swaps production if it responds. Turn this on for apps that hold an exclusive stateful connection (e.g. a WhatsApp gateway) - the test instance would otherwise run alongside production and fight over the same session. Without the test step, a broken build only shows up after production is already replaced.",
 };
 
 export const projectSettingsPt: ProjectSettingsDict = {
@@ -67,4 +76,9 @@ export const projectSettingsPt: ProjectSettingsDict = {
   diskAlertLabel: "Limite pro alerta",
   diskAlertHint: "Deixe vazio pra desativar. Checado de hora em hora, reavisa no máximo uma vez por dia.",
   diskAlertPlaceholder: "5",
+  deployStrategyTitle: "Estratégia de deploy",
+  deployStrategySubtitle: "Como um novo deploy troca a versão que tá rodando.",
+  skipStagingTitle: "Deploy direto, sem container de teste",
+  skipStagingDescription:
+    "Por padrão, o deploy builda uma instância de teste primeiro e só troca a produção se ela responder. Ative isso pra apps que seguram uma conexão exclusiva com estado (ex.: gateway de WhatsApp) - senão a instância de teste roda junto com a produção e disputa a mesma sessão. Sem a etapa de teste, um build quebrado só aparece depois que a produção já foi trocada.",
 };

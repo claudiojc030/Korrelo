@@ -16,6 +16,7 @@ export interface Project {
   autoDeployEnabled: boolean;
   deployBranch: string;
   diskLimitMb: number | null;
+  skipStagingTest: boolean;
   createdAt: string;
 }
 

@@ -22,6 +22,7 @@ model Project {
   autoDeployEnabled Boolean @default(false)
   deployBranch     String   @default("main")
   diskLimitMb      Int?
+  skipStagingTest  Boolean  @default(false)
   createdAt        DateTime @default(now())
   envVars          EnvVar[]
   managedDatabases ManagedDatabase[]

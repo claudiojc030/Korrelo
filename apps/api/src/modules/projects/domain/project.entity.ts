@@ -20,6 +20,12 @@ export class Project {
     // Alerta (não bloqueio: o Docker padrão não segura quota de disco por
     // container sem reparticionar a VPS inteira em XFS). Null = sem alerta.
     public readonly diskLimitMb: number | null,
+    // Projeto que segura conexão exclusiva com estado (ex.: sessão de
+    // WhatsApp) não pode ter dois processos vivos ao mesmo tempo apontando
+    // pro mesmo banco - o container de teste do deploy normal (blue-green)
+    // causa esse conflito. Com isso ligado, o deploy builda e troca a versão
+    // em produção direto, sem subir instância de teste antes.
+    public readonly skipStagingTest: boolean,
     public readonly createdAt: Date,
   ) {}
 
@@ -39,6 +45,7 @@ export class Project {
       false,
       "main",
       null,
+      false,
       new Date(),
     );
   }
@@ -59,6 +66,7 @@ export class Project {
       this.autoDeployEnabled,
       this.deployBranch,
       this.diskLimitMb,
+      this.skipStagingTest,
       this.createdAt,
     );
   }
@@ -79,6 +87,7 @@ export class Project {
       this.autoDeployEnabled,
       this.deployBranch,
       this.diskLimitMb,
+      this.skipStagingTest,
       this.createdAt,
     );
   }
@@ -99,6 +108,7 @@ export class Project {
       this.autoDeployEnabled,
       this.deployBranch,
       this.diskLimitMb,
+      this.skipStagingTest,
       this.createdAt,
     );
   }
@@ -119,6 +129,7 @@ export class Project {
       this.autoDeployEnabled,
       this.deployBranch,
       this.diskLimitMb,
+      this.skipStagingTest,
       this.createdAt,
     );
   }
@@ -139,6 +150,7 @@ export class Project {
       this.autoDeployEnabled,
       this.deployBranch,
       this.diskLimitMb,
+      this.skipStagingTest,
       this.createdAt,
     );
   }
@@ -159,6 +171,7 @@ export class Project {
       autoDeployEnabled,
       deployBranch,
       this.diskLimitMb,
+      this.skipStagingTest,
       this.createdAt,
     );
   }
@@ -179,6 +192,28 @@ export class Project {
       this.autoDeployEnabled,
       this.deployBranch,
       diskLimitMb,
+      this.skipStagingTest,
+      this.createdAt,
+    );
+  }
+
+  withSkipStagingTest(skipStagingTest: boolean): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
+      this.diskLimitMb,
+      skipStagingTest,
       this.createdAt,
     );
   }

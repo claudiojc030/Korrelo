@@ -78,6 +78,7 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
     autoDeployEnabled?: boolean;
     deployBranch?: string;
     diskLimitMb?: number | null;
+    skipStagingTest?: boolean;
   }) {
     if (!project) return;
     setSaving(true);
@@ -168,6 +169,18 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
             </button>
           </div>
         </div>
+      </div>
+
+      <p className="mb-2 mt-6 text-[13.5px] font-medium text-foreground">{t.projectSettings.deployStrategyTitle}</p>
+      <p className="mb-2 text-[12.5px] text-muted-foreground">{t.projectSettings.deployStrategySubtitle}</p>
+      <div className="rounded-xl border border-border-subtle bg-surface px-4">
+        <FeatureToggleRow
+          title={t.projectSettings.skipStagingTitle}
+          description={t.projectSettings.skipStagingDescription}
+          checked={project.skipStagingTest}
+          disabled={saving}
+          onChange={(value) => updateSettings({ skipStagingTest: value })}
+        />
       </div>
 
       <p className="mb-2 mt-6 text-[13.5px] font-medium text-foreground">{t.projectSettings.diskAlertTitle}</p>

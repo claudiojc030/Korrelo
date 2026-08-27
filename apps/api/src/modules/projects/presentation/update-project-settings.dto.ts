@@ -4,4 +4,5 @@ export class UpdateProjectSettingsDto {
   autoDeployEnabled?: boolean;
   deployBranch?: string;
   diskLimitMb?: number | null;
+  skipStagingTest?: boolean;
 }

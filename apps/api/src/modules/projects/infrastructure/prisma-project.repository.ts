@@ -46,6 +46,7 @@ export class PrismaProjectRepository implements ProjectRepository {
         autoDeployEnabled: project.autoDeployEnabled,
         deployBranch: project.deployBranch,
         diskLimitMb: project.diskLimitMb,
+        skipStagingTest: project.skipStagingTest,
         createdAt: project.createdAt,
       },
       update: {
@@ -62,6 +63,7 @@ export class PrismaProjectRepository implements ProjectRepository {
         autoDeployEnabled: project.autoDeployEnabled,
         deployBranch: project.deployBranch,
         diskLimitMb: project.diskLimitMb,
+        skipStagingTest: project.skipStagingTest,
       },
     });
     return this.toDomain(row);
@@ -86,6 +88,7 @@ export class PrismaProjectRepository implements ProjectRepository {
     autoDeployEnabled: boolean;
     deployBranch: string;
     diskLimitMb: number | null;
+    skipStagingTest: boolean;
     createdAt: Date;
   }): Project {
     return new Project(
@@ -103,6 +106,7 @@ export class PrismaProjectRepository implements ProjectRepository {
       row.autoDeployEnabled,
       row.deployBranch,
       row.diskLimitMb,
+      row.skipStagingTest,
       row.createdAt,
     );
   }

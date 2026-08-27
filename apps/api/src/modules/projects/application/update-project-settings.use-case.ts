@@ -12,6 +12,7 @@ export interface UpdateProjectSettingsInput {
   deployBranch?: string;
   // undefined = não mexe; null = remove o alerta; número = novo limite em MB.
   diskLimitMb?: number | null;
+  skipStagingTest?: boolean;
 }
 
 @Injectable()
@@ -44,6 +45,9 @@ export class UpdateProjectSettingsUseCase {
     updated = updated.withAutoDeploy(input.autoDeployEnabled ?? project.autoDeployEnabled, deployBranch);
     if (input.diskLimitMb !== undefined) {
       updated = updated.withDiskLimit(input.diskLimitMb);
+    }
+    if (input.skipStagingTest !== undefined) {
+      updated = updated.withSkipStagingTest(input.skipStagingTest);
     }
 
     return this.repository.save(updated);
