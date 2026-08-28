@@ -166,6 +166,37 @@ export class DockerExecDatabaseQueryRunner implements DatabaseQueryRunner {
     );
   }
 
+  async deleteRow(
+    containerName: string,
+    database: ManagedDatabase,
+    table: string,
+    primaryKey: Record<string, string>,
+  ): Promise<void> {
+    if (database.type === "postgres") {
+      const whereClause = Object.entries(primaryKey)
+        .map(([column, value]) => `"${column}" = ${escapeSqlLiteral(value)}`)
+        .join(" AND ");
+      await this.runPostgresQuery(containerName, database, `DELETE FROM "${table}" WHERE ${whereClause};`);
+      return;
+    }
+
+    if (database.type === "mongodb") {
+      const id = primaryKey["_id"];
+      if (!id) {
+        throw new BadRequestException(apiError("PRIMARY_KEY_REQUIRED", "_id da linha não informado."));
+      }
+      const evalScript =
+        `(function(){ var id; try { id = ObjectId(${JSON.stringify(id)}); } catch(e) { id = ${JSON.stringify(id)}; } ` +
+        `print(JSON.stringify(db.${table}.deleteOne({_id: id}))); })()`;
+      await this.runMongoEval(containerName, database, evalScript);
+      return;
+    }
+
+    throw new BadRequestException(
+      apiError("TABLE_EDIT_NOT_SUPPORTED", "Exclusão de linha só é suportada em Postgres e MongoDB."),
+    );
+  }
+
   private async execDocker(
     containerName: string,
     args: string[],

@@ -92,6 +92,10 @@ export interface ProjectDatabaseDict {
   editSaveButton: string;
   editNoPrimaryKey: string;
   editSaveError: string;
+  deleteRowButton: string;
+  deleteRowConfirmTitle: string;
+  deleteRowConfirmBody: string;
+  deleteRowConfirmButton: string;
 }
 
 export const projectDatabaseEn: ProjectDatabaseDict = {
@@ -191,6 +195,10 @@ export const projectDatabaseEn: ProjectDatabaseDict = {
   editSaveButton: "Save",
   editNoPrimaryKey: "This table has no primary key, editing isn't supported.",
   editSaveError: "Failed to save the changes.",
+  deleteRowButton: "Delete row",
+  deleteRowConfirmTitle: "Delete this row?",
+  deleteRowConfirmBody: "This permanently removes it from the database. This can't be undone.",
+  deleteRowConfirmButton: "Delete",
 };
 
 export const projectDatabasePt: ProjectDatabaseDict = {
@@ -290,4 +298,8 @@ export const projectDatabasePt: ProjectDatabaseDict = {
   editSaveButton: "Salvar",
   editNoPrimaryKey: "Essa tabela não tem chave primária, edição não é suportada.",
   editSaveError: "Falha ao salvar as alterações.",
+  deleteRowButton: "Excluir linha",
+  deleteRowConfirmTitle: "Excluir essa linha?",
+  deleteRowConfirmBody: "Isso remove ela do banco de dados permanentemente. Não pode ser desfeito.",
+  deleteRowConfirmButton: "Excluir",
 };

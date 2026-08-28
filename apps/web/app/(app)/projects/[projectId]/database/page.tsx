@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from "react";
 import { useRouter } from "next/navigation";
-import { Database, DatabaseZap, Eye, EyeOff, Loader2, Pencil, Play, Save, TriangleAlert, X } from "lucide-react";
+import { Database, DatabaseZap, Eye, EyeOff, Loader2, Pencil, Play, Save, Trash2, TriangleAlert, X } from "lucide-react";
 import { apiFetch } from "../../../../../lib/api-client";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../../../lib/api-error";
@@ -604,6 +604,8 @@ function DatabaseBrowser({
   const [edits, setEdits] = useState<Record<number, Record<string, string>>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [confirmDeleteRow, setConfirmDeleteRow] = useState<number | null>(null);
+  const [deletingRow, setDeletingRow] = useState(false);
 
   function loadTables() {
     setTablesError(null);
@@ -753,6 +755,47 @@ function DatabaseBrowser({
     }
   }
 
+  async function handleDeleteRow() {
+    if (confirmDeleteRow === null || !result || !sourceTable || !primaryKeyColumns) return;
+    const rowIndex = confirmDeleteRow;
+    const primaryKey: Record<string, string> = {};
+    for (const pkCol of primaryKeyColumns) {
+      const colIndex = result.columns.indexOf(pkCol);
+      primaryKey[pkCol] = colIndex >= 0 ? result.rows[rowIndex][colIndex] : "";
+    }
+
+    setDeletingRow(true);
+    setSaveError(null);
+    try {
+      const res = await apiFetch(`/projects/${projectId}/database/rows`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ table: sourceTable, primaryKeys: [primaryKey] }),
+      });
+      const body: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(translateApiError(t, body, t.projectDatabase.editSaveError));
+
+      const results = (body as { results: { error: string | null }[] }).results;
+      const firstError = results.find((r) => r.error)?.error;
+      if (firstError) {
+        setSaveError(firstError);
+        return;
+      }
+
+      setConfirmDeleteRow(null);
+      setEdits((prev) => {
+        const next = { ...prev };
+        delete next[rowIndex];
+        return next;
+      });
+      await handleRunQuery(query, sourceTable);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : t.projectDatabase.unknownError);
+    } finally {
+      setDeletingRow(false);
+    }
+  }
+
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
@@ -898,6 +941,15 @@ function DatabaseBrowser({
                 <div className="flex max-h-96 flex-col gap-3 overflow-auto p-3">
                   {result.rows.map((row, i) => (
                     <div key={i} className="rounded-md border border-border-subtle bg-background p-2">
+                      <div className="mb-1 flex justify-end">
+                        <button
+                          onClick={() => setConfirmDeleteRow(i)}
+                          title={t.projectDatabase.deleteRowButton}
+                          className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                       {result.columns.map((col, j) => (
                         <div key={col} className="flex items-center gap-2 py-0.5">
                           <span className="w-32 flex-none truncate font-mono text-[11.5px] text-muted-foreground" title={col}>
@@ -927,6 +979,7 @@ function DatabaseBrowser({
                             {col}
                           </th>
                         ))}
+                        {editMode && <th className="sticky top-0 border-b border-border-subtle bg-surface px-2 py-2" />}
                       </tr>
                     </thead>
                     <tbody>
@@ -948,6 +1001,17 @@ function DatabaseBrowser({
                               </td>
                             ),
                           )}
+                          {editMode && (
+                            <td className="px-1.5 py-1 text-right">
+                              <button
+                                onClick={() => setConfirmDeleteRow(i)}
+                                title={t.projectDatabase.deleteRowButton}
+                                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-destructive"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -965,6 +1029,47 @@ function DatabaseBrowser({
           )}
         </div>
       </div>
+
+      {confirmDeleteRow !== null && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4"
+          onClick={() => !deletingRow && setConfirmDeleteRow(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl border border-border-subtle bg-surface p-5 shadow-panel"
+          >
+            <div className="flex items-start gap-3">
+              <div className="flex h-8 w-8 flex-none items-center justify-center rounded-full bg-destructive/10 text-destructive">
+                <TriangleAlert size={16} strokeWidth={1.75} />
+              </div>
+              <div>
+                <p className="text-[14.5px] font-semibold text-foreground">{t.projectDatabase.deleteRowConfirmTitle}</p>
+                <p className="mt-1 text-[13px] text-muted-foreground">{t.projectDatabase.deleteRowConfirmBody}</p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmDeleteRow(null)}
+                disabled={deletingRow}
+                className="rounded-md px-3.5 py-2 text-[13px] font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+              >
+                {t.common.cancel}
+              </button>
+              <button
+                onClick={handleDeleteRow}
+                disabled={deletingRow}
+                className="inline-flex items-center gap-2 rounded-md bg-destructive px-3.5 py-2 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                {deletingRow && <Loader2 size={14} className="animate-spin" />}
+                {t.projectDatabase.deleteRowConfirmButton}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

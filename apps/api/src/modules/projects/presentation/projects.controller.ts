@@ -26,6 +26,7 @@ import { ListDatabaseTablesUseCase } from "../application/list-database-tables.u
 import { RunDatabaseQueryUseCase } from "../application/run-database-query.use-case";
 import { GetTablePrimaryKeyUseCase } from "../application/get-table-primary-key.use-case";
 import { UpdateDatabaseRowsUseCase } from "../application/update-database-rows.use-case";
+import { DeleteDatabaseRowsUseCase } from "../application/delete-database-rows.use-case";
 import { StartMongoImportUseCase } from "../application/start-mongo-import.use-case";
 import { GetMongoImportStatusUseCase } from "../application/get-mongo-import-status.use-case";
 import { StartDatabaseExportUseCase } from "../application/start-database-export.use-case";
@@ -42,6 +43,7 @@ import { SetEnvVarsDto } from "./set-env-vars.dto";
 import { ProvisionDatabaseDto } from "./provision-database.dto";
 import { RunDatabaseQueryDto } from "./run-database-query.dto";
 import { UpdateDatabaseRowsDto } from "./update-database-rows.dto";
+import { DeleteDatabaseRowsDto } from "./delete-database-rows.dto";
 import { StartMongoImportDto } from "./start-mongo-import.dto";
 import { UpdateProjectSettingsDto } from "./update-project-settings.dto";
 import { AttachDomainDto } from "./attach-domain.dto";
@@ -76,6 +78,7 @@ export class ProjectsController {
     private readonly runDatabaseQuery: RunDatabaseQueryUseCase,
     private readonly getTablePrimaryKey: GetTablePrimaryKeyUseCase,
     private readonly updateDatabaseRows: UpdateDatabaseRowsUseCase,
+    private readonly deleteDatabaseRows: DeleteDatabaseRowsUseCase,
     private readonly startMongoImport: StartMongoImportUseCase,
     private readonly getMongoImportStatus: GetMongoImportStatusUseCase,
     private readonly startDatabaseExport: StartDatabaseExportUseCase,
@@ -193,6 +196,11 @@ export class ProjectsController {
   @Post(":id/database/rows")
   updateDatabaseRowsEndpoint(@Param("id") id: string, @Body() dto: UpdateDatabaseRowsDto) {
     return this.updateDatabaseRows.execute(id, dto.table, dto.updates).then((results) => ({ results }));
+  }
+
+  @Delete(":id/database/rows")
+  deleteDatabaseRowsEndpoint(@Param("id") id: string, @Body() dto: DeleteDatabaseRowsDto) {
+    return this.deleteDatabaseRows.execute(id, dto.table, dto.primaryKeys).then((results) => ({ results }));
   }
 
   @Post(":id/database/mongo-import")

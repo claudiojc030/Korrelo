@@ -22,4 +22,5 @@ export interface DatabaseQueryRunner {
     primaryKey: Record<string, string>,
     changes: Record<string, string>,
   ): Promise<void>;
+  deleteRow(containerName: string, database: ManagedDatabase, table: string, primaryKey: Record<string, string>): Promise<void>;
 }
