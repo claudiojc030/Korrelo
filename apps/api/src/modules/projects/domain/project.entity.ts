@@ -26,6 +26,10 @@ export class Project {
     // causa esse conflito. Com isso ligado, o deploy builda e troca a versão
     // em produção direto, sem subir instância de teste antes.
     public readonly skipStagingTest: boolean,
+    // Null = rateio automático entre os projetos rodando (ResourceBudgetCalculator).
+    // Definido = usa esse valor fixo, ignorando o rateio - pra quem quer
+    // controlar manualmente quanto cada projeto pode usar.
+    public readonly memoryLimitMb: number | null,
     public readonly createdAt: Date,
   ) {}
 
@@ -46,6 +50,7 @@ export class Project {
       "main",
       null,
       false,
+      null,
       new Date(),
     );
   }
@@ -67,6 +72,7 @@ export class Project {
       this.deployBranch,
       this.diskLimitMb,
       this.skipStagingTest,
+      this.memoryLimitMb,
       this.createdAt,
     );
   }
@@ -88,6 +94,7 @@ export class Project {
       this.deployBranch,
       this.diskLimitMb,
       this.skipStagingTest,
+      this.memoryLimitMb,
       this.createdAt,
     );
   }
@@ -109,6 +116,7 @@ export class Project {
       this.deployBranch,
       this.diskLimitMb,
       this.skipStagingTest,
+      this.memoryLimitMb,
       this.createdAt,
     );
   }
@@ -130,6 +138,7 @@ export class Project {
       this.deployBranch,
       this.diskLimitMb,
       this.skipStagingTest,
+      this.memoryLimitMb,
       this.createdAt,
     );
   }
@@ -151,6 +160,7 @@ export class Project {
       this.deployBranch,
       this.diskLimitMb,
       this.skipStagingTest,
+      this.memoryLimitMb,
       this.createdAt,
     );
   }
@@ -172,6 +182,7 @@ export class Project {
       deployBranch,
       this.diskLimitMb,
       this.skipStagingTest,
+      this.memoryLimitMb,
       this.createdAt,
     );
   }
@@ -193,6 +204,7 @@ export class Project {
       this.deployBranch,
       diskLimitMb,
       this.skipStagingTest,
+      this.memoryLimitMb,
       this.createdAt,
     );
   }
@@ -214,6 +226,29 @@ export class Project {
       this.deployBranch,
       this.diskLimitMb,
       skipStagingTest,
+      this.memoryLimitMb,
+      this.createdAt,
+    );
+  }
+
+  withMemoryLimit(memoryLimitMb: number | null): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
+      this.diskLimitMb,
+      this.skipStagingTest,
+      memoryLimitMb,
       this.createdAt,
     );
   }

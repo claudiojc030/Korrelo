@@ -13,6 +13,8 @@ export interface UpdateProjectSettingsInput {
   // undefined = não mexe; null = remove o alerta; número = novo limite em MB.
   diskLimitMb?: number | null;
   skipStagingTest?: boolean;
+  // undefined = não mexe; null = volta pro rateio automático; número = fixa esse limite.
+  memoryLimitMb?: number | null;
 }
 
 @Injectable()
@@ -38,6 +40,12 @@ export class UpdateProjectSettingsUseCase {
       );
     }
 
+    if (input.memoryLimitMb !== undefined && input.memoryLimitMb !== null && input.memoryLimitMb < 128) {
+      throw new BadRequestException(
+        apiError("INVALID_MEMORY_LIMIT", "O limite de memória precisa ser de pelo menos 128 MB (ou vazio pra voltar ao rateio automático)."),
+      );
+    }
+
     let updated = project.withSettings(
       input.terminalEnabled ?? project.terminalEnabled,
       input.databaseEnabled ?? project.databaseEnabled,
@@ -48,6 +56,9 @@ export class UpdateProjectSettingsUseCase {
     }
     if (input.skipStagingTest !== undefined) {
       updated = updated.withSkipStagingTest(input.skipStagingTest);
+    }
+    if (input.memoryLimitMb !== undefined) {
+      updated = updated.withMemoryLimit(input.memoryLimitMb);
     }
 
     return this.repository.save(updated);

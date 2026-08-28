@@ -47,6 +47,7 @@ export class PrismaProjectRepository implements ProjectRepository {
         deployBranch: project.deployBranch,
         diskLimitMb: project.diskLimitMb,
         skipStagingTest: project.skipStagingTest,
+        memoryLimitMb: project.memoryLimitMb,
         createdAt: project.createdAt,
       },
       update: {
@@ -64,6 +65,7 @@ export class PrismaProjectRepository implements ProjectRepository {
         deployBranch: project.deployBranch,
         diskLimitMb: project.diskLimitMb,
         skipStagingTest: project.skipStagingTest,
+        memoryLimitMb: project.memoryLimitMb,
       },
     });
     return this.toDomain(row);
@@ -89,6 +91,7 @@ export class PrismaProjectRepository implements ProjectRepository {
     deployBranch: string;
     diskLimitMb: number | null;
     skipStagingTest: boolean;
+    memoryLimitMb: number | null;
     createdAt: Date;
   }): Project {
     return new Project(
@@ -107,6 +110,7 @@ export class PrismaProjectRepository implements ProjectRepository {
       row.deployBranch,
       row.diskLimitMb,
       row.skipStagingTest,
+      row.memoryLimitMb,
       row.createdAt,
     );
   }

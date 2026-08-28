@@ -53,6 +53,7 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
   const [saving, setSaving] = useState(false);
   const [branchInput, setBranchInput] = useState("");
   const [diskLimitInput, setDiskLimitInput] = useState("");
+  const [memoryLimitInput, setMemoryLimitInput] = useState("");
 
   function load() {
     apiFetch(`/projects/${params.projectId}`)
@@ -62,6 +63,7 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
         if (p) {
           setBranchInput(p.deployBranch);
           setDiskLimitInput(p.diskLimitMb ? String(Math.round(p.diskLimitMb / 1024)) : "");
+          setMemoryLimitInput(p.memoryLimitMb ? String(p.memoryLimitMb) : "");
         }
       })
       .catch(() => setProject(null));
@@ -79,6 +81,7 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
     deployBranch?: string;
     diskLimitMb?: number | null;
     skipStagingTest?: boolean;
+    memoryLimitMb?: number | null;
   }) {
     if (!project) return;
     setSaving(true);
@@ -181,6 +184,36 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
           disabled={saving}
           onChange={(value) => updateSettings({ skipStagingTest: value })}
         />
+      </div>
+
+      <p className="mb-2 mt-6 text-[13.5px] font-medium text-foreground">{t.projectSettings.memoryLimitTitle}</p>
+      <p className="mb-2 text-[12.5px] text-muted-foreground">{t.projectSettings.memoryLimitDescription}</p>
+      <div className="rounded-xl border border-border-subtle bg-surface px-4">
+        <div className="flex items-center justify-between py-4">
+          <div>
+            <p className="text-[13.5px] font-medium text-foreground">{t.projectSettings.memoryLimitLabel}</p>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t.projectSettings.memoryLimitHint}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              value={memoryLimitInput}
+              onChange={(e) => setMemoryLimitInput(e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder={t.projectSettings.memoryLimitPlaceholder}
+              inputMode="numeric"
+              className="w-24 rounded-md border border-border-subtle bg-transparent px-2.5 py-1.5 text-right font-mono text-[13px] text-foreground outline-none focus:border-accent"
+            />
+            <span className="text-[12.5px] text-muted-foreground">MB</span>
+            <button
+              onClick={() =>
+                updateSettings({ memoryLimitMb: memoryLimitInput.trim() ? Number(memoryLimitInput) : null })
+              }
+              disabled={saving}
+              className="rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {t.common.save}
+            </button>
+          </div>
+        </div>
       </div>
 
       <p className="mb-2 mt-6 text-[13.5px] font-medium text-foreground">{t.projectSettings.diskAlertTitle}</p>

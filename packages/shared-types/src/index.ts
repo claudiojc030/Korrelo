@@ -17,6 +17,7 @@ export interface Project {
   deployBranch: string;
   diskLimitMb: number | null;
   skipStagingTest: boolean;
+  memoryLimitMb: number | null;
   createdAt: string;
 }
 

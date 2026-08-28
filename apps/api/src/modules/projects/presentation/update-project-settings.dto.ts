@@ -5,4 +5,5 @@ export class UpdateProjectSettingsDto {
   deployBranch?: string;
   diskLimitMb?: number | null;
   skipStagingTest?: boolean;
+  memoryLimitMb?: number | null;
 }

@@ -23,6 +23,11 @@ export interface ProjectSettingsDict {
   deployStrategySubtitle: string;
   skipStagingTitle: string;
   skipStagingDescription: string;
+  memoryLimitTitle: string;
+  memoryLimitDescription: string;
+  memoryLimitLabel: string;
+  memoryLimitHint: string;
+  memoryLimitPlaceholder: string;
 }
 
 export const projectSettingsEn: ProjectSettingsDict = {
@@ -52,6 +57,12 @@ export const projectSettingsEn: ProjectSettingsDict = {
   skipStagingTitle: "Deploy directly, skip the test container",
   skipStagingDescription:
     "By default, deploy builds a test instance first and only swaps production if it responds. Turn this on for apps that hold an exclusive stateful connection (e.g. a WhatsApp gateway) - the test instance would otherwise run alongside production and fight over the same session. Without the test step, a broken build only shows up after production is already replaced.",
+  memoryLimitTitle: "Memory limit",
+  memoryLimitDescription:
+    "By default, Korrelo splits the VPS's available RAM evenly across every running project. Set a fixed limit here to take a project out of that automatic split and control it yourself.",
+  memoryLimitLabel: "Fixed limit",
+  memoryLimitHint: "Leave empty to go back to the automatic split. Applies on the next deploy.",
+  memoryLimitPlaceholder: "512",
 };
 
 export const projectSettingsPt: ProjectSettingsDict = {
@@ -81,4 +92,10 @@ export const projectSettingsPt: ProjectSettingsDict = {
   skipStagingTitle: "Deploy direto, sem container de teste",
   skipStagingDescription:
     "Por padrão, o deploy builda uma instância de teste primeiro e só troca a produção se ela responder. Ative isso pra apps que seguram uma conexão exclusiva com estado (ex.: gateway de WhatsApp) - senão a instância de teste roda junto com a produção e disputa a mesma sessão. Sem a etapa de teste, um build quebrado só aparece depois que a produção já foi trocada.",
+  memoryLimitTitle: "Limite de memória",
+  memoryLimitDescription:
+    "Por padrão, o Korrelo divide a RAM disponível da VPS igualmente entre todo projeto rodando. Defina um limite fixo aqui pra tirar um projeto desse rateio automático e controlar você mesmo.",
+  memoryLimitLabel: "Limite fixo",
+  memoryLimitHint: "Deixe vazio pra voltar ao rateio automático. Vale a partir do próximo deploy.",
+  memoryLimitPlaceholder: "512",
 };

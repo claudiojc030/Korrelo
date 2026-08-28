@@ -23,6 +23,7 @@ model Project {
   deployBranch     String   @default("main")
   diskLimitMb      Int?
   skipStagingTest  Boolean  @default(false)
+  memoryLimitMb    Int?
   createdAt        DateTime @default(now())
   envVars          EnvVar[]
   managedDatabases ManagedDatabase[]
