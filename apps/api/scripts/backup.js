@@ -71,7 +71,7 @@ async function backupProjectUploads(project, destDir) {
 }
 
 async function backupManagedDatabases(prisma, destDir) {
-  const projects = await prisma.project.findMany({ include: { managedDatabase: true } });
+  const projects = await prisma.project.findMany({ include: { managedDatabases: true } });
   const failures = [];
 
   for (const project of projects) {
@@ -79,57 +79,63 @@ async function backupManagedDatabases(prisma, destDir) {
       await backupProjectUploads(project, destDir);
     }
 
-    const db = project.managedDatabase;
-    if (!db || db.type === "custom" || !project.containerName) continue;
+    if (!project.containerName) continue;
 
-    const containerName = `${project.containerName}-db-1`;
-    const safeName = project.name.replace(/[^a-z0-9-]+/gi, "-");
+    // Um projeto pode ter mais de um banco gerenciado agora (ex.: Postgres +
+    // Redis) - cada um com o próprio serviceName/container, então precisa
+    // fazer backup de todos, não só de um.
+    for (const db of project.managedDatabases) {
+      if (db.type === "custom") continue;
 
-    try {
-      if (db.type === "postgres") {
-        const dest = path.join(destDir, `${safeName}-postgres.sql`);
-        const { stdout } = await run(
-          "docker",
-          ["exec", containerName, "pg_dump", "-U", db.username, db.databaseName],
-          { maxBuffer: MAX_BUFFER },
-        );
-        await fs.writeFile(dest, stdout);
-        console.log(`${project.name} (Postgres) -> ${dest}`);
-      } else if (db.type === "mongodb") {
-        const dest = path.join(destDir, `${safeName}-mongodb.archive`);
-        const { stdout } = await run(
-          "docker",
-          [
-            "exec",
-            containerName,
-            "mongodump",
-            "--username",
-            db.username,
-            "--password",
-            db.password,
-            "--authenticationDatabase",
-            "admin",
-            "--archive",
-          ],
-          { encoding: "buffer", maxBuffer: MAX_BUFFER },
-        );
-        await fs.writeFile(dest, stdout);
-        console.log(`${project.name} (MongoDB) -> ${dest}`);
-      } else if (db.type === "redis") {
-        if (!db.persistent) {
-          console.log(`${project.name} (Redis): pulado (marcado como cache/fila, sem persistência).`);
-          continue;
+      const containerName = `${project.containerName}-${db.serviceName}-1`;
+      const safeName = project.name.replace(/[^a-z0-9-]+/gi, "-");
+
+      try {
+        if (db.type === "postgres") {
+          const dest = path.join(destDir, `${safeName}-postgres.sql`);
+          const { stdout } = await run(
+            "docker",
+            ["exec", containerName, "pg_dump", "-U", db.username, db.databaseName],
+            { maxBuffer: MAX_BUFFER },
+          );
+          await fs.writeFile(dest, stdout);
+          console.log(`${project.name} (Postgres) -> ${dest}`);
+        } else if (db.type === "mongodb") {
+          const dest = path.join(destDir, `${safeName}-mongodb.archive`);
+          const { stdout } = await run(
+            "docker",
+            [
+              "exec",
+              containerName,
+              "mongodump",
+              "--username",
+              db.username,
+              "--password",
+              db.password,
+              "--authenticationDatabase",
+              "admin",
+              "--archive",
+            ],
+            { encoding: "buffer", maxBuffer: MAX_BUFFER },
+          );
+          await fs.writeFile(dest, stdout);
+          console.log(`${project.name} (MongoDB) -> ${dest}`);
+        } else if (db.type === "redis") {
+          if (!db.persistent) {
+            console.log(`${project.name} (Redis): pulado (marcado como cache/fila, sem persistência).`);
+            continue;
+          }
+          const dest = path.join(destDir, `${safeName}-redis.rdb`);
+          await run("docker", ["exec", containerName, "redis-cli", "-a", db.password, "SAVE"], {
+            maxBuffer: MAX_BUFFER,
+          });
+          await run("docker", ["cp", `${containerName}:/data/dump.rdb`, dest], { maxBuffer: MAX_BUFFER });
+          console.log(`${project.name} (Redis) -> ${dest}`);
         }
-        const dest = path.join(destDir, `${safeName}-redis.rdb`);
-        await run("docker", ["exec", containerName, "redis-cli", "-a", db.password, "SAVE"], {
-          maxBuffer: MAX_BUFFER,
-        });
-        await run("docker", ["cp", `${containerName}:/data/dump.rdb`, dest], { maxBuffer: MAX_BUFFER });
-        console.log(`${project.name} (Redis) -> ${dest}`);
+      } catch (error) {
+        console.error(`Falha ao fazer backup de "${project.name}" (${db.type}): ${error.message}`);
+        failures.push(`${project.name} (${db.type}): ${error.message}`);
       }
-    } catch (error) {
-      console.error(`Falha ao fazer backup de "${project.name}": ${error.message}`);
-      failures.push(`${project.name}: ${error.message}`);
     }
   }
 
