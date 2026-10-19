@@ -5,9 +5,14 @@ import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../lib/i18n/dictionaries";
 
 interface OnboardingChecklistProps {
-  githubConnected: boolean;
-  hasProjects: boolean;
-  twoFactorEnabled: boolean;
+  /**
+   * null = "não deu pra saber" (a API falhou). Nesses passos a linha é
+   * omitida em vez de marcada como pendente: um checklist que mostra
+   * "conecte o GitHub" quando o problema era a API lying pro usuário.
+   */
+  githubConnected: boolean | null;
+  hasProjects: boolean | null;
+  twoFactorEnabled: boolean | null;
 }
 
 interface Step {
@@ -20,19 +25,21 @@ interface Step {
 
 export async function OnboardingChecklist({ githubConnected, hasProjects, twoFactorEnabled }: OnboardingChecklistProps) {
   const t = getDictionary(await getLocaleServer());
-  const steps: Step[] = [
+  const allSteps: (Step & { known: boolean })[] = [
     {
       key: "github",
       label: t.dashboard.onboardingGithubLabel,
       description: t.dashboard.onboardingGithubDescription,
-      done: githubConnected,
+      done: githubConnected === true,
+      known: githubConnected !== null,
       action: <GithubConnectButton />,
     },
     {
       key: "project",
       label: t.dashboard.onboardingProjectLabel,
       description: t.dashboard.onboardingProjectDescription,
-      done: hasProjects,
+      done: hasProjects === true,
+      known: hasProjects !== null,
       action: (
         <Link
           href="/projects"
@@ -46,7 +53,8 @@ export async function OnboardingChecklist({ githubConnected, hasProjects, twoFac
       key: "2fa",
       label: t.dashboard.onboarding2faLabel,
       description: t.dashboard.onboarding2faDescription,
-      done: twoFactorEnabled,
+      done: twoFactorEnabled === true,
+      known: twoFactorEnabled !== null,
       action: (
         <Link
           href="/security"
@@ -57,6 +65,8 @@ export async function OnboardingChecklist({ githubConnected, hasProjects, twoFac
       ),
     },
   ];
+
+  const steps: Step[] = allSteps.filter((step) => step.known);
 
   const pending = steps.filter((step) => !step.done);
   if (pending.length === 0) {

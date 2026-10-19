@@ -93,4 +93,22 @@ export interface SystemMetrics {
   uptimeSeconds: number;
   tier: ResourceTier;
   containers: ContainerSummary[];
+  /**
+   * true quando estes números vêm de um cache (a coleta real falhou ou ficou
+   * lenta demais) e podem estar desatualizados. A UI precisa avisar isso em
+   * vez de mostrar o valor antigo como se fosse o atual.
+   */
+  stale?: boolean;
+  /**
+   * false quando não foi possível obter NENHUMA métrica (Docker e disco
+   * indisponíveis). A UI deve mostrar "indisponível" em vez de 0%.
+   */
+  available?: boolean;
+  /**
+   * false quando o Docker não respondeu (timeout/erro). Evita que uma falha
+   * de coleta seja lida como "não existe container rodando".
+   */
+  dockerReachable?: boolean;
+  /** Momento (ISO) da coleta que originou estes valores. */
+  collectedAt?: string;
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Settings as SettingsIcon, Globe, KeyRound, Plus, Trash2, Save, Loader2, Eye, EyeOff, TriangleAlert, ClipboardPaste } from "lucide-react";
+import { Settings as SettingsIcon, Globe, KeyRound, Plus, Trash2, Save, Loader2, Eye, EyeOff, TriangleAlert, ClipboardPaste, Lock } from "lucide-react";
 import { apiFetch } from "../../../lib/api-client";
 import { useTranslation } from "../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../lib/api-error";
@@ -10,6 +10,8 @@ import { PasteEnvModal } from "../../../components/paste-env-modal";
 interface EnvRow {
   key: string;
   value: string;
+  /** true quando o valor veio mascarado da API (segredo). */
+  masked?: boolean;
 }
 
 export default function SettingsPage() {
@@ -23,11 +25,19 @@ export default function SettingsPage() {
   const [confirmDetach, setConfirmDetach] = useState(false);
 
   const [rows, setRows] = useState<EnvRow[]>([]);
+  // Valor como veio da API, por chave. Usado pra não reenviar (e não
+  // sobrescrever) um segredo que o usuário não mexeu.
+  const [originals, setOriginals] = useState<Record<string, string>>({});
   const [envLoading, setEnvLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [envError, setEnvError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [revealAll, setRevealAll] = useState(false);
+
+  const [revealKey, setRevealKey] = useState<string | null>(null);
+  const [revealPassword, setRevealPassword] = useState("");
+  const [revealError, setRevealError] = useState<string | null>(null);
+  const [revealing, setRevealing] = useState(false);
 
   const [pasteOpen, setPasteOpen] = useState(false);
 
@@ -35,8 +45,15 @@ export default function SettingsPage() {
     setEnvLoading(true);
     apiFetch("/settings/env")
       .then((res) => res.json())
-      .then((data: EnvRow[]) => setRows(data.length > 0 ? data : [{ key: "", value: "" }]))
-      .catch(() => setRows([{ key: "", value: "" }]))
+      .then((data: EnvRow[]) => {
+        const loaded = data.length > 0 ? data : [{ key: "", value: "" }];
+        setRows(loaded);
+        setOriginals(Object.fromEntries(loaded.map((row) => [row.key, row.value])));
+      })
+      .catch(() => {
+        setRows([{ key: "", value: "" }]);
+        setOriginals({});
+      })
       .finally(() => setEnvLoading(false));
   }
 
@@ -122,24 +139,71 @@ export default function SettingsPage() {
     setSaved(false);
   }
 
+  /**
+   * Revela o valor real de UMA variável. Exige a senha do administrador
+   * (confirmado no backend) e só mostra o valor naquela tela - a API não
+   * devolve segredos em resposta comum.
+   */
+  async function handleReveal() {
+    if (!revealKey) return;
+    setRevealing(true);
+    setRevealError(null);
+    try {
+      const res = await apiFetch("/settings/env/reveal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: revealKey, password: revealPassword }),
+      });
+      const body: unknown = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(translateApiError(t, body, t.settings.revealError));
+      }
+      const data = body as { key: string; value: string };
+      setRows((prev) =>
+        prev.map((row) => (row.key === data.key ? { ...row, value: data.value, masked: false } : row)),
+      );
+      // O valor revelado é o valor REAL já gravado: marcar como "original"
+      // evita reenviá-lo no próximo save (e não sobrescreve nada).
+      setOriginals((prev) => ({ ...prev, [data.key]: data.value }));
+      setRevealKey(null);
+      setRevealPassword("");
+    } catch (err) {
+      setRevealError(err instanceof Error ? err.message : t.settings.revealError);
+    } finally {
+      setRevealing(false);
+    }
+  }
+
   async function handleSaveEnv() {
     setSaving(true);
     setEnvError(null);
     setSaved(false);
     try {
       const vars = rows.filter((r) => r.key.trim().length > 0);
+      let written = 0;
       for (const v of vars) {
+        // Não reenvia o que não mudou: um segredo mascarado (ou revelado e
+        // não alterado) não pode ser sobrescrito com o que veio da tela.
+        // O backend também ignora a máscara - essa é a segunda rede de
+        // proteção.
+        if (originals[v.key] !== undefined && originals[v.key] === v.value) continue;
         const res = await apiFetch("/settings/env", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(v),
+          body: JSON.stringify({ key: v.key, value: v.value }),
         });
         if (!res.ok) {
           const body: unknown = await res.json().catch(() => ({}));
           throw new Error(translateApiError(t, body, t.settings.saveError));
         }
+        written += 1;
       }
       setSaved(true);
+      if (written > 0) {
+        // Recarrega pra voltar ao estado mascarado (e confirmar o que foi
+        // realmente gravado).
+        loadEnv();
+      }
     } catch (err) {
       setEnvError(err instanceof Error ? err.message : t.settings.unknownError);
     } finally {
@@ -172,13 +236,13 @@ export default function SettingsPage() {
               {t.settings.domainAttachedPrefix}
               {domain}
             </p>
-            <div className="mt-2.5 flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-[12.5px] text-warning">
+            <div className="mt-2 flex items-start gap-2 rounded-md bg-warning/10 px-3 py-2 text-[12.5px] text-warning">
               <TriangleAlert size={14} strokeWidth={1.75} className="mt-0.5 flex-none" />
               <span>{t.settings.domainAttachedWarning}</span>
             </div>
             <button
               onClick={() => setConfirmDetach(true)}
-              className="mt-3 text-[13px] font-medium text-destructive hover:opacity-85"
+              className="mt-3 text-[12.5px] font-medium text-destructive hover:opacity-85"
             >
               {t.settings.detachButton}
             </button>
@@ -218,20 +282,24 @@ export default function SettingsPage() {
           <div className="flex flex-none items-center gap-3">
             <button
               onClick={() => setPasteOpen(true)}
-              className="inline-flex items-center gap-1.5 text-[12.5px] font-medium text-accent hover:opacity-85"
+              className="text-[12.5px] font-medium text-accent hover:opacity-85"
             >
-              <ClipboardPaste size={14} strokeWidth={1.75} />
               {t.settings.pasteEnvButton}
             </button>
             <button
               onClick={() => setRevealAll((v) => !v)}
-              className="inline-flex items-center gap-1.5 text-[12.5px] text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-1 text-[12.5px] font-medium text-muted-foreground hover:text-foreground"
             >
               {revealAll ? <EyeOff size={14} /> : <Eye size={14} />}
               {revealAll ? t.settings.hideValues : t.settings.showValues}
             </button>
           </div>
         </div>
+
+        <p className="mb-3 flex items-start gap-2 rounded-md bg-surface px-3 py-2 text-[12px] text-muted-foreground">
+          <Lock size={13} strokeWidth={1.75} className="mt-0.5 flex-none" />
+          <span>{t.settings.maskedNotice}</span>
+        </p>
 
         {envLoading ? (
           <p className="text-[13px] text-muted-foreground">{t.common.loading}</p>
@@ -255,10 +323,22 @@ export default function SettingsPage() {
                     spellCheck={false}
                     className="flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 font-mono text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground/50 focus:border-accent"
                   />
+                  {row.masked && (
+                    <button
+                      onClick={() => {
+                        setRevealKey(row.key);
+                        setRevealPassword("");
+                        setRevealError(null);
+                      }}
+                      className="flex-none text-[12px] font-medium text-accent hover:opacity-85"
+                    >
+                      {t.settings.revealButton}
+                    </button>
+                  )}
                   <button
                     onClick={() => removeRow(index)}
                     aria-label={t.settings.removeVarAriaLabel}
-                    className="flex-none rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    className="flex-none rounded-md px-1.5 py-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                   >
                     <Trash2 size={14} strokeWidth={1.75} />
                   </button>
@@ -282,7 +362,7 @@ export default function SettingsPage() {
           <button
             onClick={handleSaveEnv}
             disabled={saving || envLoading}
-            className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-60"
+            className="inline-flex items-center gap-2 rounded-md bg-accent px-4 py-2 text-[13px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} strokeWidth={1.75} />}
             {t.settings.saveVarsButton}
@@ -290,6 +370,47 @@ export default function SettingsPage() {
           {saved && <span className="text-[12.5px] text-accent">{t.settings.saved}</span>}
         </div>
       </div>
+
+      {revealKey && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4" onClick={() => !revealing && setRevealKey(null)}>
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl border border-border-subtle bg-surface p-5 shadow-panel"
+          >
+            <p className="text-[13.5px] font-semibold text-foreground">{t.settings.revealTitle}</p>
+            <p className="mt-1 font-mono text-[12.5px] text-muted-foreground">{revealKey}</p>
+            <input
+              type="password"
+              value={revealPassword}
+              onChange={(e) => setRevealPassword(e.target.value)}
+              placeholder={t.settings.revealPasswordPlaceholder}
+              autoFocus
+              className="mt-3 w-full rounded-md border border-border bg-background px-3 py-2 text-[13px] text-foreground outline-none focus:border-accent"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleReveal();
+              }}
+            />
+            {revealError && <p className="mt-2 text-[12.5px] text-destructive">{revealError}</p>}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => setRevealKey(null)}
+                disabled={revealing}
+                className="rounded-md px-3 py-1.5 text-[12.5px] font-medium text-muted-foreground hover:bg-background hover:text-foreground"
+              >
+                {t.settings.revealCancelButton}
+              </button>
+              <button
+                onClick={() => void handleReveal()}
+                disabled={revealing || !revealPassword}
+                className="inline-flex items-center gap-2 rounded-md bg-accent px-3.5 py-1.5 text-[12.5px] font-semibold text-accent-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                {revealing && <Loader2 size={13} className="animate-spin" />}
+                {t.settings.revealConfirmButton}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmDetach && (
         <div
@@ -308,21 +429,21 @@ export default function SettingsPage() {
               </div>
               <div>
                 <p className="text-[14.5px] font-semibold text-foreground">{t.settings.confirmDetachTitle}</p>
-                <p className="mt-1 text-[13px] text-muted-foreground">{t.settings.confirmDetachBody}</p>
+                <p className="mt-1 text-[12.5px] text-muted-foreground">{t.settings.confirmDetachBody}</p>
               </div>
             </div>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={() => setConfirmDetach(false)}
                 disabled={detaching}
-                className="rounded-md px-3.5 py-2 text-[13px] font-medium text-muted-foreground hover:bg-muted disabled:opacity-50"
+                className="rounded-md px-3.5 py-2 text-[12.5px] font-medium text-muted-foreground hover:bg-background hover:text-foreground disabled:opacity-50"
               >
                 {t.common.cancel}
               </button>
               <button
-                onClick={handleDetach}
+                onClick={() => void handleDetach()}
                 disabled={detaching}
-                className="inline-flex items-center gap-2 rounded-md bg-destructive px-3.5 py-2 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-md bg-destructive px-3.5 py-2 text-[12.5px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {detaching && <Loader2 size={14} className="animate-spin" />}
                 {t.settings.detachButton}

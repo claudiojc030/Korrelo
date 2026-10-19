@@ -2,6 +2,7 @@ export interface ProjectDetailDict {
   // layout.tsx
   backToProjects: string;
   projectNotFound: string;
+  projectLoadError: string;
   statusDetected: string;
   statusConfiguring: string;
   statusRunning: string;
@@ -78,6 +79,7 @@ export interface ProjectDetailDict {
 export const projectDetailEn: ProjectDetailDict = {
   backToProjects: "Projects",
   projectNotFound: "Project not found.",
+  projectLoadError: "Couldn't load this project. The API may be unavailable or too slow right now.",
   statusDetected: "Detected",
   statusConfiguring: "Configuring",
   statusRunning: "Running",
@@ -152,6 +154,7 @@ export const projectDetailEn: ProjectDetailDict = {
 export const projectDetailPt: ProjectDetailDict = {
   backToProjects: "Projetos",
   projectNotFound: "Projeto não encontrado.",
+  projectLoadError: "Não foi possível carregar este projeto. A API pode estar indisponível ou lenta demais agora.",
   statusDetected: "Detectado",
   statusConfiguring: "Configurando",
   statusRunning: "Rodando",

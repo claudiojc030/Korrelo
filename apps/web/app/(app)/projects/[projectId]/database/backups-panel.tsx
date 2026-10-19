@@ -65,17 +65,23 @@ export function BackupsPanel({ projectId }: { projectId: string }) {
       }
 
       const poll = async () => {
-        const statusRes = await apiFetch(`/projects/${projectId}/database/export/status`);
-        const status: { done: boolean; success: boolean | null; errorMessage?: string } = await statusRes.json();
-        if (!status.done) {
-          setTimeout(poll, STATUS_POLL_MS);
-          return;
-        }
-        setBackingUp(false);
-        if (status.success) {
-          load();
-        } else {
-          setBackupError(status.errorMessage ?? t.projectDatabase.backupStartError);
+        try {
+          const statusRes = await apiFetch(`/projects/${projectId}/database/export/status`);
+          const status: { done: boolean; success: boolean | null; errorMessage?: string } = await statusRes.json();
+          if (!status.done) {
+            setTimeout(poll, STATUS_POLL_MS);
+            return;
+          }
+          setBackingUp(false);
+          if (status.success) {
+            load();
+          } else {
+            setBackupError(status.errorMessage ?? t.projectDatabase.backupStartError);
+          }
+        } catch {
+          // Timeout/erro no polling: o usuário pode reagir depois; não deixa
+          // a requisição abortada virar unhandled rejection.
+          setBackingUp(false);
         }
       };
       poll();

@@ -31,6 +31,14 @@ export interface SettingsDict {
   pasteEnvPlaceholder: string;
   pasteEnvImportButton: string;
   pasteEnvError: string;
+  maskedNotice: string;
+  revealButton: string;
+  revealTitle: string;
+  revealPasswordPlaceholder: string;
+  revealConfirmButton: string;
+  revealCancelButton: string;
+  revealError: string;
+  revealedBadge: string;
 }
 
 export const settingsEn: SettingsDict = {
@@ -69,6 +77,15 @@ export const settingsEn: SettingsDict = {
   pasteEnvPlaceholder: "JWT_SECRET=...\nGITHUB_APP_ID=...",
   pasteEnvImportButton: "Import",
   pasteEnvError: "Failed to import.",
+  maskedNotice:
+    "Secret values are masked. Saving without changing them keeps the stored value untouched - to rotate a secret, type a new value over it.",
+  revealButton: "Reveal",
+  revealTitle: "Type your admin password to reveal this value",
+  revealPasswordPlaceholder: "Your password",
+  revealConfirmButton: "Reveal",
+  revealCancelButton: "Cancel",
+  revealError: "Couldn't reveal the value.",
+  revealedBadge: "revealed",
 };
 
 export const settingsPt: SettingsDict = {
@@ -107,4 +124,13 @@ export const settingsPt: SettingsDict = {
   pasteEnvPlaceholder: "JWT_SECRET=...\nGITHUB_APP_ID=...",
   pasteEnvImportButton: "Importar",
   pasteEnvError: "Falha ao importar.",
+  maskedNotice:
+    "Os valores sensíveis ficam mascarados. Salvar sem alterá-los mantém o valor guardado como está - pra trocar um segredo, digite um valor novo por cima.",
+  revealButton: "Revelar",
+  revealTitle: "Digite sua senha de administrador pra revelar este valor",
+  revealPasswordPlaceholder: "Sua senha",
+  revealConfirmButton: "Revelar",
+  revealCancelButton: "Cancelar",
+  revealError: "Não foi possível revelar o valor.",
+  revealedBadge: "revelado",
 };

@@ -18,6 +18,7 @@ export interface ProjectsDict {
   sectionPendingDeploy: string;
   sectionFailed: string;
   emptyState: string;
+  loadError: string;
   remove: string;
   deleteConfirmBody: string;
   cancel: string;
@@ -60,6 +61,7 @@ export const projectsEn: ProjectsDict = {
   sectionPendingDeploy: "Waiting to deploy",
   sectionFailed: "Failed",
   emptyState: "No projects yet. Import a repository from GitHub to get started.",
+  loadError: "Couldn't load the projects. The API may be unavailable or too slow right now.",
   remove: "Remove",
   deleteConfirmBody: "This stops the container (if running) and deletes the cloned files. This can't be undone.",
   cancel: "Cancel",
@@ -103,6 +105,7 @@ export const projectsPt: ProjectsDict = {
   sectionPendingDeploy: "Aguardando deploy",
   sectionFailed: "Falharam",
   emptyState: "Nenhum projeto ainda. Importe um repositório do GitHub pra começar.",
+  loadError: "Não foi possível carregar os projetos. A API pode estar indisponível ou lenta demais agora.",
   remove: "Remover",
   deleteConfirmBody: "Isso para o container (se estiver rodando) e apaga os arquivos clonados. Não pode ser desfeito.",
   cancel: "Cancelar",

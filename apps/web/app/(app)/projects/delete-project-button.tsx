@@ -39,16 +39,23 @@ export function DeleteProjectButton({ projectId, projectName }: { projectId: str
       }
 
       const poll = async () => {
-        const statusRes = await apiFetch(`/projects/${projectId}/database/export/status`);
-        const status: { done: boolean; success: boolean | null; errorMessage?: string } = await statusRes.json();
-        if (!status.done) {
-          setTimeout(poll, 1000);
-          return;
-        }
-        if (status.success) {
-          setExportPhase("done");
-        } else {
-          setExportError(status.errorMessage ?? t.projects.exportDatabaseStartError);
+        try {
+          const statusRes = await apiFetch(`/projects/${projectId}/database/export/status`);
+          const status: { done: boolean; success: boolean | null; errorMessage?: string } = await statusRes.json();
+          if (!status.done) {
+            setTimeout(poll, 1000);
+            return;
+          }
+          if (status.success) {
+            setExportPhase("done");
+          } else {
+            setExportError(status.errorMessage ?? t.projects.exportDatabaseStartError);
+            setExportPhase("failed");
+          }
+        } catch {
+          // Falha no polling: não pode deixar a requisição abortada virar
+          // unhandled rejection.
+          setExportError(t.projects.exportDatabaseStartError);
           setExportPhase("failed");
         }
       };

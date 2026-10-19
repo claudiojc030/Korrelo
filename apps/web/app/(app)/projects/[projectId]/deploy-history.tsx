@@ -34,10 +34,15 @@ export function DeployHistory({ projectId, initialRecords }: { projectId: string
     // Só faz polling enquanto algum deploy estiver rodando, pra dar
     // visibilidade de andamento igual o histórico do Render.
     const interval = setInterval(async () => {
-      const res = await apiFetch(`/projects/${projectId}/deploys`);
-      if (res.ok) {
-        const latest = (await res.json()) as DeployRecord[];
-        setRecords((prev) => [...latest, ...prev.slice(latest.length)]);
+      try {
+        const res = await apiFetch(`/projects/${projectId}/deploys`);
+        if (res.ok) {
+          const latest = (await res.json()) as DeployRecord[];
+          setRecords((prev) => [...latest, ...prev.slice(latest.length)]);
+        }
+      } catch {
+        // Timeout/erro de rede no polling: o próximo tick tenta de novo.
+        // Sem este catch, uma requisição abortada viraria unhandled rejection.
       }
     }, POLL_MS);
     return () => clearInterval(interval);

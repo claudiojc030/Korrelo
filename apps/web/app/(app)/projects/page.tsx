@@ -9,13 +9,14 @@ import { getRequestHostServer } from "../../../lib/get-request-host-server";
 import { getProjectPublicUrl } from "../../../lib/project-public-url";
 import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
 import { getDictionary, type Dictionary } from "../../../lib/i18n/dictionaries";
+import { fetchApiServer, type ApiServerResult } from "../../../lib/api-server-fetch";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-
-async function getProjects(): Promise<Project[]> {
-  const res = await fetch(`${API_URL}/projects`, { cache: "no-store", headers: await authHeaderServer() });
-  if (!res.ok) return [];
-  return res.json();
+/**
+ * Timeout na chamada: sem ele, uma API lenta segurava o render inteiro e a
+ * rota só voltava com o 504 do Nginx (ou nem voltava).
+ */
+async function getProjects(): Promise<ApiServerResult<Project[]>> {
+  return fetchApiServer<Project[]>("/projects", { headers: await authHeaderServer() });
 }
 
 function parseStack(project: Project): DetectedStack | null {
@@ -152,7 +153,19 @@ function Section({
 export default async function ProjectsPage() {
   const t = getDictionary(await getLocaleServer());
   const host = await getRequestHostServer();
-  const projects = await getProjects();
+  const projectsResult = await getProjects();
+  const projects = projectsResult.ok ? projectsResult.data : null;
+
+  if (projects === null) {
+    // Falha de backend não pode virar "nenhum projeto cadastrado": o
+    // operador precisa saber que a API não respondeu.
+    return (
+      <div className="mx-auto max-w-5xl px-8 py-10">
+        <h1 className="text-xl font-semibold text-foreground">{t.projects.title}</h1>
+        <p className="mt-3 text-[13.5px] text-destructive">{t.projects.loadError}</p>
+      </div>
+    );
+  }
 
   const running = projects.filter((p) => p.status === "running");
   const failed = projects.filter((p) => p.status === "failed");

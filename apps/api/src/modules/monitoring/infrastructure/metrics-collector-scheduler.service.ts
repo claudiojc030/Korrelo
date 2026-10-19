@@ -10,6 +10,8 @@ const RETENTION_DAYS = 7;
 @Injectable()
 export class MetricsCollectorSchedulerService {
   private readonly logger = new Logger(MetricsCollectorSchedulerService.name);
+  /** Impede duas coletas do scheduler ao mesmo tempo (ticks sobrepostos). */
+  private collecting = false;
 
   constructor(
     private readonly recordMetricSample: RecordMetricSampleUseCase,
@@ -18,10 +20,17 @@ export class MetricsCollectorSchedulerService {
 
   @Interval(COLLECT_INTERVAL_MS)
   async collect(): Promise<void> {
+    if (this.collecting) {
+      this.logger.warn("[metrics] coleta anterior ainda em andamento - tick ignorado");
+      return;
+    }
+    this.collecting = true;
     try {
       await this.recordMetricSample.execute();
     } catch (error) {
-      this.logger.warn(`Falha ao coletar amostra de métricas: ${error}`);
+      this.logger.warn(`[metrics] falha ao coletar amostra de métricas: ${error}`);
+    } finally {
+      this.collecting = false;
     }
   }
 

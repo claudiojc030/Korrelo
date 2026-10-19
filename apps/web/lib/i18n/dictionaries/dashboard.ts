@@ -2,6 +2,9 @@ export interface DashboardDict {
   title: string;
   autoRefreshNote: string;
   metricsUnavailable: string;
+  metricsStale: string;
+  dockerUnreachable: string;
+  projectsUnavailable: string;
   overview: string;
   overviewSubtitle: string;
   cpu: string;
@@ -69,8 +72,11 @@ export interface DashboardDict {
 
 export const dashboardEn: DashboardDict = {
   title: "Dashboard",
-  autoRefreshNote: "Refreshes every 12s",
+  autoRefreshNote: "Refreshes every 30s",
   metricsUnavailable: "Couldn't load metrics. Check whether the API is running.",
+  metricsStale: "These values may be outdated: the last collection didn't complete.",
+  dockerUnreachable: "The Docker daemon didn't answer, so the container list may be outdated.",
+  projectsUnavailable: "Couldn't load the project list. Check whether the API is running.",
   overview: "Overview",
   overviewSubtitle: "server total",
   cpu: "CPU",
@@ -138,8 +144,11 @@ export const dashboardEn: DashboardDict = {
 
 export const dashboardPt: DashboardDict = {
   title: "Dashboard",
-  autoRefreshNote: "Atualiza a cada 12s",
+  autoRefreshNote: "Atualiza a cada 30s",
   metricsUnavailable: "Não foi possível carregar as métricas. Verifique se a API está no ar.",
+  metricsStale: "Estes valores podem estar desatualizados: a última coleta não foi concluída.",
+  dockerUnreachable: "O Docker não respondeu, então a lista de containers pode estar desatualizada.",
+  projectsUnavailable: "Não foi possível carregar a lista de projetos. Verifique se a API está no ar.",
   overview: "Geral",
   overviewSubtitle: "total do servidor",
   cpu: "CPU",

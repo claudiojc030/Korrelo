@@ -49,6 +49,9 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: REFRESH_TOKEN_REPOSITORY, useClass: PrismaRefreshTokenRepository },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
   ],
-  exports: [TOKEN_SERVICE, USER_REPOSITORY],
+  // PASSWORD_HASHER é exportado pra quem precisar confirmar a senha do
+  // administrador sem duplicar a lógica de comparação (ex.: revelação
+  // explícita de um segredo do Core em SettingsModule).
+  exports: [TOKEN_SERVICE, USER_REPOSITORY, PASSWORD_HASHER],
 })
 export class AuthModule {}

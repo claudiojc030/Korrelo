@@ -12,56 +12,30 @@ import { getProjectPublicUrl } from "../../../lib/project-public-url";
 import { AutoRefresh } from "../../../components/auto-refresh";
 import { getLocaleServer } from "../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../lib/i18n/dictionaries";
+import { fetchApiServer, type ApiServerResult } from "../../../lib/api-server-fetch";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-
-async function getSystemMetrics(): Promise<SystemMetrics | null> {
-  try {
-    const res = await fetch(`${API_URL}/monitoring/system`, {
-      cache: "no-store",
-      headers: await authHeaderServer(),
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+/**
+ * Todas as chamadas do backend feitas aqui têm TIMEOUT (ver api-server-fetch).
+ * Antes, um `fetch` sem timeout ficava pendurado quando a API demorava e a
+ * página inteira travava até o Nginx desistir (504). Agora a falha é rápida
+ * e a tela mostra o estado real ("indisponível") em vez de ficar carregando.
+ */
+async function getSystemMetrics(): Promise<ApiServerResult<SystemMetrics>> {
+  return fetchApiServer<SystemMetrics>("/monitoring/system", { headers: await authHeaderServer() });
 }
 
-async function getProjects(): Promise<Project[]> {
-  try {
-    const res = await fetch(`${API_URL}/projects`, { cache: "no-store", headers: await authHeaderServer() });
-    if (!res.ok) return [];
-    return res.json();
-  } catch {
-    return [];
-  }
+async function getProjects(): Promise<ApiServerResult<Project[]>> {
+  return fetchApiServer<Project[]>("/projects", { headers: await authHeaderServer() });
 }
 
-async function getGithubStatus() {
-  try {
-    const res = await fetch(`${API_URL}/github/status`, {
-      cache: "no-store",
-      headers: await authHeaderServer(),
-    });
-    if (!res.ok) return null;
-    return res.json() as Promise<{ connected: boolean; accountLogin: string | null }>;
-  } catch {
-    return null;
-  }
+async function getGithubStatus(): Promise<ApiServerResult<{ connected: boolean; accountLogin: string | null }>> {
+  return fetchApiServer<{ connected: boolean; accountLogin: string | null }>("/github/status", {
+    headers: await authHeaderServer(),
+  });
 }
 
-async function getTwoFactorStatus(): Promise<{ enabled: boolean } | null> {
-  try {
-    const res = await fetch(`${API_URL}/auth/2fa/status`, {
-      cache: "no-store",
-      headers: await authHeaderServer(),
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+async function getTwoFactorStatus(): Promise<ApiServerResult<{ enabled: boolean }>> {
+  return fetchApiServer<{ enabled: boolean }>("/auth/2fa/status", { headers: await authHeaderServer() });
 }
 
 interface UpdateStatus {
@@ -72,17 +46,8 @@ interface UpdateStatus {
   updateAvailable: boolean;
 }
 
-async function getUpdateStatus(): Promise<UpdateStatus | null> {
-  try {
-    const res = await fetch(`${API_URL}/monitoring/update-status`, {
-      cache: "no-store",
-      headers: await authHeaderServer(),
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+async function getUpdateStatus(): Promise<ApiServerResult<UpdateStatus>> {
+  return fetchApiServer<UpdateStatus>("/monitoring/update-status", { headers: await authHeaderServer() });
 }
 
 function formatUptime(seconds: number): string {
@@ -104,7 +69,7 @@ export default async function DashboardPage() {
     medium: t.dashboard.tierMedium,
     large: t.dashboard.tierLarge,
   };
-  const [metrics, projects, githubStatus, twoFactorStatus, updateStatus] = await Promise.all([
+  const [metricsResult, projectsResult, githubResult, twoFactorResult, updateResult] = await Promise.all([
     getSystemMetrics(),
     getProjects(),
     getGithubStatus(),
@@ -112,9 +77,19 @@ export default async function DashboardPage() {
     getUpdateStatus(),
   ]);
 
-  const runningProjects = projects.filter((p) => p.status === "running" && p.containerName);
+  const metrics = metricsResult.ok ? metricsResult.data : null;
+  // null = "não sei" (a API falhou). Diferente de [] = "não tem projeto".
+  // Sem essa distinção, uma indisponibilidade da API aparecia como
+  // "nenhum projeto cadastrado".
+  const projects = projectsResult.ok ? projectsResult.data : null;
+  const githubStatus = githubResult.ok ? githubResult.data : null;
+  const twoFactorStatus = twoFactorResult.ok ? twoFactorResult.data : null;
+  const updateStatus = updateResult.ok ? updateResult.data : null;
+
+  const runningProjects = (projects ?? []).filter((p) => p.status === "running" && p.containerName);
   const projectContainerNames = new Set(runningProjects.map((p) => p.containerName));
   const otherContainers = metrics?.containers.filter((c) => !projectContainerNames.has(c.name)) ?? [];
+  const dockerUnreachable = metrics?.dockerReachable === false;
 
   function findContainer(name: string | null): ContainerSummary | undefined {
     return metrics?.containers.find((c) => c.name === name);
@@ -122,7 +97,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-8 py-10">
-      <AutoRefresh intervalMs={12000} />
+      <AutoRefresh intervalMs={30000} />
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold text-foreground">{t.dashboard.title}</h1>
@@ -134,21 +109,24 @@ export default async function DashboardPage() {
             {t.dashboard.autoRefreshNote}
           </p>
         </div>
-        {metrics && <TierBadge tier={metrics.tier} label={TIER_LABEL[metrics.tier]} />}
+        {metrics && metrics.available !== false && <TierBadge tier={metrics.tier} label={TIER_LABEL[metrics.tier]} />}
       </div>
 
       {updateStatus && <UpdateBanner status={updateStatus} />}
 
       <OnboardingChecklist
-        githubConnected={githubStatus?.connected ?? false}
-        hasProjects={projects.length > 0}
-        twoFactorEnabled={twoFactorStatus?.enabled ?? false}
+        githubConnected={githubStatus?.connected ?? null}
+        hasProjects={projects === null ? null : projects.length > 0}
+        twoFactorEnabled={twoFactorStatus?.enabled ?? null}
       />
 
-      {!metrics ? (
+      {!metrics || metrics.available === false ? (
         <p className="text-[13.5px] text-destructive">{t.dashboard.metricsUnavailable}</p>
       ) : (
         <>
+          {metrics.stale === true && (
+            <p className="mb-3 text-[13px] text-warning">{t.dashboard.metricsStale}</p>
+          )}
           <h2 className="mb-2.5 text-[13px] font-medium text-muted-foreground">
             {t.dashboard.overview} <span className="text-muted-foreground/60">· {t.dashboard.overviewSubtitle}</span>
           </h2>
@@ -186,15 +164,14 @@ export default async function DashboardPage() {
           <MetricsHistoryChart />
 
           <div className="mt-8">
-            <div className="mb-2.5 flex items-center gap-2 text-muted-foreground">
-              <Server size={15} strokeWidth={1.75} />
-              <h2 className="text-[13px] font-medium">
-                {t.dashboard.runningProjects} <span className="text-muted-foreground/60">· {t.dashboard.runningProjectsSubtitle}</span>
-              </h2>
-            </div>
+            <h2 className="mb-2.5 text-[13px] font-medium text-muted-foreground">
+              {t.dashboard.runningProjects} <span className="text-muted-foreground/60">· {t.dashboard.runningProjectsSubtitle}</span>
+            </h2>
 
-            {runningProjects.length === 0 ? (
-              <p className="text-[13px] text-muted-foreground">{t.dashboard.noRunningProjects}</p>
+            {projects === null ? (
+              <p className="text-[13.5px] text-destructive">{t.dashboard.projectsUnavailable}</p>
+            ) : runningProjects.length === 0 ? (
+              <p className="text-[13.5px] text-muted-foreground">{t.dashboard.noRunningProjects}</p>
             ) : (
               <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
                 {runningProjects.map((project, i) => {
@@ -272,20 +249,21 @@ export default async function DashboardPage() {
           </div>
 
           <div className="mt-8">
-            <div className="mb-2.5 flex items-center gap-2 text-muted-foreground">
-              <Box size={15} strokeWidth={1.75} />
-              <h2 className="text-[13px] font-medium">
-                {t.dashboard.infrastructure} <span className="text-muted-foreground/60">· {t.dashboard.infrastructureSubtitle}</span>
-              </h2>
-            </div>
-            {otherContainers.length === 0 ? (
-              <p className="text-[13px] text-muted-foreground">{t.dashboard.noInfraContainers}</p>
+            <h2 className="mb-2.5 text-[13px] font-medium text-muted-foreground">
+              {t.dashboard.infrastructure} <span className="text-muted-foreground/60">· {t.dashboard.infrastructureSubtitle}</span>
+            </h2>
+            {dockerUnreachable ? (
+              // Falha de coleta NÃO é "não existe container": mostrar isso
+              // errado levava o operador a desligar containers bons.
+              <p className="text-[13.5px] text-warning">{t.dashboard.dockerUnreachable}</p>
+            ) : otherContainers.length === 0 ? (
+              <p className="text-[13.5px] text-muted-foreground">{t.dashboard.noInfraContainers}</p>
             ) : (
               <div className="overflow-hidden rounded-xl border border-border-subtle bg-surface">
                 {otherContainers.map((container, i) => (
                   <div
                     key={container.name}
-                    className={`flex items-center justify-between px-4 py-3 ${
+                    className={`flex items-center justify-between gap-4 px-4 py-3 ${
                       i > 0 ? "border-t border-border-subtle" : ""
                     }`}
                   >

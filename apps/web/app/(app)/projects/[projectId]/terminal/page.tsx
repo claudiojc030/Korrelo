@@ -4,20 +4,11 @@ import { TerminalClient } from "./terminal-client";
 import { authHeaderServer } from "../../../../../lib/auth-cookie-server";
 import { getLocaleServer } from "../../../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../../../lib/i18n/dictionaries";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+import { fetchApiServer } from "../../../../../lib/api-server-fetch";
 
 async function getProject(projectId: string): Promise<Project | null> {
-  try {
-    const res = await fetch(`${API_URL}/projects/${projectId}`, {
-      cache: "no-store",
-      headers: await authHeaderServer(),
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+  const result = await fetchApiServer<Project>(`/projects/${projectId}`, { headers: await authHeaderServer() });
+  return result.ok ? result.data : null;
 }
 
 export default async function TerminalPage(props: { params: Promise<{ projectId: string }> }) {

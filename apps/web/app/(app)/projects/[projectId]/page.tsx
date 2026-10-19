@@ -8,34 +8,21 @@ import { DeployHistory } from "./deploy-history";
 import { getProjectPublicUrl } from "../../../../lib/project-public-url";
 import { getLocaleServer } from "../../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../../lib/i18n/dictionaries";
+import { fetchApiServer, type ApiServerResult } from "../../../../lib/api-server-fetch";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
-
-async function getProject(projectId: string): Promise<Project | null> {
-  try {
-    const res = await fetch(`${API_URL}/projects/${projectId}`, {
-      cache: "no-store",
-      headers: await authHeaderServer(),
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+/**
+ * Cada chamada do backend tem TIMEOUT próprio: uma delas travar (Docker
+ * lento, API sobrecarregada) não pode derrubar o render da página inteira.
+ * O que falhou simplesmente vem como null e a tela mostra o estado parcial.
+ */
+async function getProject(projectId: string): Promise<ApiServerResult<Project>> {
+  return fetchApiServer<Project>(`/projects/${projectId}`, { headers: await authHeaderServer() });
 }
 
-async function getDiskUsage(projectId: string): Promise<number | null> {
-  try {
-    const res = await fetch(`${API_URL}/projects/${projectId}/disk-usage`, {
-      cache: "no-store",
-      headers: await authHeaderServer(),
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { diskUsageMb: number };
-    return data.diskUsageMb;
-  } catch {
-    return null;
-  }
+async function getDiskUsage(projectId: string): Promise<ApiServerResult<{ diskUsageMb: number }>> {
+  return fetchApiServer<{ diskUsageMb: number }>(`/projects/${projectId}/disk-usage`, {
+    headers: await authHeaderServer(),
+  });
 }
 
 interface DeployRecord {
@@ -50,43 +37,16 @@ interface DeployRecord {
   finishedAt: string | null;
 }
 
-async function getDeployRecords(projectId: string): Promise<DeployRecord[]> {
-  try {
-    const res = await fetch(`${API_URL}/projects/${projectId}/deploys`, {
-      cache: "no-store",
-      headers: await authHeaderServer(),
-    });
-    if (!res.ok) return [];
-    return res.json();
-  } catch {
-    return [];
-  }
+async function getDeployRecords(projectId: string): Promise<ApiServerResult<DeployRecord[]>> {
+  return fetchApiServer<DeployRecord[]>(`/projects/${projectId}/deploys`, { headers: await authHeaderServer() });
 }
 
-async function getDomainAliases(projectId: string): Promise<string[]> {
-  try {
-    const res = await fetch(`${API_URL}/projects/${projectId}/domain/aliases`, {
-      cache: "no-store",
-      headers: await authHeaderServer(),
-    });
-    if (!res.ok) return [];
-    return res.json();
-  } catch {
-    return [];
-  }
+async function getDomainAliases(projectId: string): Promise<ApiServerResult<string[]>> {
+  return fetchApiServer<string[]>(`/projects/${projectId}/domain/aliases`, { headers: await authHeaderServer() });
 }
 
-async function getSystemMetrics(): Promise<SystemMetrics | null> {
-  try {
-    const res = await fetch(`${API_URL}/monitoring/system`, {
-      cache: "no-store",
-      headers: await authHeaderServer(),
-    });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
+async function getSystemMetrics(): Promise<ApiServerResult<SystemMetrics>> {
+  return fetchApiServer<SystemMetrics>("/monitoring/system", { headers: await authHeaderServer() });
 }
 
 function parseStack(project: Project): DetectedStack | null {
@@ -111,7 +71,7 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
   const params = await props.params;
   const t = getDictionary(await getLocaleServer());
   const host = await getRequestHostServer();
-  const [project, diskUsageMb, metrics, deployRecords, domainAliases] = await Promise.all([
+  const [projectResult, diskUsageResult, metricsResult, deployRecordsResult, domainAliasesResult] = await Promise.all([
     getProject(params.projectId),
     getDiskUsage(params.projectId),
     getSystemMetrics(),
@@ -119,7 +79,21 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
     getDomainAliases(params.projectId),
   ]);
 
-  if (!project) return null;
+  if (!projectResult.ok) {
+    // Antes, qualquer falha (inclusive timeout) devolvia null e a página
+    // ficava em branco, sem dizer o que aconteceu.
+    return (
+      <div className="mx-auto max-w-5xl px-8 py-10">
+        <p className="text-[13.5px] text-destructive">{t.projectDetail.projectLoadError}</p>
+      </div>
+    );
+  }
+
+  const project = projectResult.data;
+  const diskUsageMb = diskUsageResult.ok ? diskUsageResult.data.diskUsageMb : null;
+  const metrics = metricsResult.ok ? metricsResult.data : null;
+  const deployRecords = deployRecordsResult.ok ? deployRecordsResult.data : [];
+  const domainAliases = domainAliasesResult.ok ? domainAliasesResult.data : [];
 
   const stack = parseStack(project);
   const container = project.containerName

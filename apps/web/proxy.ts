@@ -7,6 +7,14 @@ import { TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from "./lib/auth-cookie-client";
 // corretamente) está sempre disponível, sem precisar declarar runtime.
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
 
+/**
+ * Tempo limite do refresh de sessão. Sem isso, uma API lenta (ou travada
+ * por carga) segurava a navegação inteira até o Nginx desistir com 504.
+ */
+const REFRESH_TIMEOUT_MS = 2_500;
+/** Espera entre as duas tentativas de refresh. */
+const RETRY_DELAY_MS = 500;
+
 function extractCookieValue(setCookies: string[], name: string): string | null {
   const raw = setCookies.find((c) => c.startsWith(`${name}=`));
   if (!raw) return null;
@@ -34,12 +42,16 @@ export async function proxy(request: NextRequest) {
     // fora do ar por 1-2s. Sem isso, um refresh que caísse bem nesse instante
     // via erro de REDE (não uma resposta 401 de verdade) deslogava o usuário
     // à toa, mesmo com a sessão perfeitamente válida.
+    let apiResponded = false;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const refreshRes = await fetch(`${API_URL}/auth/refresh`, {
           method: "POST",
           headers: { cookie: `${REFRESH_TOKEN_COOKIE}=${refreshToken}` },
+          // Tempo limite: sem ele, uma API travada segura a navegação.
+          signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
         });
+        apiResponded = true;
         if (refreshRes.ok) {
           const setCookies = refreshRes.headers.getSetCookie();
           // Sem isso, o Set-Cookie só valeria pra PRÓXIMA requisição do
@@ -60,12 +72,27 @@ export async function proxy(request: NextRequest) {
         // Resposta de verdade (401 etc.): sessão inválida mesmo, não adianta tentar de novo.
         break;
       } catch {
-        // Erro de rede/conexão recusada: só nesse caso vale tentar de novo.
+        // Erro de rede/conexão recusada/TIMEOUT: só nesse caso vale tentar de
+        // novo. Timeout é tratado como "API indisponível", não como
+        // "sessão inválida" - deslogar o usuário por causa de lentidão seria
+        // pior do que renderizar a página sem dados.
         if (attempt === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 800));
+          await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
         }
       }
     }
+
+    if (apiResponded) {
+      // A API respondeu (401): a sessão é inválida mesmo. Mantém o
+      // comportamento de antes - redireciona pro login.
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+
+    // A API não respondeu a tempo (ou recusou a conexão). A sessão pode estar
+    // válida: em vez de expulsar o usuário pro login, segue com a navegação
+    // - a página mostra o estado "API indisponível" e o próximo refresh
+    // tenta de novo.
+    return NextResponse.next();
   }
 
   return NextResponse.redirect(new URL("/login", request.url));

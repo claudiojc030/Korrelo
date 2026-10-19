@@ -1,42 +1,206 @@
-import { Inject, Injectable } from "@nestjs/common";
-import type { SystemMetrics } from "@korrelo/shared-types";
+import { Inject, Injectable, Logger } from "@nestjs/common";
+import * as os from "node:os";
+import { classifyResourceTier, type SystemMetrics } from "@korrelo/shared-types";
 import {
   SYSTEM_METRICS_COLLECTOR,
   type SystemMetricsCollector,
 } from "../domain/system-metrics-collector";
 
-// collect() roda docker ps/stats + leitura de disco, e isso é caro o bastante (chega
-// a ~2s neste ambiente) pra valer a pena não repetir se duas chamadas caírem
-// quase juntas (o poll do dashboard e o coletor em background de métricas,
-// por exemplo). Cache curtíssimo com dedupe do in-flight: uma chamada em
-// andamento é reaproveitada por qualquer outra que chegar antes dela
-// terminar, e o resultado fica bom por mais alguns segundos depois.
-const CACHE_TTL_MS = 3_000;
+/**
+ * Cache curto + proteção contra cascata.
+ *
+ * Contexto (incidente de 19/10/2026): a coleta de métricas chamava
+ * `docker stats` sem timeout. Quando o Docker ficava lento, a promise
+ * "in-flight" nunca resolvia e TODAS as requisições do dashboard passavam a
+ * esperar a mesma promise pendurada - o painel inteiro travava atrás do
+ * Docker e o Nginx devolvia 504.
+ *
+ * O que esta classe garante:
+ * - No máximo UMA coleta em andamento; requisições simultâneas compartilham
+ *   a mesma promise (e ela é SEMPRE liberada, mesmo em caso de falha).
+ * - A promise compartilhada nunca rejeita: quem chama recebe métricas
+ *   (possivelmente desatualizadas), nunca uma exceção.
+ * - Falhas consecutivas viram backoff exponencial e depois um circuito
+ *   aberto: enquanto o Docker não responde, nem tentamos de novo.
+ * - A última leitura válida fica em cache e é devolvida marcada como
+ *   `stale`, em vez de zero ("0% de CPU" seria mentira).
+ * - Recuperação automática: quando uma coleta volta a dar certo, o contador
+ *   zera e o circuito fecha sozinho.
+ */
+
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/** Por quanto tempo uma leitura é considerada "fresca". */
+const CACHE_TTL_MS = envInt("SYSTEM_METRICS_CACHE_TTL_MS", 3_000);
+/** Quantas falhas consecutivas são necessárias pra declarar o circuito aberto. */
+const FAILURE_THRESHOLD = envInt("SYSTEM_METRICS_FAILURE_THRESHOLD", 3);
+/** Base do backoff exponencial entre tentativas. */
+const BACKOFF_BASE_MS = envInt("SYSTEM_METRICS_BACKOFF_BASE_MS", 5_000);
+/** Teto do backoff. */
+const BACKOFF_MAX_MS = envInt("SYSTEM_METRICS_BACKOFF_MAX_MS", 60_000);
+
+interface CacheEntry {
+  value: SystemMetrics;
+  expiresAt: number;
+}
 
 @Injectable()
 export class GetSystemMetricsUseCase {
-  private cached: { value: SystemMetrics; expiresAt: number } | null = null;
+  private readonly logger = new Logger(GetSystemMetricsUseCase.name);
+
+  private cached: CacheEntry | null = null;
+  private lastGood: SystemMetrics | null = null;
   private inFlight: Promise<SystemMetrics> | null = null;
+
+  private consecutiveFailures = 0;
+  private nextAttemptAt = 0;
+  private circuitOpen = false;
 
   constructor(
     @Inject(SYSTEM_METRICS_COLLECTOR) private readonly collector: SystemMetricsCollector,
   ) {}
 
   async execute(): Promise<SystemMetrics> {
-    if (this.cached && this.cached.expiresAt > Date.now()) {
+    const now = Date.now();
+
+    if (this.cached && this.cached.expiresAt > now) {
       return this.cached.value;
     }
+
+    // Backoff/circuito aberto: NÃO toca no Docker. Devolve o último estado
+    // conhecido (marcado como desatualizado) em vez de ficar pendurado.
+    if (now < this.nextAttemptAt) {
+      return this.staleOrDegraded();
+    }
+
+    // Coleta em andamento: compartilha a mesma promise. Nunca rejeita, então
+    // nenhuma requisição fica esperando um erro.
     if (this.inFlight) {
       return this.inFlight;
     }
 
-    this.inFlight = this.collector.collect();
+    const run = this.collectOnce();
+    this.inFlight = run;
     try {
-      const value = await this.inFlight;
-      this.cached = { value, expiresAt: Date.now() + CACHE_TTL_MS };
-      return value;
+      return await run;
     } finally {
-      this.inFlight = null;
+      // Liberado SEMPRE (inclusive em caso de exceção inesperada): se a
+      // referência ficasse presa, o dashboard ficaria esperando uma promise
+      // morta para sempre.
+      if (this.inFlight === run) {
+        this.inFlight = null;
+      }
     }
+  }
+
+  /** Estado interno, para diagnóstico/log. Não expõe dados sensíveis. */
+  getStatus(): {
+    consecutiveFailures: number;
+    circuitOpen: boolean;
+    nextAttemptAt: number;
+    hasCachedValue: boolean;
+    collecting: boolean;
+  } {
+    return {
+      consecutiveFailures: this.consecutiveFailures,
+      circuitOpen: this.circuitOpen,
+      nextAttemptAt: this.nextAttemptAt,
+      hasCachedValue: this.lastGood !== null,
+      collecting: this.inFlight !== null,
+    };
+  }
+
+  private async collectOnce(): Promise<SystemMetrics> {
+    try {
+      const metrics = await this.collector.collect();
+
+      if (metrics.dockerReachable === false) {
+        // O Docker não respondeu (timeout/erro). A coleta de CPU/memória pode
+        // estar boa, mas o painel não pode fingir que está tudo normal.
+        this.registerFailure("docker_indisponivel");
+        return this.staleOrDegraded(metrics);
+      }
+
+      this.registerSuccess();
+      this.lastGood = metrics;
+      this.cached = { value: metrics, expiresAt: Date.now() + CACHE_TTL_MS };
+      return metrics;
+    } catch (error) {
+      this.registerFailure("coleta_lancou_excecao");
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`[metrics] falha ao coletar métricas: ${message}`);
+      return this.staleOrDegraded();
+    }
+  }
+
+  private registerSuccess(): void {
+    if (this.consecutiveFailures > 0) {
+      this.logger.log("[metrics] coleta recuperada - circuito fechado");
+    }
+    this.consecutiveFailures = 0;
+    this.nextAttemptAt = 0;
+    this.circuitOpen = false;
+  }
+
+  private registerFailure(reason: string): void {
+    this.consecutiveFailures += 1;
+
+    const exponential = BACKOFF_BASE_MS * Math.pow(2, Math.max(0, this.consecutiveFailures - 1));
+    const backoffMs = Math.min(BACKOFF_MAX_MS, exponential);
+    this.nextAttemptAt = Date.now() + backoffMs;
+
+    const wasOpen = this.circuitOpen;
+    this.circuitOpen = this.consecutiveFailures >= FAILURE_THRESHOLD;
+
+    this.logger.warn(
+      `[metrics] coleta falhou (${reason}) - falha ${this.consecutiveFailures}/${FAILURE_THRESHOLD}, ` +
+        `nova tentativa em ${backoffMs}ms${this.circuitOpen ? ", circuito aberto" : ""}`,
+    );
+
+    if (this.circuitOpen && !wasOpen) {
+      this.logger.warn(
+        "[metrics] circuito aberto - o dashboard passa a mostrar o último valor conhecido até o Docker responder",
+      );
+    }
+  }
+
+  /**
+   * Última leitura válida (marcada como desatualizada) ou, se nunca houve
+   * uma leitura boa, um objeto explicitamente "indisponível" - nunca zeros
+   * silenciosos que a UI interpretaria como "0% de CPU, tudo tranquilo".
+   */
+  private staleOrDegraded(fallback?: SystemMetrics): SystemMetrics {
+    if (this.lastGood) {
+      return { ...this.lastGood, stale: true, dockerReachable: false };
+    }
+    if (fallback) {
+      return { ...fallback, stale: true, dockerReachable: false };
+    }
+    return this.degradedMetrics();
+  }
+
+  private degradedMetrics(): SystemMetrics {
+    const totalMemMb = Math.round(os.totalmem() / 1024 / 1024);
+    return {
+      cpuPercent: 0,
+      totalMemMb,
+      freeMemMb: Math.round(os.freemem() / 1024 / 1024),
+      usedMemPercent: 0,
+      diskTotalGb: null,
+      diskFreeGb: null,
+      usedDiskPercent: null,
+      uptimeSeconds: Math.round(os.uptime()),
+      tier: classifyResourceTier(totalMemMb),
+      containers: [],
+      stale: true,
+      available: false,
+      dockerReachable: false,
+      collectedAt: new Date().toISOString(),
+    };
   }
 }

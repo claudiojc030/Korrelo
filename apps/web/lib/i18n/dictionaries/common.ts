@@ -12,6 +12,8 @@ export interface CommonDict {
   no: string;
   unavailableOnPlatform: string;
   never: string;
+  retry: string;
+  tryAgain: string;
 }
 
 export const commonEn: CommonDict = {
@@ -28,6 +30,8 @@ export const commonEn: CommonDict = {
   no: "No",
   unavailableOnPlatform: "unavailable on this platform",
   never: "never",
+  retry: "Try again",
+  tryAgain: "Try again",
 };
 
 export const commonPt: CommonDict = {
@@ -44,4 +48,6 @@ export const commonPt: CommonDict = {
   no: "Não",
   unavailableOnPlatform: "indisponível nesta plataforma",
   never: "nunca",
+  retry: "Tentar de novo",
+  tryAgain: "Tentar de novo",
 };
