@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { ScheduleModule } from "@nestjs/schedule";
+import { ProjectsModule } from "../projects/projects.module";
 import { MonitoringController } from "./presentation/monitoring.controller";
 import { GetSystemMetricsUseCase } from "./application/get-system-metrics.use-case";
 import { RecordMetricSampleUseCase } from "./application/record-metric-sample.use-case";
@@ -19,7 +20,10 @@ import { SELF_UPDATER } from "./domain/self-updater";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
 @Module({
-  imports: [ScheduleModule.forRoot()],
+  // ProjectsModule entra aqui porque o self-update precisa do worker de
+  // deploy: para ele (drain) e recusa a atualização se houver deploy em
+  // andamento.
+  imports: [ScheduleModule.forRoot(), ProjectsModule],
   controllers: [MonitoringController],
   providers: [
     PrismaService,

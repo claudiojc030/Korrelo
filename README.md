@@ -221,6 +221,28 @@ calcularia, o limite efetivo (o que valeria), os limites dos bancos, se
 existe divergência entre o Core e o Docker e se um deploy seria possível
 agora (e por quê não).
 
+### O boot do Korrelo é somente leitura
+
+Reiniciar ou atualizar o Korrelo **nunca** altera um container que já
+existe. No boot o Korrelo só:
+
+- lê o Docker (`docker inspect`, `docker ps`, `docker stats`);
+- reconcilia metadados no banco do Core (limite, imagem, política de
+  restart, redes, portas);
+- detecta divergência entre o Core e o Docker;
+- **detecta** container de teste órfão e registra o fato (sem remover).
+
+Remover um container de teste acontece só em dois casos: no `finally` do
+deploy que o criou, ou por ação administrativa explícita:
+
+```bash
+curl -s -X POST https://SEU_DOMINIO/api/deploy-jobs/cleanup-staging
+```
+
+Essa limpeza só alcança containers com a label efêmera **e** cujo nome é de
+container de teste (`*-staging`) **e** cujo deploy não está mais em
+andamento — um container de produção nunca é removido por ela.
+
 ### Limitando o consumo do build (opcional)
 
 O build roda dentro do Docker, e o processo de build (npm/next build) fica

@@ -4,19 +4,37 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { SelfUpdater, SelfUpdateStatus } from "../domain/self-updater";
+import { formatDirtyWorkingTreeMessage, inspectWorkingTree } from "../../../infrastructure/git-working-tree";
+import { DeployQueueService } from "../../projects/infrastructure/deploy-queue.service";
 
 const STEP_MARKER = "__KORRELO_UPDATE_STEP__";
 const DONE_MARKER = "__KORRELO_UPDATE_DONE__";
-// Se passar disso sem marcar "done", trata como travado/morto (ex.: VPS
-// reiniciou no meio) em vez de bloquear novas tentativas de update pra sempre.
+// Se o update morrer no meio e ninguém liberar o drain, os deploys voltam
+// sozinhos depois deste tempo (o mesmo TTL do arquivo de drain).
 const STALE_THRESHOLD_MS = 10 * 60 * 1000;
 
+/**
+ * Self-update do KORRELO.
+ *
+ * Wave 2.5 - o update do Core NUNCA pode:
+ * - rodar no meio de um deploy de projeto (bloqueia se houver);
+ * - descartar alteração local do working tree (aborta se estiver sujo);
+ * - tocar em container, volume, rede ou banco de projeto (o script só
+ *   builda o Core).
+ *
+ * O que ele FAZ: drena o worker de deploy, faz backup do banco do Core,
+ * atualiza o código, aplica as migrations, reinicia o PM2 do Core e
+ * libera o worker.
+ */
 @Injectable()
 export class ScriptSelfUpdater implements SelfUpdater {
   private readonly logger = new Logger(ScriptSelfUpdater.name);
 
+  constructor(private readonly deployQueue: DeployQueueService) {}
+
   private get stateDir(): string {
-    return path.join(os.homedir(), ".korrelo");
+    // KORRELO_STATE_DIR permite apontar para outro lugar (testes).
+    return process.env.KORRELO_STATE_DIR ?? path.join(os.homedir(), ".korrelo");
   }
 
   private get logPath(): string {
@@ -27,7 +45,10 @@ export class ScriptSelfUpdater implements SelfUpdater {
     // ecosystem.config.js roda a API com cwd "./apps/api" a partir da raiz do
     // repo (mesmo em dev, "npm run start:dev --workspace=apps/api" tem o
     // mesmo cwd), então subir dois níveis sempre chega na raiz.
-    return path.resolve(process.cwd(), "..", "..");
+    // KORRELO_REPO_DIR permite apontar para outro lugar (testes).
+    return process.env.KORRELO_REPO_DIR
+      ? path.resolve(process.env.KORRELO_REPO_DIR)
+      : path.resolve(process.cwd(), "..", "..");
   }
 
   async start(): Promise<{ alreadyRunning: boolean }> {
@@ -35,6 +56,30 @@ export class ScriptSelfUpdater implements SelfUpdater {
     if (current.running) {
       return { alreadyRunning: true };
     }
+
+    // ------------------------------------------------------------------
+    // 1. Working tree limpo? (o caso real: package-lock.json modificado)
+    // ------------------------------------------------------------------
+    const workingTree = await inspectWorkingTree(this.repoDir);
+    if (!workingTree.clean) {
+      // NÃO descarta nada - aborta e explica.
+      throw new Error(formatDirtyWorkingTreeMessage(workingTree));
+    }
+
+    // ------------------------------------------------------------------
+    // 2. Nenhum deploy de projeto em andamento
+    // ------------------------------------------------------------------
+    if (await this.deployQueue.hasActiveJob()) {
+      throw new Error(
+        "Existe um deploy de projeto em andamento: a atualização do Korrelo foi recusada. " +
+          "Nenhum rollout do Core começa no meio de um deploy - tente novamente assim que o deploy terminar.",
+      );
+    }
+
+    // ------------------------------------------------------------------
+    // 3. DRAIN: nenhum novo deploy começa até o update terminar
+    // ------------------------------------------------------------------
+    await this.deployQueue.drain("atualização do Korrelo");
 
     fs.mkdirSync(this.stateDir, { recursive: true });
     fs.writeFileSync(this.logPath, "");
@@ -58,7 +103,7 @@ export class ScriptSelfUpdater implements SelfUpdater {
     child.unref();
     fs.closeSync(out);
 
-    this.logger.log(`Self-update disparado (pid ${child.pid}).`);
+    this.logger.log(`[update] self-update disparado (pid ${child.pid})`);
     return { alreadyRunning: false };
   }
 

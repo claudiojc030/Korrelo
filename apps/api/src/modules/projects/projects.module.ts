@@ -7,6 +7,7 @@ import { CronJobsController } from "./presentation/cron-jobs.controller";
 import { GithubWebhookController } from "./presentation/github-webhook.controller";
 import { ProjectFilesController } from "./presentation/project-files.controller";
 import { DeployJobsController } from "./presentation/deploy-jobs.controller";
+import { RolloutController } from "./presentation/rollout.controller";
 import { ListProjectsUseCase } from "./application/list-projects.use-case";
 import { GetProjectUseCase } from "./application/get-project.use-case";
 import { CreateProjectUseCase } from "./application/create-project.use-case";
@@ -122,6 +123,7 @@ import { CompatibilityDryRunService } from "./infrastructure/compatibility-dry-r
     GithubWebhookController,
     ProjectFilesController,
     DeployJobsController,
+    RolloutController,
   ],
   providers: [
     PrismaService,
@@ -212,6 +214,6 @@ import { CompatibilityDryRunService } from "./infrastructure/compatibility-dry-r
     { provide: DATABASE_RESTORER, useClass: ScriptDatabaseRestorer },
     { provide: DEPLOY_JOB_REPOSITORY, useClass: PrismaDeployJobRepository },
   ],
-  exports: [PROJECT_REPOSITORY, DEPLOY_JOB_REPOSITORY],
+  exports: [PROJECT_REPOSITORY, DEPLOY_JOB_REPOSITORY, DeployQueueService],
 })
 export class ProjectsModule {}

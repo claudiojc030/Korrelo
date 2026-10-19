@@ -2,6 +2,7 @@ import { Controller, Get, NotFoundException, Param, Post, Query } from "@nestjs/
 import { apiError } from "../../../infrastructure/api-error";
 import { DeployQueueService } from "../infrastructure/deploy-queue.service";
 import { CompatibilityDryRunService } from "../infrastructure/compatibility-dry-run.service";
+import { StagingCleanupService } from "../infrastructure/staging-cleanup.service";
 
 /**
  * Fila global de deploy (Wave 2).
@@ -11,6 +12,7 @@ import { CompatibilityDryRunService } from "../infrastructure/compatibility-dry-
  * - lista os jobs recentes (com o estado e a etapa de cada um);
  * - mostra os contadores da fila (fila, rodando, falhas, rollbacks);
  * - permite reexecutar um job interrompido/falho (retry controlado);
+ * - permite retomar um job que ficou PAUSADO no startup (ação explícita);
  * - mostra o dry-run de compatibilidade (o que MUDARIA em cada projeto,
  *   sem aplicar nada).
  */
@@ -19,6 +21,7 @@ export class DeployJobsController {
   constructor(
     private readonly deployQueue: DeployQueueService,
     private readonly dryRun: CompatibilityDryRunService,
+    private readonly stagingCleanup: StagingCleanupService,
   ) {}
 
   @Get()
@@ -41,6 +44,20 @@ export class DeployJobsController {
   @Get("dry-run")
   async compatibilityDryRun() {
     return this.dryRun.run();
+  }
+
+  /**
+   * Limpeza EXPLICITA de containers de teste órfãos.
+   *
+   * O startup do Korrelo é somente leitura: ele apenas DETECTA (e registra)
+   * staging órfão. A remoção só acontece aqui, por ação explícita - e nunca
+   * alcança um container de produção (a remoção exige a label efêmera E o
+   * nome de container de teste).
+   */
+  @Post("cleanup-staging")
+  async cleanupStaging() {
+    const outcome = await this.stagingCleanup.cleanupOrphanedStaging();
+    return { ok: true, ...outcome };
   }
 
   @Post(":id/retry")

@@ -1,0 +1,14 @@
+{
+  "projects": [
+    { "name": "korrelo-mesatta-8452004c" },
+    { "name": "korrelo-evolution-api-whatsapp-f848a858" }
+  ],
+  "pm2Apps": ["korrelo-api", "korrelo-web"],
+  "apiHealthUrl": "http://127.0.0.1:3001/health",
+  "webHealthUrl": "http://127.0.0.1:3000/",
+  "notes": [
+    "projects[] = nome do projeto no compose (o mesmo nome do container de app).",
+    "O rollout só INSPECIONA esses containers (docker ps/inspect).",
+    "Nenhum container de projeto é criado, removido, reiniciado ou reconfigurado."
+  ]
+}

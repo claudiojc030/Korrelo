@@ -200,6 +200,13 @@ if [ ! -f apps/api/.env ]; then
 else
   echo "apps/api/.env já existe, não mexi nele."
 fi
+# O .env do Core guarda JWT_SECRET, ENV_ENCRYPTION_KEY e a chave privada do
+# GitHub App: só o dono da instalação pode ler (0600). O `cp` acima cria o
+# arquivo com a permissão padrão do umask (0644 na maioria das vezes).
+if [ -f apps/api/.env ]; then
+  chmod 600 apps/api/.env
+  echo "apps/api/.env com permissão 600 (somente o dono do Core lê)."
+fi
 
 log "Configurando .env da Web"
 if [ ! -f apps/web/.env ]; then

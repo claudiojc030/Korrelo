@@ -15,6 +15,12 @@ export interface UpdateProjectSettingsInput {
   skipStagingTest?: boolean;
   // undefined = não mexe; null = volta pro rateio automático; número = fixa esse limite.
   memoryLimitMb?: number | null;
+  /**
+   * Confirmação explícita para REDUZIR o limite de memória de um projeto
+   * que está rodando. Sem isso, a redução é recusada (o container em
+   * execução não pode ter a memória diminuída por acidente).
+   */
+  confirmMemoryReduction?: boolean;
   // Healthcheck Docker do container (opcional).
   healthcheck?: {
     enabled?: boolean;
@@ -67,7 +73,29 @@ export class UpdateProjectSettingsUseCase {
       updated = updated.withSkipStagingTest(input.skipStagingTest);
     }
     if (input.memoryLimitMb !== undefined) {
+      // Reduzir o limite de um projeto QUE ESTÁ RODANDO é perigoso (o
+      // container pode morrer por OOM). Exige confirmação explícita.
+      const observed = project.productionMemoryLimitMb;
+      const isRunning = project.status === "running";
+      if (
+        input.memoryLimitMb !== null &&
+        isRunning &&
+        observed !== null &&
+        input.memoryLimitMb < observed &&
+        input.confirmMemoryReduction !== true
+      ) {
+        throw new BadRequestException(
+          apiError(
+            "MEMORY_REDUCTION_REQUIRES_CONFIRMATION",
+            `O projeto está rodando com ${observed} MB. Reduzir para ${input.memoryLimitMb} MB exige confirmação explícita ` +
+              "(reenvie com confirmMemoryReduction: true).",
+          ),
+        );
+      }
       updated = updated.withMemoryLimit(input.memoryLimitMb);
+      updated = updated.withMemoryLimitReductionApproved(
+        input.confirmMemoryReduction === true ? true : project.memoryLimitReductionApproved,
+      );
     }
     if (input.healthcheck !== undefined) {
       updated = updated.withHealthcheckConfig(
