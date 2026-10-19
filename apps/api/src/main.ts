@@ -46,6 +46,13 @@ async function bootstrap() {
   });
 
   const port = process.env.PORT ?? 3001;
+  // Shutdown gracioso (Wave 2): com isto, o Nest roda os hooks de
+  // onModuleDestroy/onApplicationShutdown no SIGTERM/SIGINT antes de sair.
+  // É o que permite ao worker da fila de deploy drenar (parar de pegar jobs
+  // novos) e ao job em andamento terminar em vez de ser morto no meio -
+  // matar o processo no meio de um promote deixa o container de produção
+  // recriado pela metade e o staging órfão.
+  app.enableShutdownHooks();
   await app.listen(port);
   console.log(`[korrelo-api] listening on port ${port}`);
 }

@@ -67,6 +67,15 @@ function ProjectCard({
         </p>
       )}
 
+      {/* Estado do ÚLTIMO deploy, separado do estado da aplicação (Wave 2):
+          um deploy falho não significa que a aplicação caiu. */}
+      {project.lastDeployStatus === "failed" && project.status === "running" && (
+        <p className="mt-1 text-[11.5px] text-destructive">{t.projects.lastDeployFailed}</p>
+      )}
+      {project.lastDeployStatus === "rolled-back" && (
+        <p className="mt-1 text-[11.5px] text-warning">{t.projects.lastDeployRolledBack}</p>
+      )}
+
       {stack && (
         <p className="mt-2.5 text-[13px] text-muted-foreground">
           {stack.language}

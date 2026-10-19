@@ -7,6 +7,9 @@ import { verifyGithubSignature } from "../infrastructure/github-webhook-signatur
 
 interface GithubPushPayload {
   ref: string;
+  /** Commit empurrado (zeros quando a branch foi deletada). */
+  after?: string;
+  deleted?: boolean;
   repository: { clone_url: string };
 }
 
@@ -37,9 +40,17 @@ export class GithubWebhookController {
     }
 
     const payload = req.body as GithubPushPayload;
+
+    // Branch deletada: o commit vem com zeros - não há nada a implantar.
+    const commitSha = payload.after && !/^0+$/.test(payload.after) ? payload.after : null;
+    if (payload.deleted || !commitSha) {
+      return { ok: true, ignored: "branch removida" };
+    }
+
     const result = await this.handlePushWebhook.execute({
       repositoryCloneUrl: payload.repository.clone_url,
       ref: payload.ref,
+      commitSha,
     });
     return { ok: true, ...result };
   }

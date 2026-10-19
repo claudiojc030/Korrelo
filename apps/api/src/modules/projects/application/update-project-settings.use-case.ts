@@ -15,6 +15,15 @@ export interface UpdateProjectSettingsInput {
   skipStagingTest?: boolean;
   // undefined = não mexe; null = volta pro rateio automático; número = fixa esse limite.
   memoryLimitMb?: number | null;
+  // Healthcheck Docker do container (opcional).
+  healthcheck?: {
+    enabled?: boolean;
+    path?: string;
+    intervalSeconds?: number;
+    timeoutSeconds?: number;
+    retries?: number;
+    startPeriodSeconds?: number;
+  } | null;
 }
 
 @Injectable()
@@ -60,7 +69,33 @@ export class UpdateProjectSettingsUseCase {
     if (input.memoryLimitMb !== undefined) {
       updated = updated.withMemoryLimit(input.memoryLimitMb);
     }
+    if (input.healthcheck !== undefined) {
+      updated = updated.withHealthcheckConfig(
+        input.healthcheck === null ? null : JSON.stringify(normalizeHealthcheck(input.healthcheck)),
+      );
+    }
 
     return this.repository.save(updated);
   }
+}
+
+/**
+ * Normaliza a configuração de healthcheck: valores fora da faixa são
+ * ajustados para algo conservador (intervalo grande, start period
+ * generoso) em vez de aceitos como vieram.
+ */
+function normalizeHealthcheck(input: NonNullable<UpdateProjectSettingsInput["healthcheck"]>) {
+  return {
+    enabled: input.enabled === true,
+    path: (input.path ?? "/").startsWith("/") ? (input.path ?? "/") : `/${input.path ?? ""}`,
+    intervalSeconds: clamp(input.intervalSeconds, 30, 5, 300),
+    timeoutSeconds: clamp(input.timeoutSeconds, 5, 1, 60),
+    retries: clamp(input.retries, 3, 1, 10),
+    startPeriodSeconds: clamp(input.startPeriodSeconds, 120, 0, 600),
+  };
+}
+
+function clamp(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
 }

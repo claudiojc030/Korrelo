@@ -28,6 +28,13 @@ export interface ProjectSettingsDict {
   memoryLimitLabel: string;
   memoryLimitHint: string;
   memoryLimitPlaceholder: string;
+  healthcheckTitle: string;
+  healthcheckDescription: string;
+  healthcheckEnabledLabel: string;
+  healthcheckEnabledHint: string;
+  healthcheckPathLabel: string;
+  healthcheckPathHint: string;
+  healthcheckPathPlaceholder: string;
 }
 
 export const projectSettingsEn: ProjectSettingsDict = {
@@ -63,6 +70,14 @@ export const projectSettingsEn: ProjectSettingsDict = {
   memoryLimitLabel: "Fixed limit",
   memoryLimitHint: "Leave empty to go back to the automatic split. Applies on the next deploy.",
   memoryLimitPlaceholder: "512",
+  healthcheckTitle: "Container healthcheck",
+  healthcheckDescription:
+    "Optional. When enabled, Docker checks this path on the container and restarts it only after several consecutive failures (with a generous start period, so a slow app isn't killed while booting).",
+  healthcheckEnabledLabel: "Enable healthcheck",
+  healthcheckEnabledHint: "Off by default: a wrong probe would restart a healthy app.",
+  healthcheckPathLabel: "Health path",
+  healthcheckPathHint: "Path checked inside the container (must answer with a status below 500).",
+  healthcheckPathPlaceholder: "/",
 };
 
 export const projectSettingsPt: ProjectSettingsDict = {
@@ -98,4 +113,12 @@ export const projectSettingsPt: ProjectSettingsDict = {
   memoryLimitLabel: "Limite fixo",
   memoryLimitHint: "Deixe vazio pra voltar ao rateio automático. Vale a partir do próximo deploy.",
   memoryLimitPlaceholder: "512",
+  healthcheckTitle: "Healthcheck do container",
+  healthcheckDescription:
+    "Opcional. Quando ligado, o Docker checa esse caminho dentro do container e só reinicia a aplicação depois de várias falhas seguidas (com um período de tolerância generoso, pra não matar um app que só demora pra subir).",
+  healthcheckEnabledLabel: "Ativar healthcheck",
+  healthcheckEnabledHint: "Desligado por padrão: um probe errado reiniciaria um app saudável.",
+  healthcheckPathLabel: "Caminho de saúde",
+  healthcheckPathHint: "Caminho checado dentro do container (precisa responder com status abaixo de 500).",
+  healthcheckPathPlaceholder: "/",
 };

@@ -158,6 +158,86 @@ Se o certificado falhar (geralmente porque o DNS ainda não propagou), o
 Korrelo desfaz a configuração e mostra o erro, sem deixar nada quebrado. Só
 tentar anexar de novo depois que o DNS já resolver pro IP da VPS.
 
+## Como o deploy funciona (fila global, memória e rollback)
+
+O Korrelo foi feito pra rodar numa VPS pequena (1 vCPU / 4 GB), então o
+deploy tem regras pra não derrubar o que já está no ar:
+
+- **Fila global**: só acontece **um deploy por vez** na VPS inteira. Os
+  outros ficam na fila (a ordem é FIFO). O estado da fila fica no banco do
+  Core, então um reinício da API não perde deploy nenhum.
+- **Antes de buildar**, o Korrelo confere memória livre, swap, disco e se o
+  Docker está respondendo. Sem folga, o deploy volta pra fila e espera (a
+  produção não é tocada).
+- **Orçamento de memória**: app, banco e container de teste dividem a mesma
+  fatia da RAM disponível (depois das reservas do host, do Core e do
+  Docker). Nenhum container recebe "quase toda a RAM" da VPS. Dá pra
+  ajustar pelas variáveis de ambiente no `apps/api/.env` (veja o
+  `.env.example`).
+- **Instância de teste**: o deploy builda e sobe uma instância de teste com
+  a imagem tagueada pelo commit. Só depois que ela responde é que a
+  produção é trocada. A instância de teste é temporária: não reinicia
+  sozinha e é removida no fim (inclusive se o deploy falhar).
+- **Rollback**: se a versão nova não responder em produção, o Korrelo volta
+  pra imagem anterior (que continua no servidor) e registra o deploy como
+  revertido. Rollback é de **aplicação**: volume e banco não são tocados.
+  Se o deploy tiver um migration incompatível, o rollback pode não ser
+  suficiente - nesse caso o painel avisa.
+- **Deploy falho não derruba a aplicação**: o estado da aplicação (rodando
+  ou não) é separado do estado do último deploy. Cron, backup e terminal
+  continuam funcionando enquanto a versão antiga está no ar.
+
+Os deploys ficam registrados na aba "Deploys" de cada projeto, e a fila
+pode ser inspecionada em `/deploy-jobs` (e os contadores em
+`/deploy-jobs/stats`).
+
+### Projetos que já estão rodando (grandfathering)
+
+Atualizar o Korrelo **não** muda nada nos containers que já existem:
+
+- o limite de memória, a imagem, a política de restart, as redes, as portas
+  e os volumes do container de produção são preservados;
+- o Korrelo apenas **lê** o estado atual do Docker (no boot) e registra no
+  banco do Core o que encontrou (limite, imagem, restart policy, redes,
+  portas) — é metadado, nada é aplicado no Docker;
+- um projeto que já roda **nunca** tem a memória diminished sozinha: mesmo
+  que a fórmula nova calcule um limite menor, o que vale é o limite
+  observado. Diminuir o limite de uma aplicação no ar exige confirmação
+  explícita nas Configurações do projeto;
+- o budget de banco é **total por projeto** e dividido entre os bancos
+  (Postgres + Redis não recebem o budget inteiro cada um), mas um banco que
+  já roda mantém o limite que tem;
+- nenhum deploy é disparado na atualização: jobs que estavam na fila antes
+  do restart ficam **pausados** (retome em `/deploy-jobs/:id/resume`).
+
+Para conferir o que mudaria na sua VPS **sem aplicar nada**:
+
+```bash
+curl -s https://SEU_DOMINIO/api/deploy-jobs/dry-run | jq
+```
+
+A saída mostra, por projeto, o limite atual, o limite que a fórmula nova
+calcularia, o limite efetivo (o que valeria), os limites dos bancos, se
+existe divergência entre o Core e o Docker e se um deploy seria possível
+agora (e por quê não).
+
+### Limitando o consumo do build (opcional)
+
+O build roda dentro do Docker, e o processo de build (npm/next build) fica
+**fora** do limite de memória do container. O Korrelo já reduz o risco de
+quatro formas: fila global (um build por vez), teto de heap no build
+(`NODE_OPTIONS`), verificação de memória livre antes de começar e imagem
+multi-stage. Se ainda assim o build pesar demais na sua VPS, a forma
+canônica de limitar é no próprio daemon do Docker (configuração manual,
+fora do Korrelo):
+
+```json
+// /etc/docker/daemon.json
+{ "builder": { "gc": { "enabled": true, "reservedSpace": "2GB" } } }
+```
+
+O Korrelo **não** mexe nessa configuração sozinho.
+
 ## Guardar arquivo enviado por usuário (upload)
 
 Todo projeto ganha automaticamente um volume persistente montado em
@@ -199,6 +279,14 @@ instalar só o que falta.
 no dashboard com o botão **"Atualizar agora"**, que roda tudo sozinho (com
 barra de progresso e log em tempo real) e reinicia o painel no final.
 
+O botão usa **exatamente o mesmo executor** do rollout seguro
+(`apps/api/scripts/rollout/`), então tem a mesma proteção: recusa se
+houver deploy de projeto em andamento, recusa se o working tree estiver
+sujo, faz backup consistente do banco do Core antes da migration, tira
+snapshot READ-ONLY dos containers dos projetos antes e depois (divergência =
+falha crítica, sem tocar no projeto), prepara os assets do Next standalone
+e reinicia só o PM2 do Core.
+
 **Jeito manual** (via SSH, ex. pra rodar antes de o botão existir na sua instalação):
 
 ```bash
@@ -212,6 +300,44 @@ cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
 (cd apps/api && npx prisma migrate deploy)
 pm2 restart ecosystem.config.js
 ```
+
+### Rollout seguro (recomendado em produção)
+
+O script `scripts/rollout-korrelo.sh` faz o rollout do Core com as
+proteções que importam quando existem aplicações no ar:
+
+```bash
+# 1. Veja o que aconteceria (NÃO executa nada)
+bash scripts/rollout-korrelo.sh
+
+# 2. Executa de verdade
+bash scripts/rollout-korrelo.sh --apply
+```
+
+O que ele garante:
+
+- **não roda no meio de um deploy de projeto** (recusa se houver job em
+  andamento);
+- **não descarta alteração local**: com o working tree sujo (ex.:
+  `package-lock.json` modificado), o update é abortado com a lista de
+  arquivos — a decisão é do operador;
+- **faz backup consistente do banco do Core** (`sqlite3 .backup`, validado
+  com `PRAGMA integrity_check`) ANTES de qualquer migration, e guarda em
+  `~/korrelo-backups/core-pre-update-AAAAMMDD-HHMMSS.db`;
+- **só aplica migration depois do backup válido** (se o backup falhar,
+  nada de migration acontece e o PM2 não é reiniciado);
+- **tira um snapshot READ-ONLY dos containers dos projetos** antes e depois e
+  compara Container ID, imagem, StartedAt, RestartCount, memória, swap,
+  política de restart, mounts, redes e portas. Qualquer divergência é
+  **falha crítica** (o script não "conserta" nada — investigue);
+- **reinicia só o PM2 do Core** (`korrelo-api` e `korrelo-web`);
+- **drena o worker de deploy** durante a janela e libera no fim;
+- em caso de falha, **volta o Core ao commit anterior** (rebuild + restart
+  do PM2 do Core). As migrations são aditivas: a versão anterior ignora as
+  colunas novas, então não há revert de schema.
+
+O status do último rollout fica em `~/.korrelo/rollouts/last.json` (e em
+`GET /api/rollout/status`).
 
 ## Segurança
 

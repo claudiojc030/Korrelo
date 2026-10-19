@@ -5,6 +5,8 @@ export interface ProjectsDict {
   port: string;
   terminal: string;
   deployFailedLabel: string;
+  lastDeployFailed: string;
+  lastDeployRolledBack: string;
   statusDetected: string;
   statusConfiguring: string;
   statusRunning: string;
@@ -48,6 +50,8 @@ export const projectsEn: ProjectsDict = {
   port: "port",
   terminal: "Terminal",
   deployFailedLabel: "Deploy failed.",
+  lastDeployFailed: "Last deploy failed (the app is still running).",
+  lastDeployRolledBack: "Last deploy was rolled back.",
   statusDetected: "Detected",
   statusConfiguring: "Configuring",
   statusRunning: "Running",
@@ -92,6 +96,8 @@ export const projectsPt: ProjectsDict = {
   port: "porta",
   terminal: "Terminal",
   deployFailedLabel: "O deploy falhou.",
+  lastDeployFailed: "O último deploy falhou (a aplicação continua rodando).",
+  lastDeployRolledBack: "O último deploy foi revertido (rollback).",
   statusDetected: "Detectado",
   statusConfiguring: "Configurando",
   statusRunning: "Rodando",

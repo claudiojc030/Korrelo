@@ -6,6 +6,7 @@ import { ProjectsController } from "./presentation/projects.controller";
 import { CronJobsController } from "./presentation/cron-jobs.controller";
 import { GithubWebhookController } from "./presentation/github-webhook.controller";
 import { ProjectFilesController } from "./presentation/project-files.controller";
+import { DeployJobsController } from "./presentation/deploy-jobs.controller";
 import { ListProjectsUseCase } from "./application/list-projects.use-case";
 import { GetProjectUseCase } from "./application/get-project.use-case";
 import { CreateProjectUseCase } from "./application/create-project.use-case";
@@ -69,7 +70,6 @@ import { DockerfileGeneratorRegistry } from "./infrastructure/dockerfile-generat
 import { DockerComposeOrchestrator } from "./infrastructure/docker-compose-orchestrator";
 import { DockerComposeFileBuilder } from "./infrastructure/docker-compose-file-builder";
 import { PortAllocator } from "./infrastructure/port-allocator";
-import { ResourceBudgetCalculator } from "./infrastructure/resource-budget-calculator";
 import { HttpHealthChecker } from "./infrastructure/http-health-checker";
 import { DockerLogReader } from "./infrastructure/docker-log-reader";
 import { NginxCertbotDomainProvisioner } from "./infrastructure/nginx-certbot-domain-provisioner";
@@ -103,11 +103,26 @@ import { DATABASE_QUERY_RUNNER } from "./domain/database-query-runner";
 import { MONGO_IMPORTER } from "./domain/mongo-importer";
 import { DATABASE_EXPORTER } from "./domain/database-exporter";
 import { DATABASE_RESTORER } from "./domain/database-restorer";
+import { DEPLOY_JOB_REPOSITORY } from "./domain/deploy-job.repository";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
+import { PrismaDeployJobRepository } from "./infrastructure/prisma-deploy-job.repository";
+import { DeployQueueService } from "./infrastructure/deploy-queue.service";
+import { WorkerLock } from "./infrastructure/worker-lock";
+import { ResourcePreflightService } from "./infrastructure/resource-preflight.service";
+import { DeployLogger } from "./infrastructure/deploy-logger";
+import { StagingCleanupService } from "./infrastructure/staging-cleanup.service";
+import { RuntimeReconciliationService } from "./infrastructure/runtime-reconciliation.service";
+import { CompatibilityDryRunService } from "./infrastructure/compatibility-dry-run.service";
 
 @Module({
   imports: [GithubModule, AuthModule, ScheduleModule.forRoot()],
-  controllers: [ProjectsController, CronJobsController, GithubWebhookController, ProjectFilesController],
+  controllers: [
+    ProjectsController,
+    CronJobsController,
+    GithubWebhookController,
+    ProjectFilesController,
+    DeployJobsController,
+  ],
   providers: [
     PrismaService,
     HandleGithubPushWebhookUseCase,
@@ -122,6 +137,7 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     CronSchedulerService,
     DiskUsageAlertScheduler,
     DeployRecoveryService,
+    StagingCleanupService,
     ListProjectsUseCase,
     GetProjectUseCase,
     CreateProjectUseCase,
@@ -168,9 +184,14 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     DotnetDockerfileGenerator,
     DockerComposeFileBuilder,
     PortAllocator,
-    ResourceBudgetCalculator,
     ProjectDiskUsageService,
     EnvVarCipher,
+    DeployLogger,
+    WorkerLock,
+    ResourcePreflightService,
+    DeployQueueService,
+    RuntimeReconciliationService,
+    CompatibilityDryRunService,
     { provide: PROJECT_REPOSITORY, useClass: PrismaProjectRepository },
     { provide: ENV_VAR_REPOSITORY, useClass: PrismaEnvVarRepository },
     { provide: MANAGED_DATABASE_REPOSITORY, useClass: PrismaManagedDatabaseRepository },
@@ -189,7 +210,8 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     { provide: MONGO_IMPORTER, useClass: ScriptMongoImporter },
     { provide: DATABASE_EXPORTER, useClass: ScriptDatabaseExporter },
     { provide: DATABASE_RESTORER, useClass: ScriptDatabaseRestorer },
+    { provide: DEPLOY_JOB_REPOSITORY, useClass: PrismaDeployJobRepository },
   ],
-  exports: [PROJECT_REPOSITORY],
+  exports: [PROJECT_REPOSITORY, DEPLOY_JOB_REPOSITORY],
 })
 export class ProjectsModule {}

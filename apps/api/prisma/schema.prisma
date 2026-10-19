@@ -24,11 +24,43 @@ model Project {
   diskLimitMb      Int?
   skipStagingTest  Boolean  @default(false)
   memoryLimitMb    Int?
+  // Estado do ÚLTIMO deploy (queued/running/succeeded/failed/rolled-back).
+  // Separado de "status" (que é o estado de RUNTIME da aplicação): um deploy
+  // de staging falho não significa que a aplicação em produção caiu.
+  lastDeployStatus String?
+  // Imagem em produção (tag por commit) e imagem anterior, usadas no
+  // rollback automático quando a nova versão falha na promoção.
+  currentImage     String?
+  previousImage    String?
+  // Healthcheck Docker do container (JSON serializado). Null = sem
+  // healthcheck (comportamento padrão e conservador).
+  healthcheckConfig String?
+  // --- Wave 2.1: grandfathering ---------------------------------------
+  // Limite de memória do container de PRODUÇÃO observado no Docker
+  // (fonte da verdade do runtime atual). NUNCA é reduzido automaticamente:
+  // um projeto que já roda continua com o limite que tem.
+  productionMemoryLimitMb Int?
+  // Snapshot do runtime atual em JSON (limite, imagem, restart policy,
+  // redes, portas, observedAt). Serve pra detectar divergência entre o Core
+  // e o Docker e pra mostrar o que aconteceria num dry-run.
+  runtimeSnapshot String?
+  // true quando o projeto foi "adotado" sem passar por um deploy com a
+  // política nova de memória (ou seja: o runtime atual é preservado).
+  grandfathered Boolean @default(false)
+  grandfatheredAt DateTime?
+  // Divergência entre o que o Core registra e o que o Docker mostra.
+  runtimeDriftDetected Boolean @default(false)
+  runtimeDriftDetails String?
+  // true quando o ADMIN autorizou explicitamente reduzir o limite de
+  // memória de um projeto que está rodando (sem isso, a redução é ignorada
+  // e o container continua com o limite atual).
+  memoryLimitReductionApproved Boolean @default(false)
   createdAt        DateTime @default(now())
   envVars          EnvVar[]
   managedDatabases ManagedDatabase[]
   cronJobs         CronJob[]
   deployRecords    DeployRecord[]
+  deployJobs       DeployJob[]
   domainAliases    ProjectDomainAlias[]
 }
 
@@ -56,6 +88,49 @@ model DeployRecord {
   commitMessage String?
   startedAt    DateTime  @default(now())
   finishedAt   DateTime?
+}
+
+// Fila global de deploy.
+//
+// Uma linha = UM deploy agendado. O worker da API pega sempre o job mais
+// antigo com status "queued" e roda UM por vez na VPS inteira (concorrência
+// global = 1): é o que impede dois builds simultâneos numa VPS de 1 vCPU.
+//
+// A unicidade lógica é (projectId, commitSha): o mesmo commit do mesmo
+// projeto não vira dois jobs. Um job manual (commitSha desconhecido no
+// momento do agendamento) tem commitSha NULL - e NULLs são distintos em
+// índice único no SQLite, então vários jobs manuais convivem; a
+// deduplicação de manuais é feita por projeto (um job em aberto por projeto).
+model DeployJob {
+  id           String    @id @default(uuid())
+  projectId    String
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  commitSha    String?
+  branch       String
+  trigger      String
+  status       String    @default("queued")
+  attempt      Int       @default(0)
+  // Etapa atual do job (queued/fetching/building/staging-start/
+  // staging-health/promote/production-health/rollback/cleanup/complete).
+  stage        String?
+  errorMessage String?
+  log          String    @default("")
+  // Imagem que estava em produção antes deste deploy e imagem candidata.
+  previousImage   String?
+  candidateImage  String?
+  rollbackAttempted Boolean @default(false)
+  rollbackSucceeded Boolean @default(false)
+  // Tag da imagem gerada por este deploy (versionada por commit).
+  imageTag     String?
+  // Duração do build (ms) e do deploy inteiro (ms) - métricas internas.
+  buildDurationMs Int?
+  deployDurationMs Int?
+  createdAt    DateTime  @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  @@unique([projectId, commitSha])
+  @@index([status, createdAt])
 }
 
 model CronJob {
@@ -90,6 +165,9 @@ model ManagedDatabase {
   connectionString String?
   envVarKey        String?
   persistent       Boolean  @default(false)
+  // Limite de memória observado do container deste banco (bytes -> MB na
+  // aplicação). Preservado no grandfathering: nunca reduzido sozinho.
+  memoryLimitMb    Int?
   createdAt        DateTime @default(now())
 
   @@unique([projectId, type])

@@ -1,6 +1,19 @@
 export type ProjectStatus = "detected" | "configuring" | "running" | "stopped" | "failed";
 export type DomainSslStatus = "none" | "pending" | "active" | "failed";
 
+/**
+ * Estado do ÚLTIMO deploy - separado do `status`, que é o estado de RUNTIME
+ * da aplicação. Um deploy falho não derruba a aplicação em produção.
+ */
+export type LastDeployStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "rolled-back"
+  | "canceled"
+  | "interrupted";
+
 export interface Project {
   id: string;
   name: string;
@@ -18,6 +31,14 @@ export interface Project {
   diskLimitMb: number | null;
   skipStagingTest: boolean;
   memoryLimitMb: number | null;
+  /** Estado do último deploy (independente do estado da aplicação). */
+  lastDeployStatus?: LastDeployStatus | null;
+  /** Imagem em produção (tag por commit). */
+  currentImage?: string | null;
+  /** Imagem anterior, usada no rollback automático. */
+  previousImage?: string | null;
+  /** Healthcheck Docker configurado (JSON serializado). */
+  healthcheckConfig?: string | null;
   createdAt: string;
 }
 

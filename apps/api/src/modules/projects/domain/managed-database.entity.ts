@@ -19,6 +19,12 @@ export class ManagedDatabase {
     // sempre entram no backup. Redis nasce efêmero (cache/fila) e só ganha
     // volume + entra no backup diário se isso for marcado explicitamente.
     public readonly persistent: boolean,
+    /**
+     * Limite de memória OBSERVADO do container deste banco (MB). Usado no
+     * grandfathering: um banco que já roda mantém o limite que tem, mesmo
+     * que a fórmula nova dê menos.
+     */
+    public readonly memoryLimitMb: number | null,
     public readonly createdAt: Date,
   ) {}
 
@@ -40,6 +46,7 @@ export class ManagedDatabase {
       null,
       null,
       type === "redis" ? persistent : true,
+      null,
       new Date(),
     );
   }
@@ -56,7 +63,26 @@ export class ManagedDatabase {
       connectionString,
       envVarKey,
       false,
+      null,
       new Date(),
+    );
+  }
+
+  /** Registra o limite de memória observado no container do banco. */
+  withMemoryLimit(memoryLimitMb: number | null): ManagedDatabase {
+    return new ManagedDatabase(
+      this.id,
+      this.projectId,
+      this.type,
+      this.serviceName,
+      this.username,
+      this.password,
+      this.databaseName,
+      this.connectionString,
+      this.envVarKey,
+      this.persistent,
+      memoryLimitMb,
+      this.createdAt,
     );
   }
 }

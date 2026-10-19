@@ -67,4 +67,67 @@ export class SimpleGitRepositoryCloner implements RepositoryCloner {
       return null;
     }
   }
+
+  /**
+   * Coloca o workspace no commit exato do job de deploy.
+   *
+   * Estratégia (sem "git pull" ambíguo):
+   * 1. garante o clone e a remote Certainada (o token de instalação expira
+   *    em ~1h, então a remote é reescrita a cada deploy);
+   * 2. descarta alterações locais (o workspace é do Korrelo, não do usuário);
+   * 3. "fetch --depth 1" do commit (ou da branch, quando o commit é
+   *    desconhecido - deploy manual);
+   * 4. checkout --force do FETCH_HEAD (HEAD destacado, que é o que o build
+   *    precisa);
+   * 5. VERIFICA o HEAD: se não for o commit esperado, o deploy falha (nunca
+   *    subir uma versão diferente da registrada no job).
+   */
+  async prepareCommit(
+    repoUrl: string,
+    destPath: string,
+    accessToken: string | undefined,
+    params: { branch?: string | null; commitSha?: string | null },
+  ): Promise<{ sha: string; message: string }> {
+    const authenticatedUrl = withAccessToken(repoUrl, accessToken);
+    const alreadyCloned = await directoryExists(`${destPath}/.git`);
+
+    if (!alreadyCloned) {
+      await fs.mkdir(destPath, { recursive: true });
+      // --no-checkout: o checkout é feito logo abaixo, no commit certo.
+      await simpleGit().clone(authenticatedUrl, destPath, ["--depth", "1", "--no-checkout"]);
+    }
+
+    const git = simpleGit(destPath);
+    await git.remote(["set-url", "origin", authenticatedUrl]);
+
+    // Workspace gerenciado pelo Korrelo: alterações locais são sobra.
+    await git.raw(["checkout", "--", "."]).catch(() => undefined);
+    await git.raw(["clean", "-fd"]).catch(() => undefined);
+
+    const expected = params.commitSha ?? null;
+    const ref = expected ?? params.branch ?? "HEAD";
+
+    try {
+      await git.raw(["fetch", "--depth", "1", "origin", ref]);
+      await git.raw(["checkout", "--force", "FETCH_HEAD"]);
+    } catch (error) {
+      // Alguns servidores não aceitam fetch por SHA. Fallback: busca a
+      // branch (com um pouco de histórico) e checa out o commit dentro dela.
+      if (!expected || !params.branch) {
+        throw new Error(`Falha ao buscar "${ref}" no repositório: ${(error as Error).message}`);
+      }
+      await git.raw(["fetch", "--depth", "50", "origin", params.branch]);
+      await git.raw(["checkout", "--force", expected]);
+    }
+
+    const sha = (await git.raw(["rev-parse", "HEAD"])).trim();
+    if (expected && !sha.startsWith(expected) && !expected.startsWith(sha)) {
+      throw new Error(
+        `O workspace ficou no commit ${sha.slice(0, 7)}, mas o deploy esperava ${expected.slice(0, 7)}.`,
+      );
+    }
+
+    const message = (await git.raw(["log", "-1", "--format=%s"])).trim();
+    return { sha, message };
+  }
 }

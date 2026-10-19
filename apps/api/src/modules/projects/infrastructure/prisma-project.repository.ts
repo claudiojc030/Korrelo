@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
-import type { ProjectStatus } from "@korrelo/shared-types";
 import { PrismaService } from "../../../infrastructure/prisma/prisma.service";
-import { Project, type DomainSslStatus } from "../domain/project.entity";
+import { Project, type DomainSslStatus, type LastDeployStatus } from "../domain/project.entity";
+import type { ProjectStatus } from "@korrelo/shared-types";
 import type { ProjectRepository } from "../domain/project.repository";
 
 @Injectable()
@@ -48,6 +48,17 @@ export class PrismaProjectRepository implements ProjectRepository {
         diskLimitMb: project.diskLimitMb,
         skipStagingTest: project.skipStagingTest,
         memoryLimitMb: project.memoryLimitMb,
+        lastDeployStatus: project.lastDeployStatus,
+        currentImage: project.currentImage,
+        previousImage: project.previousImage,
+        healthcheckConfig: project.healthcheckConfig,
+        productionMemoryLimitMb: project.productionMemoryLimitMb,
+        runtimeSnapshot: project.runtimeSnapshot,
+        grandfathered: project.grandfathered,
+        grandfatheredAt: project.grandfatheredAt,
+        runtimeDriftDetected: project.runtimeDriftDetected,
+        runtimeDriftDetails: project.runtimeDriftDetails,
+        memoryLimitReductionApproved: project.memoryLimitReductionApproved,
         createdAt: project.createdAt,
       },
       update: {
@@ -66,6 +77,17 @@ export class PrismaProjectRepository implements ProjectRepository {
         diskLimitMb: project.diskLimitMb,
         skipStagingTest: project.skipStagingTest,
         memoryLimitMb: project.memoryLimitMb,
+        lastDeployStatus: project.lastDeployStatus,
+        currentImage: project.currentImage,
+        previousImage: project.previousImage,
+        healthcheckConfig: project.healthcheckConfig,
+        productionMemoryLimitMb: project.productionMemoryLimitMb,
+        runtimeSnapshot: project.runtimeSnapshot,
+        grandfathered: project.grandfathered,
+        grandfatheredAt: project.grandfatheredAt,
+        runtimeDriftDetected: project.runtimeDriftDetected,
+        runtimeDriftDetails: project.runtimeDriftDetails,
+        memoryLimitReductionApproved: project.memoryLimitReductionApproved,
       },
     });
     return this.toDomain(row);
@@ -92,6 +114,17 @@ export class PrismaProjectRepository implements ProjectRepository {
     diskLimitMb: number | null;
     skipStagingTest: boolean;
     memoryLimitMb: number | null;
+    lastDeployStatus: string | null;
+    currentImage: string | null;
+    previousImage: string | null;
+    healthcheckConfig: string | null;
+    productionMemoryLimitMb: number | null;
+    runtimeSnapshot: string | null;
+    grandfathered: boolean;
+    grandfatheredAt: Date | null;
+    runtimeDriftDetected: boolean;
+    runtimeDriftDetails: string | null;
+    memoryLimitReductionApproved: boolean;
     createdAt: Date;
   }): Project {
     return new Project(
@@ -111,6 +144,17 @@ export class PrismaProjectRepository implements ProjectRepository {
       row.diskLimitMb,
       row.skipStagingTest,
       row.memoryLimitMb,
+      (row.lastDeployStatus as LastDeployStatus | null) ?? null,
+      row.currentImage,
+      row.previousImage,
+      row.healthcheckConfig,
+      row.productionMemoryLimitMb,
+      row.runtimeSnapshot,
+      row.grandfathered,
+      row.grandfatheredAt,
+      row.runtimeDriftDetected,
+      row.runtimeDriftDetails,
+      row.memoryLimitReductionApproved,
       row.createdAt,
     );
   }

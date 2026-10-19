@@ -35,6 +35,7 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
         connectionString,
         envVarKey: db.envVarKey,
         persistent: db.persistent,
+        memoryLimitMb: db.memoryLimitMb,
         createdAt: db.createdAt,
       },
       update: {
@@ -45,6 +46,7 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
         connectionString,
         envVarKey: db.envVarKey,
         persistent: db.persistent,
+        memoryLimitMb: db.memoryLimitMb,
       },
     });
     return this.toDomain(row);
@@ -65,6 +67,7 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
     connectionString: string | null;
     envVarKey: string | null;
     persistent: boolean;
+    memoryLimitMb: number | null;
     createdAt: Date;
   }): ManagedDatabase {
     return new ManagedDatabase(
@@ -78,6 +81,7 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
       row.connectionString ? this.cipher.decrypt(row.connectionString) : row.connectionString,
       row.envVarKey,
       row.persistent,
+      row.memoryLimitMb,
       row.createdAt,
     );
   }

@@ -6,6 +6,7 @@ import * as crypto from "node:crypto";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import cookieParser from "cookie-parser";
+import express from "express";
 import request from "supertest";
 
 // Testes de integração de verdade pro ProjectsModule: sobem o módulo inteiro
@@ -37,6 +38,8 @@ class FakeContainerOrchestrator {
   promoteCalls: DeployConfigLike[] = [];
   removeStagingCalls: { projectPath: string; containerName: string }[] = [];
   teardownCalls: { projectPath: string; containerName: string }[] = [];
+  rollbackCalls: { config: DeployConfigLike; previousImage: string }[] = [];
+  pruneCalls: { imageName: string; protectedImages: string[] }[] = [];
   shouldFailDeploy = false;
 
   async deployStaging(config: DeployConfigLike): Promise<string> {
@@ -58,6 +61,46 @@ class FakeContainerOrchestrator {
 
   async teardown(config: { projectPath: string; containerName: string }): Promise<void> {
     this.teardownCalls.push(config);
+  }
+
+  // Wave 2: rollback e limpeza de imagens.
+  async rollback(config: DeployConfigLike, previousImage: string): Promise<string> {
+    this.rollbackCalls.push({ config, previousImage });
+    return "fake rollback output";
+  }
+
+  async supportsBuildKit(): Promise<boolean> {
+    return false;
+  }
+
+  async pruneProjectImages(config: { imageName: string; protectedImages: string[] }): Promise<string> {
+    this.pruneCalls.push(config);
+    return "";
+  }
+}
+
+/**
+ * Preflight sempre OK: o teste roda sem Docker, e o preflight real
+ * (RAM/disco/Docker) bloquearia o deploy. A lógica do preflight tem teste
+ * próprio.
+ */
+class FakeResourcePreflight {
+  async check(): Promise<{ ok: boolean; reason: string | null; metrics: Record<string, unknown> }> {
+    return {
+      ok: true,
+      reason: null,
+      metrics: {
+        totalMemMb: 4096,
+        freeMemMb: 2048,
+        swapTotalMb: 2048,
+        swapFreeMb: 2048,
+        diskFreeMb: 20480,
+        dockerReachable: true,
+        activeBuilds: 0,
+        requiredMemoryMb: 1024,
+        requiredDiskMb: 2000,
+      },
+    };
   }
 }
 
@@ -156,6 +199,18 @@ class FakeRepositoryCloner {
   async getLastCommit(): Promise<{ hash: string; message: string } | null> {
     return { hash: "abc1234", message: "fake commit (teste)" };
   }
+
+  // Wave 2: o deploy usa o commit exato do job.
+  async prepareCommit(
+    _repoUrl: string,
+    destPath: string,
+    _accessToken: string | undefined,
+    params: { branch?: string | null; commitSha?: string | null },
+  ): Promise<{ sha: string; message: string }> {
+    await this.cloneOrUpdate(_repoUrl, destPath);
+    const sha = params.commitSha ?? "abc1234abcdef";
+    return { sha, message: "fake commit (teste)" };
+  }
 }
 
 function extractCookie(setCookieHeader: string | string[] | undefined, name: string): string | null {
@@ -178,6 +233,9 @@ describe("Projects flow (e2e)", () => {
     process.env.JWT_EXPIRES_IN = "15m";
     process.env.ENV_ENCRYPTION_KEY = crypto.randomBytes(32).toString("hex");
     process.env.KORRELO_WORKSPACE_DIR = tempWorkspaceDir;
+    // O lock do worker fica no diretório temporário do teste (não suja o
+    // home de quem roda a suíte).
+    process.env.KORRELO_LOCK_DIR = tempWorkspaceDir;
     fs.mkdirSync(tempWorkspaceDir, { recursive: true });
 
     const prismaCli = require.resolve("prisma/build/index.js");
@@ -201,6 +259,7 @@ describe("Projects flow (e2e)", () => {
     const { DATABASE_QUERY_RUNNER } = require("../domain/database-query-runner");
     const { REPOSITORY_CLONER } = require("../domain/repository-cloner");
     const { PortAllocator } = require("../infrastructure/port-allocator");
+    const { ResourcePreflightService } = require("../infrastructure/resource-preflight.service");
 
     const moduleFixture = await Test.createTestingModule({ imports: [ProjectsModule] })
       .overrideProvider(CONTAINER_ORCHESTRATOR)
@@ -219,10 +278,23 @@ describe("Projects flow (e2e)", () => {
       .useValue(new FakeRepositoryCloner())
       .overrideProvider(PortAllocator)
       .useValue({ allocate: async () => 39999 })
+      // O preflight real exige Docker e folga de RAM: no teste (sem Docker) ele
+      // seguraria o job na fila.
+      .overrideProvider(ResourcePreflightService)
+      .useValue(new FakeResourcePreflight())
       .compile();
 
     app = moduleFixture.createNestApplication();
     app.use(cookieParser());
+    // Mesma configuração do main.ts: o corpo BRUTO é guardado pra verificar
+    // a assinatura HMAC dos webhooks do GitHub.
+    app.use(
+      express.json({
+        verify: (req: express.Request & { rawBody?: Buffer }, _res: express.Response, buf: Buffer) => {
+          req.rawBody = buf;
+        },
+      }),
+    );
     await app.init();
 
     // O guard global do AuthModule (importado transitivamente pelo
@@ -243,6 +315,89 @@ describe("Projects flow (e2e)", () => {
   function authCookieHeader(): string {
     return `korrelo_token=${authCookie}`;
   }
+
+  describe("deploy por webhook (fila global)", () => {
+    const WEBHOOK_SECRET = "segredo-do-webhook-e2e";
+
+    function signedWebhook(body: string): string {
+      return `sha256=${crypto.createHmac("sha256", WEBHOOK_SECRET).update(body).digest("hex")}`;
+    }
+
+    it("o webhook enfileira o deploy (sem esperar o build) e deduplica o mesmo commit", async () => {
+      process.env.GITHUB_APP_WEBHOOK_SECRET = WEBHOOK_SECRET;
+
+      const created = await request(app.getHttpServer())
+        .post("/projects")
+        .set("Cookie", [authCookieHeader()])
+        .send({ name: "Projeto Webhook", repoUrl: "https://github.com/exemplo/webhook.git" });
+      const projectId = created.body.id;
+
+      await request(app.getHttpServer())
+        .post(`/projects/${projectId}/import`)
+        .set("Cookie", [authCookieHeader()]);
+
+      await request(app.getHttpServer())
+        .patch(`/projects/${projectId}/settings`)
+        .set("Cookie", [authCookieHeader()])
+        .send({ autoDeployEnabled: true, deployBranch: "main" });
+
+      const payload = JSON.stringify({
+        ref: "refs/heads/main",
+        after: "abcdef1234567890abcdef1234567890abcdef12",
+        repository: { clone_url: "https://github.com/exemplo/webhook.git" },
+      });
+
+      const first = await request(app.getHttpServer())
+        .post("/github/webhook")
+        .set("Content-Type", "application/json")
+        .set("X-Hub-Signature-256", signedWebhook(payload))
+        .set("X-GitHub-Event", "push")
+        .send(payload);
+
+      expect(first.status).toBe(200);
+      expect(first.body.triggered).toContain(projectId);
+      expect(first.body.jobs).toHaveLength(1);
+
+      // O MESMO commit de novo: não cria um segundo job.
+      const second = await request(app.getHttpServer())
+        .post("/github/webhook")
+        .set("Content-Type", "application/json")
+        .set("X-Hub-Signature-256", signedWebhook(payload))
+        .set("X-GitHub-Event", "push")
+        .send(payload);
+
+      expect(second.status).toBe(200);
+      expect(second.body.jobs).toEqual(first.body.jobs);
+
+      const jobs = await request(app.getHttpServer())
+        .get("/deploy-jobs")
+        .set("Cookie", [authCookieHeader()]);
+      expect(jobs.body.length).toBe(1);
+      expect(jobs.body[0].commitSha).toBe("abcdef1234567890abcdef1234567890abcdef12");
+      expect(jobs.body[0].branch).toBe("main");
+
+      delete process.env.GITHUB_APP_WEBHOOK_SECRET;
+    });
+
+    it("recusa webhook com assinatura inválida", async () => {
+      process.env.GITHUB_APP_WEBHOOK_SECRET = WEBHOOK_SECRET;
+      const payload = JSON.stringify({
+        ref: "refs/heads/main",
+        after: "abcdef1234567890abcdef1234567890abcdef12",
+        repository: { clone_url: "https://github.com/exemplo/webhook.git" },
+      });
+
+      const res = await request(app.getHttpServer())
+        .post("/github/webhook")
+        .set("Content-Type", "application/json")
+        .set("X-Hub-Signature-256", "sha256=invalida")
+        .set("X-GitHub-Event", "push")
+        .send(payload);
+
+      expect(res.status).toBe(400);
+      delete process.env.GITHUB_APP_WEBHOOK_SECRET;
+    });
+  });
 
   describe("CRUD básico de projetos", () => {
     let projectId: string;
@@ -493,7 +648,11 @@ describe("Projects flow (e2e)", () => {
       const projectWorkspace = path.join(tempWorkspaceDir, projectId);
       expect(fs.existsSync(path.join(projectWorkspace, "Dockerfile"))).toBe(true);
       expect(fs.existsSync(path.join(projectWorkspace, "docker-compose.korrelo.yml"))).toBe(true);
-      expect(fs.existsSync(path.join(projectWorkspace, ".env.korrelo"))).toBe(true);
+      // Wave 2: o arquivo de ambiente do projeto fica FORA do diretório do
+      // projeto (e, portanto, fora do contexto de build) - é o que impede o
+      // segredo de entrar na imagem.
+      expect(fs.existsSync(path.join(projectWorkspace, ".env.korrelo"))).toBe(false);
+      expect(fs.existsSync(path.join(tempWorkspaceDir, `${projectId}-secrets`, ".env.korrelo"))).toBe(true);
     });
 
     it("respeita um Dockerfile já versionado no repositório, sem sobrescrever com o gerado", async () => {
@@ -523,6 +682,11 @@ describe("Projects flow (e2e)", () => {
         .set("Cookie", [authCookieHeader()]);
 
       fakeOrchestrator.shouldFailDeploy = true;
+      // Espera os deploys anteriores (incluindo o do webhook) terminarem:
+      // a limpeza do container de teste acontece no `finally`, ou seja, DEPOIS
+      // do registro ficar como "success"/"failed" - sem esta espera, a
+      // contagem viria meio deslocada.
+      await sleep(300);
       const removeStagingCallsBefore = fakeOrchestrator.removeStagingCalls.length;
       const promoteCallsBefore = fakeOrchestrator.promoteCalls.length;
       const res = await request(app.getHttpServer())
@@ -532,17 +696,25 @@ describe("Projects flow (e2e)", () => {
 
       const deployResult = await waitForDeployResult(app, failingId, authCookieHeader());
       fakeOrchestrator.shouldFailDeploy = false;
+      // A limpeza do container de teste roda no `finally`, depois do registro
+      // virar "failed" - espera ela acontecer antes de contar as chamadas.
+      await sleep(200);
 
       expect(deployResult.status).toBe("failed");
-      // Falhou já na instância de teste: limpa ela (removeStaging), mas nunca
-      // chega a promover pra produção (promote não é chamado).
+      // Falhou já na instância de teste: limpa ela (removeStaging, no
+      // finally), mas nunca chega a promover pra produção (promote não é
+      // chamado).
       expect(fakeOrchestrator.removeStagingCalls.length).toBe(removeStagingCallsBefore + 1);
       expect(fakeOrchestrator.promoteCalls.length).toBe(promoteCallsBefore);
 
       const project = await request(app.getHttpServer())
         .get(`/projects/${failingId}`)
         .set("Cookie", [authCookieHeader()]);
-      expect(project.body.status).toBe("failed");
+      // Wave 2: a produção NUNCA foi tocada - o estado de runtime do projeto
+      // não vira "failed" (a aplicação antiga continua no ar e cron/backup
+      // continuam funcionando). O que ficou "failed" é o ÚLTIMO DEPLOY.
+      expect(project.body.status).not.toBe("failed");
+      expect(project.body.lastDeployStatus).toBe("failed");
     });
 
     it("faz rollback quando o health check nunca fica saudável", async () => {
@@ -570,7 +742,10 @@ describe("Projects flow (e2e)", () => {
       const project = await request(app.getHttpServer())
         .get(`/projects/${unhealthyId}`)
         .set("Cookie", [authCookieHeader()]);
-      expect(project.body.status).toBe("failed");
+      // O health check do staging falhou: a produção não foi tocada, então o
+      // runtime continua como estava e o último deploy é que está "failed".
+      expect(project.body.status).not.toBe("failed");
+      expect(project.body.lastDeployStatus).toBe("failed");
     });
 
     it("lê logs do projeto implantado (via LOG_READER fake)", async () => {

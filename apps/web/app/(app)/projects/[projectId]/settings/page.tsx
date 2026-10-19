@@ -54,6 +54,14 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
   const [branchInput, setBranchInput] = useState("");
   const [diskLimitInput, setDiskLimitInput] = useState("");
   const [memoryLimitInput, setMemoryLimitInput] = useState("");
+  const [healthcheckEnabled, setHealthcheckEnabled] = useState(false);
+  const [healthcheckPath, setHealthcheckPath] = useState("/");
+  const [healthcheckValues, setHealthcheckValues] = useState({
+    intervalSeconds: 30,
+    timeoutSeconds: 5,
+    retries: 3,
+    startPeriodSeconds: 120,
+  });
 
   function load() {
     apiFetch(`/projects/${params.projectId}`)
@@ -64,6 +72,23 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
           setBranchInput(p.deployBranch);
           setDiskLimitInput(p.diskLimitMb ? String(Math.round(p.diskLimitMb / 1024)) : "");
           setMemoryLimitInput(p.memoryLimitMb ? String(p.memoryLimitMb) : "");
+          // Healthcheck (Wave 2): o projeto guarda a configuração em JSON.
+          try {
+            const parsed = p.healthcheckConfig ? JSON.parse(p.healthcheckConfig) : null;
+            setHealthcheckEnabled(parsed?.enabled === true);
+            setHealthcheckPath(parsed?.path ?? "/");
+            if (parsed) {
+              setHealthcheckValues({
+                intervalSeconds: parsed.intervalSeconds ?? 30,
+                timeoutSeconds: parsed.timeoutSeconds ?? 5,
+                retries: parsed.retries ?? 3,
+                startPeriodSeconds: parsed.startPeriodSeconds ?? 120,
+              });
+            }
+          } catch {
+            setHealthcheckEnabled(false);
+            setHealthcheckPath("/");
+          }
         }
       })
       .catch(() => setProject(null));
@@ -82,6 +107,14 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
     diskLimitMb?: number | null;
     skipStagingTest?: boolean;
     memoryLimitMb?: number | null;
+    healthcheck?: {
+      enabled?: boolean;
+      path?: string;
+      intervalSeconds?: number;
+      timeoutSeconds?: number;
+      retries?: number;
+      startPeriodSeconds?: number;
+    };
   }) {
     if (!project) return;
     setSaving(true);
@@ -208,6 +241,48 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
                 updateSettings({ memoryLimitMb: memoryLimitInput.trim() ? Number(memoryLimitInput) : null })
               }
               disabled={saving}
+              className="rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {t.common.save}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p className="mb-2 mt-6 text-[13.5px] font-medium text-foreground">{t.projectSettings.healthcheckTitle}</p>
+      <p className="mb-2 text-[12.5px] text-muted-foreground">{t.projectSettings.healthcheckDescription}</p>
+      <div className="rounded-xl border border-border-subtle bg-surface px-4">
+        <FeatureToggleRow
+          title={t.projectSettings.healthcheckEnabledLabel}
+          description={t.projectSettings.healthcheckEnabledHint}
+          checked={healthcheckEnabled}
+          disabled={saving}
+          onChange={(value) =>
+            updateSettings({
+              healthcheck: { ...healthcheckValues, enabled: value, path: healthcheckPath },
+            })
+          }
+        />
+        <div className="flex items-center justify-between py-4">
+          <div>
+            <p className="text-[13.5px] font-medium text-foreground">{t.projectSettings.healthcheckPathLabel}</p>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t.projectSettings.healthcheckPathHint}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              value={healthcheckPath}
+              onChange={(e) => setHealthcheckPath(e.target.value)}
+              placeholder={t.projectSettings.healthcheckPathPlaceholder}
+              disabled={!healthcheckEnabled}
+              className="w-32 rounded-md border border-border-subtle bg-transparent px-2.5 py-1.5 font-mono text-[13px] text-foreground outline-none focus:border-accent disabled:opacity-50"
+            />
+            <button
+              onClick={() =>
+                updateSettings({
+                  healthcheck: { ...healthcheckValues, enabled: healthcheckEnabled, path: healthcheckPath },
+                })
+              }
+              disabled={saving || !healthcheckEnabled}
               className="rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
             >
               {t.common.save}

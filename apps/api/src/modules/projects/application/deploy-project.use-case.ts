@@ -1,12 +1,6 @@
-import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  InternalServerErrorException,
-  Logger,
-  NotFoundException,
-} from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { promises as fs } from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import type { DetectedStack } from "@korrelo/shared-types";
 import { apiError } from "../../../infrastructure/api-error";
@@ -16,7 +10,6 @@ import { DOCKERFILE_GENERATOR, type DockerfileGenerator } from "../domain/docker
 import {
   CONTAINER_ORCHESTRATOR,
   COMPOSE_FILENAME,
-  ENV_FILENAME,
   type ContainerOrchestrator,
   type DeployConfig,
 } from "../domain/container-orchestrator";
@@ -27,7 +20,7 @@ import {
   type ManagedDatabaseRepository,
 } from "../domain/managed-database.repository";
 import { DEPLOY_RECORD_REPOSITORY, type DeployRecordRepository } from "../domain/deploy-record.repository";
-import { DeployRecord, type DeployTrigger } from "../domain/deploy-record.entity";
+import { DeployRecord } from "../domain/deploy-record.entity";
 import { REPOSITORY_CLONER, type RepositoryCloner } from "../domain/repository-cloner";
 import { GITHUB_APP_CLIENT, type GithubAppClient } from "../../github/domain/github-app-client";
 import {
@@ -35,18 +28,32 @@ import {
   type GithubInstallationRepository,
 } from "../../github/domain/github-installation.repository";
 import { PortAllocator } from "../infrastructure/port-allocator";
-import { ResourceBudgetCalculator } from "../infrastructure/resource-budget-calculator";
 import { DockerComposeFileBuilder } from "../infrastructure/docker-compose-file-builder";
-import { getProjectWorkspacePath } from "../infrastructure/workspace-paths";
+import {
+  getProjectSecretsDir,
+  getProjectSecretsPath,
+  getProjectWorkspacePath,
+} from "../infrastructure/workspace-paths";
+import {
+  computeDeploymentMemoryPlan,
+  type DeploymentMemoryPlan,
+} from "../infrastructure/memory-budget";
+import { ensureDockerignore } from "../infrastructure/dockerignore";
+import { DeployLogger } from "../infrastructure/deploy-logger";
+import { DEPLOY_JOB_REPOSITORY, type DeployJobRepository } from "../domain/deploy-job.repository";
+import { DeployJob, type DeployJobStage } from "../domain/deploy-job.entity";
+import type { HealthcheckConfig } from "../domain/container-orchestrator";
 
 const HEALTH_CHECK_TIMEOUT_MS = 30_000;
 
-async function fileExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
+/** Erro de deploy com a informação de se a produção foi afetada. */
+class DeployFailure extends Error {
+  constructor(
+    message: string,
+    readonly productionAffected: boolean,
+  ) {
+    super(message);
+    this.name = "DeployFailure";
   }
 }
 
@@ -55,14 +62,25 @@ function sanitizeContainerName(projectId: string, projectName: string): string {
   return `korrelo-${slug || "project"}-${projectId.slice(0, 8)}`;
 }
 
+/**
+ * Executa UM job de deploy (a fila global garante um por vez).
+ *
+ * Fluxo (Wave 2):
+ *   fetching → building (staging) → staging-health → promote →
+ *   production-health → (rollback) → cleanup → complete
+ *
+ * Invariantes:
+ * - a produção só é tocada DEPOIS que a instância de teste passou no
+ *   health check;
+ * - se a nova versão falhar na produção, a imagem anterior é restaurada
+ *   (rollback) - o volume/banco NÃO são tocados;
+ * - o container de teste é removido SEMPRE (finally);
+ * - falha de deploy NÃO derruba o estado de runtime da aplicação (a versão
+ *   anterior continua no ar e o cron/backup/terminal continuam funcionando).
+ */
 @Injectable()
 export class DeployProjectUseCase {
   private readonly logger = new Logger(DeployProjectUseCase.name);
-  // Duas chamadas concorrentes pro mesmo projeto (ex.: um push automático
-  // caindo bem na hora de um deploy manual) escreveriam o mesmo
-  // docker-compose.korrelo.yml ao mesmo tempo, corrompendo o arquivo. Essa
-  // fila encadeia execuções do MESMO projeto sem bloquear projetos diferentes.
-  private readonly deployQueues = new Map<string, Promise<unknown>>();
 
   constructor(
     @Inject(PROJECT_REPOSITORY) private readonly repository: ProjectRepository,
@@ -77,29 +95,21 @@ export class DeployProjectUseCase {
     @Inject(GITHUB_INSTALLATION_REPOSITORY)
     private readonly githubInstallationRepository: GithubInstallationRepository,
     private readonly portAllocator: PortAllocator,
-    private readonly resourceBudget: ResourceBudgetCalculator,
     private readonly composeFileBuilder: DockerComposeFileBuilder,
+    @Inject(DEPLOY_JOB_REPOSITORY) private readonly deployJobRepository: DeployJobRepository,
+    private readonly deployLogger: DeployLogger,
   ) {}
 
-  async execute(projectId: string, triggeredBy: DeployTrigger = "manual"): Promise<Project> {
-    const previous = this.deployQueues.get(projectId) ?? Promise.resolve();
-    const run = previous.catch(() => {}).then(() => this.runDeploy(projectId, triggeredBy));
-    this.deployQueues.set(projectId, run);
-    try {
-      return await run;
-    } finally {
-      // Só limpa se ninguém encadeou outro deploy por trás desse enquanto
-      // ele rodava (senão apagaria a referência do deploy mais novo).
-      if (this.deployQueues.get(projectId) === run) {
-        this.deployQueues.delete(projectId);
-      }
-    }
-  }
+  async executeJob(job: DeployJob): Promise<void> {
+    const context = {
+      deployJobId: job.id,
+      projectId: job.projectId,
+      commitSha: job.commitSha,
+    };
 
-  private async runDeploy(projectId: string, triggeredBy: DeployTrigger): Promise<Project> {
-    const project = await this.repository.findById(projectId);
+    const project = await this.repository.findById(job.projectId);
     if (!project) {
-      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));
+      throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${job.projectId} não encontrado`));
     }
     if (!project.detectedStack) {
       throw new BadRequestException(
@@ -110,168 +120,518 @@ export class DeployProjectUseCase {
       );
     }
 
-    let deployRecord = await this.deployRecordRepository.save(DeployRecord.start(projectId, triggeredBy));
-
     const stack = JSON.parse(project.detectedStack) as DetectedStack;
     const projectPath = getProjectWorkspacePath(project.id);
+    let deployRecord = await this.deployRecordRepository.save(DeployRecord.start(project.id, job.trigger));
 
-    let containerName: string;
-    let hostPort: number;
-    let stagingHostPort: number;
-    let stagingContainerName: string;
-    let memoryLimitMb: number;
-    let deployConfig: DeployConfig;
+    let deployConfig: DeployConfig | null = null;
+    let promoted = false;
+    let rollbackSucceeded = false;
+    let stagingRemoved = false;
+    let candidateImage: string | null = null;
+    let previousImage: string | null = null;
+
     try {
-      // Sem isso o deploy só reconstruía a imagem em cima do código já clonado
-      // no /import, nunca pegando commits novos - webhook e deploy manual
-      // ficavam presos pra sempre na versão importada originalmente.
+      // ------------------------------------------------------------------
+      // 1. fetching: workspace no commit exato do job
+      // ------------------------------------------------------------------
+      await this.setStage(job, "fetching", context);
       const accessToken = await this.resolveGithubAccessToken();
-      await this.cloner.cloneOrUpdate(project.repoUrl, projectPath, accessToken);
-      const lastCommit = await this.cloner.getLastCommit(projectPath);
-      if (lastCommit) {
-        deployRecord = await this.deployRecordRepository.save(deployRecord.withCommit(lastCommit.hash, lastCommit.message));
-      }
+      const prepared = await this.cloner.prepareCommit(project.repoUrl, projectPath, accessToken, {
+        branch: job.branch,
+        commitSha: job.commitSha,
+      });
+      this.deployLogger.log("fetching", { ...context, commitSha: prepared.sha }, "workspace preparado", {
+        branch: job.branch,
+      });
 
-      // Se o próprio repositório já traz um Dockerfile versionado, é ele que
-      // vale - sobrescrever sempre com o gerado automaticamente jogava fora
-      // qualquer customização que o dono do projeto tivesse commitado (ex.:
-      // bundle de certificado extra pra assinatura fiscal), a cada deploy,
-      // silenciosamente.
-      const hasCustomDockerfile = await fileExists(path.join(projectPath, "Dockerfile"));
-      if (!hasCustomDockerfile) {
-        const { dockerfile, dockerignore } = this.dockerfileGenerator.generate(stack);
-        await fs.writeFile(path.join(projectPath, "Dockerfile"), dockerfile, "utf-8");
-        if (!(await fileExists(path.join(projectPath, ".dockerignore")))) {
-          await fs.writeFile(path.join(projectPath, ".dockerignore"), dockerignore, "utf-8");
+      if (!job.commitSha) {
+        // Deploy manual: o commit só é conhecido agora. Só é gravado no job
+        // se ainda não existir outro job com o mesmo (projeto, commit) - a
+        // unicidade lógica impede dois jobs do mesmo commit.
+        const existing = await this.deployJobRepository.findByProjectAndCommit(project.id, prepared.sha);
+        if (!existing || existing.id === job.id) {
+          await this.deployJobRepository.save(job.withCommit(prepared.sha));
         }
       }
+      deployRecord = await this.deployRecordRepository.save(
+        deployRecord.withCommit(prepared.sha.slice(0, 7), prepared.message),
+      );
 
-      const containerPort = stack.recommendedPort ?? 3000;
-      // Porta estável entre redeploys: sem isso, cada deploy corria o risco de
-      // cair numa porta diferente (a porta atual do projeto conta como "em uso"
-      // pelo próprio container antigo ainda rodando), quebrando silenciosamente
-      // um domínio personalizado já anexado.
-      hostPort = project.assignedPort ?? (await this.portAllocator.allocate(containerPort));
-      containerName = sanitizeContainerName(project.id, project.name);
-      stagingContainerName = `${containerName}-staging`;
-      stagingHostPort = await this.portAllocator.allocate(hostPort + 1);
-      // Definido manualmente nas Configurações do projeto = usa esse valor
-      // fixo; senão cai no rateio automático de sempre entre os projetos
-      // rodando.
-      memoryLimitMb = project.memoryLimitMb ?? (await this.resourceBudget.getContainerMemoryLimitMb(project.id));
+      // ------------------------------------------------------------------
+      // 2. orçamento de memória (app + banco + staging na mesma fatia),
+      //    respeitando o grandfathering: um projeto que já roda NUNCA tem
+      //    o limite reduzido automaticamente.
+      // ------------------------------------------------------------------
+      const plan = await this.computeMemoryPlan(project);
+      this.deployLogger.log("fetching", context, "orçamento de memória calculado", {
+        productionLimitMb: plan.productionLimitMb,
+        limitSource: plan.effective.source,
+        grandfathered: plan.effective.grandfathered,
+        stagingLimitMb: plan.stagingLimitMb,
+        databaseBudgetTotalMb: plan.databaseBudgetTotalMb,
+      });
+
+      if (plan.requiresExplicitConfirmation) {
+        // O admin pediu um limite MENOR que o do container em execução:
+        // isso não é aplicado sozinho (reduzir memória de um app no ar pode
+        // matá-lo por OOM). O deploy para com a explicação.
+        throw new DeployFailure(
+          plan.effective.note ??
+            "Reduzir o limite de memória de um projeto em execução exige confirmação explícita.",
+          false,
+        );
+      }
+
+      if (project.status === "running" && project.productionMemoryLimitMb === null) {
+        // O projeto está rodando, mas o Core ainda não sabe o limite atual
+        // do container (reconciliação pendente ou Docker indisponível no
+        // boot). Sem esse dado, um deploy poderia DIMINUIR a memória de um
+        // app no ar. Melhor travar o deploy até a reconciliação acontecer.
+        throw new DeployFailure(
+          "O limite de memória atual do container de produção é desconhecido (reconciliação pendente). " +
+            "O deploy fica bloqueado até o Korrelo conseguir ler o estado real do container - é isso que impede " +
+            "que a memória de uma aplicação no ar seja diminuída sem querer.",
+          false,
+        );
+      }
+
+      // ------------------------------------------------------------------
+      // 3. imagem versionada por commit
+      // ------------------------------------------------------------------
+      const imageName = sanitizeContainerName(project.id, project.name);
+      const imageTag = `commit-${prepared.sha.slice(0, 12)}`;
+      candidateImage = `${imageName}:${imageTag}`;
+      previousImage = project.currentImage;
+      await this.deployJobRepository.save(
+        job.withImageInfo({ previousImage, candidateImage, imageTag }),
+      );
+
+      // ------------------------------------------------------------------
+      // 4. arquivos: secrets FORA do contexto, .dockerignore garantido,
+      //    compose com a tag da imagem
+      // ------------------------------------------------------------------
+      const secretsPath = await this.writeEnvFile(project);
+      // O workspace sempre existe depois do clone, mas garantimos aqui: um
+      // diretório faltando faria o deploy falhar na hora de escrever o
+      // compose (e a produção nem seria tocada).
+      await fs.mkdir(projectPath, { recursive: true });
+      const dockerignore = await ensureDockerignore(projectPath);
+      if (dockerignore.added.length > 0) {
+        this.deployLogger.log(
+          "fetching",
+          context,
+          `.dockerignore atualizado (entradas obrigatórias adicionadas: ${dockerignore.added.join(", ")})`,
+        );
+      }
+
+      const containerName = imageName;
+      const stagingContainerName = `${containerName}-staging`;
+      const hostPort = project.assignedPort ?? (await this.portAllocator.allocate(stack.recommendedPort ?? 3000));
+      const stagingHostPort = await this.portAllocator.allocate(hostPort + 1);
 
       const allManagedDatabases = await this.managedDatabaseRepository.findAllByProjectId(project.id);
-      // Bancos "custom" são externos (o usuário cola a própria connection string),
-      // então o Korrelo nunca sobe container pra eles, só injeta a env var.
       const managedContainerDatabases = allManagedDatabases.filter((db) => db.type !== "custom");
-      // Orçamento dividido entre o app e cada banco gerenciado: com 1 banco só
-      // (o caso mais comum), cada um fica com metade do orçamento total, igual
-      // sempre foi. Com mais bancos no mesmo projeto (ex.: Postgres + Redis),
-      // a fatia de cada um encolhe pra caber todo mundo sem estourar a RAM.
-      const dbMemoryLimitMb = Math.round(memoryLimitMb / (managedContainerDatabases.length + 1));
+      // O budget de banco é TOTAL por projeto e dividido entre os bancos
+      // (Postgres + Redis NÃO recebem o budget inteiro cada um).
+      const dbLimitByType = new Map(plan.databaseLimits.map((limit) => [limit.type, limit.limitMb]));
 
       deployConfig = {
         projectPath,
         containerName,
         hostPort,
-        containerPort,
-        memoryLimitMb,
-        staging: { containerName: stagingContainerName, hostPort: stagingHostPort },
+        containerPort: stack.recommendedPort ?? 3000,
+        memoryLimitMb: plan.productionLimitMb,
+        staging: {
+          containerName: stagingContainerName,
+          hostPort: stagingHostPort,
+          memoryLimitMb: plan.stagingLimitMb,
+        },
         databases: managedContainerDatabases.map((db) => ({
           type: db.type as "postgres" | "redis" | "mongodb",
           serviceName: db.serviceName as string,
           username: db.username as string,
           password: db.password as string,
           databaseName: db.databaseName as string,
-          memoryLimitMb: dbMemoryLimitMb,
+          memoryLimitMb: dbLimitByType.get(db.type as "postgres" | "redis" | "mongodb") ?? 0,
           persistent: db.persistent,
         })),
+        imageName,
+        imageTag,
+        envFilePath: secretsPath,
+        projectId: project.id,
+        deployJobId: job.id,
+        commitSha: prepared.sha,
+        healthcheck: this.parseHealthcheckConfig(project),
+        memswapLimitMb: this.parseMemswapLimitMb(),
       };
 
-      const composeContent = this.composeFileBuilder.build(deployConfig);
+      // Dockerfile próprio do projeto tem precedência (o dono do projeto
+      // sabe o que está fazendo) - mas o .dockerignore obrigatório já foi
+      // garantido acima (o segredo NÃO entra no contexto).
+      const hasCustomDockerfile = await fileExists(path.join(projectPath, "Dockerfile"));
+      if (!hasCustomDockerfile) {
+        const { dockerfile, dockerignore: generatedIgnore } = this.dockerfileGenerator.generate(stack, {
+          useCacheMounts: await this.orchestrator.supportsBuildKit(),
+          buildMemoryMb: plan.stagingLimitMb,
+        });
+        await fs.writeFile(path.join(projectPath, "Dockerfile"), dockerfile, "utf-8");
+        if (!(await fileExists(path.join(projectPath, ".dockerignore")))) {
+          await fs.writeFile(path.join(projectPath, ".dockerignore"), generatedIgnore, "utf-8");
+        }
+      }
+
+      const composeContent = this.composeFileBuilder.build(deployConfig, stack.language);
       await fs.writeFile(path.join(projectPath, COMPOSE_FILENAME), composeContent, "utf-8");
 
-      // O compose sempre referencia esse arquivo via env_file, então precisa existir
-      // mesmo vazio, ou o `docker compose up` falha procurando um arquivo que não está lá.
-      const envVars = await this.envVarRepository.findByProjectId(project.id);
-      const envFileContent = envVars.map((v) => `${v.key}=${v.value}`).join("\n") + "\n";
-      await fs.writeFile(path.join(projectPath, ENV_FILENAME), envFileContent, "utf-8");
-    } catch (error) {
-      // Sem esse catch, qualquer falha aqui (clone, geração de Dockerfile,
-      // alocação de porta) derrubava a exceção direto pro caller sem NUNCA
-      // marcar o DeployRecord como "failed" - ele ficava "Em andamento" pra
-      // sempre na tela, mesmo com o deploy de verdade já morto.
-      await this.repository.save(project.withFailedDeployment());
-      const message = error instanceof Error ? error.message : String(error);
-      await this.deployRecordRepository.save(deployRecord.appendLog(message).withResult("failed", message));
-      throw error;
-    }
-
-    // Fase 1: builda e sobe só a instância de teste. A versão em produção (se
-    // já existir) continua no ar o tempo todo, sem ser tocada. Pulada quando
-    // skipStagingTest está ligado - pra projeto que segura conexão exclusiva
-    // com estado (ex.: sessão de WhatsApp), subir um segundo processo em
-    // paralelo apontando pro mesmo banco/sessão causa conflito com a versão
-    // em produção, então o teste faz mais mal que bem nesse caso.
-    let record = deployRecord;
-    if (!project.skipStagingTest) {
-      try {
+      // ------------------------------------------------------------------
+      // 5. staging: builda e sobe a instância de teste
+      // ------------------------------------------------------------------
+      if (!project.skipStagingTest) {
+        await this.setStage(job, "staging-start", context);
+        const buildStartedAt = Date.now();
         const stagingLog = await this.orchestrator.deployStaging(deployConfig);
-        record = record.appendLog(`--- build/staging ---\n${stagingLog}`);
-        await this.deployRecordRepository.save(record);
-      } catch (error) {
-        await this.removeStagingIgnoringErrors(deployConfig);
-        await this.repository.save(project.withFailedDeployment());
-        const message = error instanceof Error ? error.message : String(error);
-        await this.deployRecordRepository.save(record.appendLog(message).withResult("failed", message));
-        throw error;
-      }
+        const buildDurationMs = Date.now() - buildStartedAt;
+        await this.deployJobRepository.save(job.withDurations(buildDurationMs, null));
+        this.deployLogger.log("staging-start", context, "build concluído", { buildDurationMs });
+        deployRecord = await this.deployRecordRepository.save(
+          deployRecord.appendLog(`--- build/staging ---\n${stagingLog}`),
+        );
 
-      const stagingHealthy = await this.healthChecker.waitUntilHealthy(stagingHostPort, HEALTH_CHECK_TIMEOUT_MS);
-      if (!stagingHealthy) {
-        await this.removeStagingIgnoringErrors(deployConfig);
-        await this.repository.save(project.withFailedDeployment());
-        const message = `Container de teste subiu mas não respondeu em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. A versão em produção não foi tocada.`;
-        await this.deployRecordRepository.save(record.withResult("failed", message));
-        throw new InternalServerErrorException(
-          apiError("DEPLOY_HEALTH_CHECK_FAILED", `Deploy cancelado: ${message}`),
+        await this.setStage(job, "staging-health", context);
+        const stagingHealthy = await this.healthChecker.waitUntilHealthy(
+          deployConfig.staging.hostPort,
+          HEALTH_CHECK_TIMEOUT_MS,
+        );
+        if (!stagingHealthy) {
+          throw new DeployFailure(
+            `Container de teste subiu mas não respondeu em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. A versão em produção não foi tocada.`,
+            false,
+          );
+        }
+      } else {
+        await this.setStage(job, "staging-start", context);
+        deployRecord = await this.deployRecordRepository.save(
+          deployRecord.appendLog("--- deploy direto (sem container de teste, configurado nas Configurações) ---"),
         );
       }
-    } else {
-      record = record.appendLog("--- deploy direto (sem container de teste, configurado nas Configurações) ---");
-      await this.deployRecordRepository.save(record);
-    }
 
-    // Fase 2: já validado, agora sim troca a versão em produção. Reaproveita a
-    // imagem recém-buildada (cache), então essa troca é rápida - segundos, não
-    // o tempo do build inteiro.
-    try {
-      const promoteLog = await this.orchestrator.promote(deployConfig);
-      record = record.appendLog(`--- promote ---\n${promoteLog}`);
-      await this.deployRecordRepository.save(record);
-    } catch (error) {
-      await this.removeStagingIgnoringErrors(deployConfig);
-      await this.repository.save(project.withFailedDeployment());
-      const message = error instanceof Error ? error.message : String(error);
-      await this.deployRecordRepository.save(record.appendLog(message).withResult("failed", message));
-      throw error;
-    }
-
-    const healthy = await this.healthChecker.waitUntilHealthy(hostPort, HEALTH_CHECK_TIMEOUT_MS);
-    await this.removeStagingIgnoringErrors(deployConfig);
-
-    if (!healthy) {
-      await this.repository.save(project.withFailedDeployment());
-      const message = `A versão trocada não respondeu na porta final ${hostPort} depois da promoção.`;
-      await this.deployRecordRepository.save(record.withResult("failed", message));
-      throw new InternalServerErrorException(
-        apiError("DEPLOY_HEALTH_CHECK_FAILED", `Deploy cancelado: ${message}`),
+      // ------------------------------------------------------------------
+      // 6. promote: troca a versão em produção
+      // ------------------------------------------------------------------
+      await this.setStage(job, "promote", context);
+      const promoteLog = await this.orchestrator.promote(deployConfig, {
+        deployJobId: job.id,
+        projectId: project.id,
+        containerName: deployConfig.containerName,
+        kind: "promote",
+        previousImage,
+      });
+      promoted = true;
+      deployRecord = await this.deployRecordRepository.save(
+        deployRecord.appendLog(`--- promote ---\n${promoteLog}`),
       );
+
+      // ------------------------------------------------------------------
+      // 7. produção saudável? se não, rollback
+      // ------------------------------------------------------------------
+      await this.setStage(job, "production-health", context);
+      const productionHealthy = await this.healthChecker.waitUntilHealthy(
+        deployConfig.hostPort,
+        HEALTH_CHECK_TIMEOUT_MS,
+      );
+
+      if (!productionHealthy) {
+        await this.setStage(job, "rollback", context);
+        rollbackSucceeded = await this.rollbackIfPossible(deployConfig, previousImage, context);
+        await this.deployJobRepository.save(job.withRollback(true, rollbackSucceeded));
+        throw new DeployFailure(
+          rollbackSucceeded
+            ? `A versão nova não respondeu em produção. Rollback executado: a versão anterior está no ar de novo.`
+            : `A versão nova não respondeu em produção e o ROLLBACK FALHOU. Ação manual necessária.`,
+          !rollbackSucceeded,
+        );
+      }
+
+      // ------------------------------------------------------------------
+      // 8. sucesso
+      // ------------------------------------------------------------------
+      // O container de teste é removido ANTES de declarar o deploy
+      // concluído: "sucesso" então significa que nada ficou pendente
+      // (nem container de teste, nem build rodando).
+      await this.setStage(job, "cleanup", context);
+      await this.removeStaging(deployConfig, context);
+      stagingRemoved = true;
+
+      await this.setStage(job, "complete", context);
+      const deployed = project
+        .withDeployment(deployConfig.containerName, deployConfig.hostPort)
+        .withImages(candidateImage, previousImage)
+        .withLastDeployStatus("succeeded")
+        // O projeto saiu do estado "adotado": ele passou por um deploy com a
+        // política nova, então o limite efetivo passa a valer como estado
+        // atual (e a reconciliação vai confirmar no próximo boot).
+        .withRuntimeObservation({
+          productionMemoryLimitMb: deployConfig.memoryLimitMb,
+          runtimeSnapshot: updateSnapshotMemoryLimit(project.runtimeSnapshot, deployConfig.memoryLimitMb),
+          grandfathered: false,
+          grandfatheredAt: project.grandfatheredAt,
+          runtimeDriftDetected: false,
+          runtimeDriftDetails: null,
+        });
+      await this.repository.save(deployed);
+      await this.deployRecordRepository.save(deployRecord.withResult("success", null));
+      await this.deployJobRepository.save(job.withStatus("succeeded"));
+      this.deployLogger.log("complete", context, "deploy concluído", { image: candidateImage });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const productionAffected =
+        error instanceof DeployFailure ? error.productionAffected : promoted && !rollbackSucceeded;
+
+      // A aplicação em produção só é marcada como quebrada quando a nova
+      // versão realmente entrou e NÃO deu pra voltar. Falha de staging (ou
+      // deploy com rollback bem-sucedido) mantém o runtime como estava -
+      // cron, backup e terminal continuam funcionando.
+      let current = await this.repository.findById(project.id);
+      if (current) {
+        if (productionAffected) {
+          current = current.withFailedDeployment();
+        }
+        current = current.withLastDeployStatus(
+          rollbackSucceeded ? "rolled-back" : "failed",
+        );
+        await this.repository.save(current);
+      }
+
+      await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
+      const jobNow = (await this.deployJobRepository.findById(job.id)) ?? job;
+      await this.deployJobRepository.save(
+        jobNow.withError(message).withStatus(rollbackSucceeded ? "failed" : "failed"),
+      );
+      this.deployLogger.error(
+        jobNow.stage ?? "unknown",
+        { ...context, commitSha: jobNow.commitSha },
+        `deploy falhou: ${message}`,
+        { productionAffected, rollbackSucceeded },
+      );
+      throw error;
+    } finally {
+      // SEMPRE remove a instância de teste - sucesso, falha ou exceção.
+      if (deployConfig && !stagingRemoved) {
+        await this.removeStagingIgnoringErrors(deployConfig, context);
+      }
+      // Imagens do projeto que não são a atual nem a anterior podem sair.
+      if (deployConfig?.imageName) {
+        const protectedImages = [project.currentImage, project.previousImage, candidateImage].filter(
+          (image): image is string => Boolean(image),
+        );
+        try {
+          const removed = await this.orchestrator.pruneProjectImages({
+            imageName: deployConfig.imageName,
+            protectedImages,
+          });
+          if (removed) {
+            this.deployLogger.log("cleanup", context, `imagens antigas removidas: ${removed}`);
+          }
+        } catch (error) {
+          this.logger.warn(`Falha ao limpar imagens antigas: ${(error as Error).message}`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Rollback: volta a produção pra imagem anterior.
+   *
+   * Só mexe na APLICAÇÃO (container). Volume e banco ficam intactos - se o
+   * deploy tiver um migration incompatível, o rollback de aplicação pode
+   * não ser suficiente (e isso é registrado no log).
+   */
+  private async rollbackIfPossible(
+    config: DeployConfig,
+    previousImage: string | null,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<boolean> {
+    if (!previousImage) {
+      this.deployLogger.warn(
+        "rollback",
+        context,
+        "sem imagem anterior registrada - rollback não é possível (deploy de primeira versão)",
+      );
+      return false;
     }
 
-    await this.deployRecordRepository.save(record.withResult("success", null));
-    const deployedProject = project.withDeployment(containerName, hostPort);
-    return this.repository.save(deployedProject);
+    try {
+      const log = await this.orchestrator.rollback(config, previousImage, {
+        deployJobId: context.deployJobId,
+        projectId: context.projectId,
+        containerName: config.containerName,
+        kind: "rollback",
+        previousImage,
+      });
+      this.deployLogger.log("rollback", context, "imagem anterior restaurada", { previousImage });
+      if (log) {
+        this.logger.debug(log);
+      }
+      const healthy = await this.healthChecker.waitUntilHealthy(config.hostPort, HEALTH_CHECK_TIMEOUT_MS);
+      if (!healthy) {
+        this.deployLogger.error("rollback", context, "a versão anterior também não respondeu");
+      }
+      return healthy;
+    } catch (error) {
+      this.deployLogger.error("rollback", context, `falha no rollback: ${(error as Error).message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Escreve o arquivo de ambiente do projeto FORA do diretório do projeto,
+   * para que ele nunca entre no contexto de build (e nem numa camada de
+   * imagem). O compose aponta pra esse caminho absoluto.
+   */
+  private async writeEnvFile(project: Project): Promise<string> {
+    const secretsDir = getProjectSecretsDir(project.id);
+    const secretsPath = getProjectSecretsPath(project.id);
+    await fs.mkdir(secretsDir, { recursive: true });
+
+    const envVars = await this.envVarRepository.findByProjectId(project.id);
+    const envFileContent = envVars.map((v) => `${v.key}=${v.value}`).join("\n") + "\n";
+    await fs.writeFile(secretsPath, envFileContent, "utf-8");
+    // Só o dono do Core lê os segredos do projeto.
+    try {
+      await fs.chmod(secretsPath, 0o600);
+    } catch {
+      // best effort
+    }
+
+    // Remove a cópia antiga (dentro do workspace) se existir: ela ficaria
+    // no contexto de build.
+    const legacyPath = path.join(getProjectWorkspacePath(project.id), ".env.korrelo");
+    try {
+      await fs.rm(legacyPath, { force: true });
+    } catch {
+      // best effort
+    }
+
+    return secretsPath;
+  }
+
+  /**
+   * Estimativa de memória do deploy, SEM efeito colateral.
+   *
+   * Usada pelo worker ANTES do preflight: é o que permite dizer "esse deploy
+   * precisa de X MB de container de teste" e bloquear o build quando a VPS
+   * não tem folga - sem reduzir, parar ou reiniciar a produção.
+   */
+  async estimateMemoryReservation(projectId: string): Promise<{
+    productionLimitMb: number;
+    stagingLimitMb: number;
+    databaseBudgetTotalMb: number;
+  }> {
+    const project = await this.repository.findById(projectId);
+    if (!project) {
+      return { productionLimitMb: 0, stagingLimitMb: 0, databaseBudgetTotalMb: 0 };
+    }
+    const plan = await this.computeMemoryPlan(project);
+    return {
+      productionLimitMb: plan.productionLimitMb,
+      stagingLimitMb: plan.stagingLimitMb,
+      databaseBudgetTotalMb: plan.databaseBudgetTotalMb,
+    };
+  }
+
+  /**
+   * Orçamento de memória do projeto: app + banco + staging dividem a MESMA
+   * fatia da memória disponível (nada mais recebe "a RAM inteira" por fora
+   * do orçamento) E o limite de produção de um projeto que já roda é
+   * preservado (grandfathering).
+   */
+  private async computeMemoryPlan(project: Project): Promise<DeploymentMemoryPlan> {
+    const totalMemMb = Math.round(os.totalmem() / 1024 / 1024);
+    const all = await this.repository.findAll();
+    const activeIds = new Set(
+      all.filter((p) => p.status === "running" || p.id === project.id).map((p) => p.id),
+    );
+    const databases = await this.managedDatabaseRepository.findAllByProjectId(project.id);
+
+    return computeDeploymentMemoryPlan({
+      totalMemMb,
+      activeProjects: activeIds.size,
+      // O limite OBSERVADO no Docker é a fonte da verdade do runtime atual.
+      observedProductionLimitMb: project.productionMemoryLimitMb,
+      adminLimitMb: project.memoryLimitMb,
+      isRunning: project.status === "running",
+      isGrandfathered: project.grandfathered,
+      adminReductionApproved: project.memoryLimitReductionApproved,
+      databases: databases
+        .filter((db) => db.type !== "custom")
+        .map((db) => ({
+          type: db.type as "postgres" | "redis" | "mongodb",
+          observedLimitMb: db.memoryLimitMb,
+        })),
+    });
+  }
+
+  private parseHealthcheckConfig(project: Project): HealthcheckConfig | null {
+    if (!project.healthcheckConfig) return null;
+    try {
+      const parsed = JSON.parse(project.healthcheckConfig) as Partial<HealthcheckConfig>;
+      return {
+        enabled: parsed.enabled === true,
+        path: parsed.path ?? "/",
+        intervalSeconds: clampInt(parsed.intervalSeconds, 30, 5, 300),
+        timeoutSeconds: clampInt(parsed.timeoutSeconds, 5, 1, 60),
+        retries: clampInt(parsed.retries, 3, 1, 10),
+        // start_period generoso: app que demora pra subir não entra em
+        // loop de restart por healthcheck.
+        startPeriodSeconds: clampInt(parsed.startPeriodSeconds, 120, 0, 600),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Teto de swap do container. NADA é aplicado por padrão (mantém o
+   * comportamento atual do Docker). Pra proibir swap no container, defina
+   * KORRELO_MEMSWAP_LIMIT_MB (igual ao mem_limit do container).
+   */
+  private parseMemswapLimitMb(): number | null {
+    const raw = process.env.KORRELO_MEMSWAP_LIMIT_MB;
+    if (!raw) return null;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  private async setStage(
+    job: DeployJob,
+    stage: DeployJobStage,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<void> {
+    await this.deployJobRepository.save(job.withStage(stage));
+    this.deployLogger.log(stage, context, "etapa iniciada");
+  }
+
+  private async removeStagingIgnoringErrors(
+    config: DeployConfig,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<void> {
+    try {
+      await this.removeStaging(config, context);
+    } catch (error) {
+      // A limpeza do staging também roda no startup (recuperação de
+      // órfãos), então uma falha aqui não é fatal.
+      this.deployLogger.warn("cleanup", context, `falha ao remover o container de teste: ${(error as Error).message}`);
+    }
+  }
+
+  /** Remove o container de teste (erro é logado, não propagado). */
+  private async removeStaging(
+    config: DeployConfig,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<void> {
+    await this.orchestrator.removeStaging(config);
+    this.deployLogger.log("cleanup", context, "container de teste removido");
   }
 
   private async resolveGithubAccessToken(): Promise<string | undefined> {
@@ -281,12 +641,33 @@ export class DeployProjectUseCase {
     const { token } = await this.githubAppClient.createInstallationToken(installation.installationId);
     return token;
   }
+}
 
-  private async removeStagingIgnoringErrors(config: { projectPath: string; containerName: string }): Promise<void> {
-    try {
-      await this.orchestrator.removeStaging(config);
-    } catch (error) {
-      this.logger.error(`Falha ao remover container de teste: ${error}`);
-    }
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clampInt(value: number | undefined, fallback: number, min: number, max: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/**
+ * Atualiza o limite de memória dentro do snapshot de runtime (o snapshot
+ * descreve o container que acabou de ser recriado pelo deploy).
+ */
+function updateSnapshotMemoryLimit(snapshot: string | null, memoryLimitMb: number): string | null {
+  if (!snapshot) return null;
+  try {
+    const parsed = JSON.parse(snapshot) as Record<string, unknown>;
+    parsed.memoryLimitMb = memoryLimitMb;
+    return JSON.stringify(parsed);
+  } catch {
+    return snapshot;
   }
 }

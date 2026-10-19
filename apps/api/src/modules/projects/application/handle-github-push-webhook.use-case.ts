@@ -1,53 +1,61 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
-import { DeployProjectUseCase } from "./deploy-project.use-case";
+import { DeployQueueService } from "../infrastructure/deploy-queue.service";
 
 export interface GithubPushEvent {
   repositoryCloneUrl: string;
   ref: string; // ex: "refs/heads/main"
+  /**
+   * Commit empurrado (payload "after" do GitHub). Quando vem, o deploy
+   * usa ESSE commit - e não "a head da branch no momento do build" - o que
+   * torna o deploy determinístico (nunca implanta um commit diferente do
+   * registrado no job).
+   */
+  commitSha?: string | null;
 }
-
-// Vários commits seguidos (comum ao iterar rápido) cada um dispara seu
-// próprio webhook. Sem isso, cada push virava um deploy inteiro na fila
-// (DeployProjectUseCase.deployQueues), inclusive de commits já superados -
-// minutos de espera acumulados pra só o último importar de verdade.
-const DEBOUNCE_MS = 10_000;
 
 @Injectable()
 export class HandleGithubPushWebhookUseCase {
   private readonly logger = new Logger(HandleGithubPushWebhookUseCase.name);
-  private readonly pendingDeploys = new Map<string, NodeJS.Timeout>();
 
   constructor(
     @Inject(PROJECT_REPOSITORY) private readonly projectRepository: ProjectRepository,
-    private readonly deployProject: DeployProjectUseCase,
+    private readonly deployQueue: DeployQueueService,
   ) {}
 
-  async execute(event: GithubPushEvent): Promise<{ triggered: string[] }> {
+  /**
+   * Só ENFILEIRA. O webhook responde pro GitHub em milissegundos e o worker
+   * roda o build depois (um por vez na VPS inteira).
+   *
+   * Pushes seguidos se COALESCEM na fila: se o job anterior ainda está
+   * "queued" (não começou), ele é cancelado e o commit novo assume. Job já
+   * iniciado nunca é cancelado, e cada job tem UM commit.
+   */
+  async execute(event: GithubPushEvent): Promise<{ triggered: string[]; jobs: string[] }> {
     const pushedBranch = event.ref.replace(/^refs\/heads\//, "");
     const candidates = await this.projectRepository.findByRepoUrl(event.repositoryCloneUrl);
 
     const triggered: string[] = [];
+    const jobs: string[] = [];
+
     for (const project of candidates) {
       if (!project.autoDeployEnabled) continue;
       if (project.deployBranch !== pushedBranch) continue;
 
+      const { job } = await this.deployQueue.enqueue({
+        projectId: project.id,
+        commitSha: event.commitSha ?? null,
+        branch: pushedBranch,
+        trigger: "webhook",
+      });
+
       triggered.push(project.id);
-
-      const existingTimer = this.pendingDeploys.get(project.id);
-      if (existingTimer) clearTimeout(existingTimer);
-
-      const timer = setTimeout(() => {
-        this.pendingDeploys.delete(project.id);
-        // Não espera o deploy terminar, porque um build pode levar minutos, e
-        // o GitHub considera a entrega do webhook falha depois de ~10s sem resposta.
-        this.deployProject.execute(project.id, "webhook").catch((error) => {
-          this.logger.error(`Auto-deploy falhou pro projeto "${project.name}" (${project.id}): ${error}`);
-        });
-      }, DEBOUNCE_MS);
-      this.pendingDeploys.set(project.id, timer);
+      jobs.push(job.id);
+      this.logger.log(
+        `Push em "${pushedBranch}" (${event.commitSha?.slice(0, 7) ?? "?"}) enfileirado pro projeto "${project.name}" (job ${job.id})`,
+      );
     }
 
-    return { triggered };
+    return { triggered, jobs };
   }
 }

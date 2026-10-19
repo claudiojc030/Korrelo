@@ -1,11 +1,10 @@
-import { Body, Controller, Delete, Get, HttpCode, Logger, Param, Patch, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Res } from "@nestjs/common";
 import type { Response } from "express";
 import { ListProjectsUseCase } from "../application/list-projects.use-case";
 import { GetProjectUseCase } from "../application/get-project.use-case";
 import { CreateProjectUseCase } from "../application/create-project.use-case";
 import { DetectProjectStackUseCase } from "../application/detect-project-stack.use-case";
 import { ImportProjectUseCase } from "../application/import-project.use-case";
-import { DeployProjectUseCase } from "../application/deploy-project.use-case";
 import { DeleteProjectUseCase } from "../application/delete-project.use-case";
 import { ListEnvVarsUseCase } from "../application/list-env-vars.use-case";
 import { SetEnvVarsUseCase } from "../application/set-env-vars.use-case";
@@ -47,18 +46,17 @@ import { DeleteDatabaseRowsDto } from "./delete-database-rows.dto";
 import { StartMongoImportDto } from "./start-mongo-import.dto";
 import { UpdateProjectSettingsDto } from "./update-project-settings.dto";
 import { AttachDomainDto } from "./attach-domain.dto";
+import { DeployQueueService } from "../infrastructure/deploy-queue.service";
 
 @Controller("projects")
 export class ProjectsController {
-  private readonly logger = new Logger(ProjectsController.name);
-
   constructor(
     private readonly listProjects: ListProjectsUseCase,
     private readonly getProject: GetProjectUseCase,
     private readonly createProject: CreateProjectUseCase,
     private readonly detectProjectStack: DetectProjectStackUseCase,
     private readonly importProject: ImportProjectUseCase,
-    private readonly deployProject: DeployProjectUseCase,
+    private readonly deployQueue: DeployQueueService,
     private readonly deleteProject: DeleteProjectUseCase,
     private readonly listEnvVars: ListEnvVarsUseCase,
     private readonly setEnvVars: SetEnvVarsUseCase,
@@ -270,17 +268,23 @@ export class ProjectsController {
 
   @Post(":id/deploy")
   @HttpCode(202)
-  deploy(@Param("id") id: string) {
+  async deploy(@Param("id") id: string) {
     // Não espera o deploy inteiro terminar (pode levar minutos: build + health
     // check + promote) - sem isso, a requisição do botão "Deploy" ficava
     // pendurada o tempo todo, e a UI só sabia atualizar QUALQUER COISA (logs,
-    // status) depois que a resposta chegasse no fim. O deploy em si já grava
-    // seu progresso via DeployRecord, e o polling do histórico (2s enquanto
-    // houver um registro "running") já cobre o resto - mesmo padrão do
-    // auto-deploy por webhook (ver HandleGithubPushWebhookUseCase).
-    this.deployProject.execute(id, "manual").catch((error) => {
-      this.logger.error(`Deploy manual falhou pro projeto ${id}: ${error}`);
+    // status) depois que a resposta chegasse no fim.
+    //
+    // Wave 2: o deploy entra na FILA GLOBAL (um por vez na VPS inteira) e o
+    // worker executa depois. O commit é resolvido na hora de rodar (é nesse
+    // momento que o repositório é buscado e o commit exato é checado out).
+    const project = await this.getProject.execute(id);
+    const { job } = await this.deployQueue.enqueue({
+      projectId: project.id,
+      commitSha: null,
+      branch: project.deployBranch,
+      trigger: "manual",
     });
+    return { ok: true, jobId: job.id, status: job.status };
   }
 
   @Get(":id/deploys")

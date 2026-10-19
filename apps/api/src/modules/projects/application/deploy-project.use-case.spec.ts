@@ -1,0 +1,396 @@
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import type { Project } from "../domain/project.entity";
+import type { DeployJob } from "../domain/deploy-job.entity";
+
+/**
+ * Testes do runner de deploy (Wave 2).
+ *
+ * Foco:
+ * - o container de teste é SEMPRE removido (sucesso e falha);
+ * - a versão anterior volta a ficar no ar quando a nova quebra na produção
+ *   (rollback) - e o estado crítico fica registrado quando o rollback
+ *   também falha;
+ * - deploy falho NÃO derruba o estado de runtime da aplicação (cron, backup
+ *   e terminal continuam funcionando);
+ * - o commit implantado é exatamente o do job.
+ */
+class FakeProjectRepository {
+  project: Project | null = null;
+  saved: Project[] = [];
+  async findAll(): Promise<Project[]> {
+    return this.project ? [this.project] : [];
+  }
+  async findById(): Promise<Project | null> {
+    return this.project;
+  }
+  async findByCustomDomain(): Promise<Project | null> {
+    return null;
+  }
+  async findByRepoUrl(): Promise<Project[]> {
+    return this.project ? [this.project] : [];
+  }
+  async save(project: Project): Promise<Project> {
+    this.project = project;
+    this.saved.push(project);
+    return project;
+  }
+  async delete(): Promise<void> {
+    this.project = null;
+  }
+}
+
+class FakeOrchestrator {
+  stagingCalls = 0;
+  promoteCalls = 0;
+  rollbackCalls: { previousImage: string }[] = [];
+  removeStagingCalls = 0;
+  pruneCalls: { protectedImages: string[] }[] = [];
+  failStaging = false;
+  failPromote = false;
+  failRollback = false;
+
+  async deployStaging(): Promise<string> {
+    this.stagingCalls += 1;
+    if (this.failStaging) throw new Error("falha no staging");
+    return "staging ok";
+  }
+  async promote(): Promise<string> {
+    this.promoteCalls += 1;
+    if (this.failPromote) throw new Error("falha no promote");
+    return "promote ok";
+  }
+  async rollback(_config: unknown, previousImage: string): Promise<string> {
+    this.rollbackCalls.push({ previousImage });
+    if (this.failRollback) throw new Error("falha no rollback");
+    return "rollback ok";
+  }
+  async removeStaging(): Promise<void> {
+    this.removeStagingCalls += 1;
+  }
+  async teardown(): Promise<void> {}
+  async supportsBuildKit(): Promise<boolean> {
+    return false;
+  }
+  async pruneProjectImages(config: { protectedImages: string[] }): Promise<string> {
+    this.pruneCalls.push(config);
+    return "";
+  }
+}
+
+class FakeHealthChecker {
+  results: boolean[] = [];
+  async waitUntilHealthy(): Promise<boolean> {
+    return this.results.length > 0 ? (this.results.shift() as boolean) : true;
+  }
+}
+
+class FakeDeployRecordRepository {
+  records: any[] = [];
+  async findByProjectId(): Promise<any[]> {
+    return [];
+  }
+  async save(record: any): Promise<any> {
+    this.records.push(record);
+    return record;
+  }
+  async failAllRunning(): Promise<number> {
+    return 0;
+  }
+}
+
+class FakeDeployJobRepository {
+  jobs = new Map<string, DeployJob>();
+  async create(job: DeployJob): Promise<DeployJob> {
+    this.jobs.set(job.id, job);
+    return job;
+  }
+  async save(job: DeployJob): Promise<DeployJob> {
+    this.jobs.set(job.id, job);
+    return job;
+  }
+  async findById(id: string): Promise<DeployJob | null> {
+    return this.jobs.get(id) ?? null;
+  }
+  async findNextQueued(): Promise<DeployJob | null> {
+    return null;
+  }
+  async findOpenByProject(): Promise<DeployJob | null> {
+    return null;
+  }
+  async findByProjectAndCommit(): Promise<DeployJob | null> {
+    return null;
+  }
+  async findAllByStatus(): Promise<DeployJob[]> {
+    return [];
+  }
+  async findLatestByProject(): Promise<DeployJob | null> {
+    return null;
+  }
+  async findRecent(): Promise<DeployJob[]> {
+    return [];
+  }
+  async countByStatus(): Promise<number> {
+    return 0;
+  }
+}
+
+class FakeCloner {
+  lastParams: { branch?: string | null; commitSha?: string | null } | null = null;
+  async cloneOrUpdate(): Promise<void> {}
+  async getCurrentBranch(): Promise<string | null> {
+    return "main";
+  }
+  async getLastCommit(): Promise<{ hash: string; message: string } | null> {
+    return { hash: "abc1234", message: "msg" };
+  }
+  async prepareCommit(
+    _repoUrl: string,
+    destPath: string,
+    _token: string | undefined,
+    params: { branch?: string | null; commitSha?: string | null },
+  ): Promise<{ sha: string; message: string }> {
+    fs.mkdirSync(destPath, { recursive: true });
+    this.lastParams = params;
+    return { sha: params.commitSha ?? "aaaaaaabbbbb", message: "msg" };
+  }
+}
+
+class EmptyRepository {
+  async findAll(): Promise<any[]> {
+    return [];
+  }
+  async findAllByProjectId(): Promise<any[]> {
+    return [];
+  }
+  async findByProjectId(): Promise<any[]> {
+    return [];
+  }
+  async findById(): Promise<any | null> {
+    return null;
+  }
+  async findLatest(): Promise<any | null> {
+    return null;
+  }
+  async save(entity: any): Promise<any> {
+    return entity;
+  }
+  async replaceAll(): Promise<any[]> {
+    return [];
+  }
+  async upsertOne(): Promise<void> {}
+}
+
+describe("DeployProjectUseCase (Wave 2)", () => {
+  let tempWorkspaceDir: string;
+  let useCase: any;
+  let ProjectEntity: any;
+  let DeployJobEntity: any;
+
+  const projectRepository = new FakeProjectRepository();
+  const orchestrator = new FakeOrchestrator();
+  const healthChecker = new FakeHealthChecker();
+  const deployRecordRepository = new FakeDeployRecordRepository();
+  const deployJobRepository = new FakeDeployJobRepository();
+  const cloner = new FakeCloner();
+
+  beforeAll(() => {
+    tempWorkspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "korrelo-deploy-"));
+    process.env.KORRELO_WORKSPACE_DIR = tempWorkspaceDir;
+    jest.resetModules();
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    ProjectEntity = require("../domain/project.entity").Project;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    DeployJobEntity = require("../domain/deploy-job.entity").DeployJob;
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { DeployProjectUseCase } = require("../application/deploy-project.use-case");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { DockerComposeFileBuilder } = require("../infrastructure/docker-compose-file-builder");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { DeployLogger } = require("../infrastructure/deploy-logger");
+
+    useCase = new DeployProjectUseCase(
+      projectRepository,
+      { supports: () => true, generate: () => ({ dockerfile: "FROM node:20-alpine\n", dockerignore: ".env.korrelo\n" }) },
+      orchestrator,
+      healthChecker,
+      new EmptyRepository(),
+      new EmptyRepository(),
+      deployRecordRepository,
+      cloner,
+      { createInstallationToken: async () => ({ token: "t", expiresAt: new Date() }) },
+      { findLatest: async () => null },
+      { allocate: async () => 3200 },
+      new DockerComposeFileBuilder(),
+      deployJobRepository,
+      new DeployLogger(),
+    );
+  });
+
+  afterAll(() => {
+    fs.rmSync(tempWorkspaceDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    orchestrator.stagingCalls = 0;
+    orchestrator.promoteCalls = 0;
+    orchestrator.rollbackCalls = [];
+    orchestrator.removeStagingCalls = 0;
+    orchestrator.failStaging = false;
+    orchestrator.failPromote = false;
+    orchestrator.failRollback = false;
+    healthChecker.results = [];
+    deployJobRepository.jobs.clear();
+    deployRecordRepository.records = [];
+
+    projectRepository.project = new ProjectEntity(
+      "proj-1",
+      "Meu Projeto",
+      "https://github.com/exemplo/projeto.git",
+      JSON.stringify({
+        language: "Node.js",
+        framework: "Express",
+        packageManager: "npm",
+        recommendedPort: 3000,
+        startCommand: "npm run start",
+        buildCommand: null,
+        entryPoint: null,
+      }),
+      "configuring",
+      null,
+      null,
+      true,
+      true,
+      null,
+      "none",
+      false,
+      "main",
+      null,
+      false,
+      null,
+      null,
+      "korrelo-x:commit-antiga",
+      "korrelo-x:commit-anterior",
+      null,
+      null, // productionMemoryLimitMb
+      null, // runtimeSnapshot
+      false, // grandfathered
+      null, // grandfatheredAt
+      false, // runtimeDriftDetected
+      null, // runtimeDriftDetails
+      false, // memoryLimitReductionApproved
+      new Date(),
+    );
+  });
+
+  function makeJob(commitSha: string | null = "aaaaaaabbbbb"): any {
+    const job = DeployJobEntity.create({
+      projectId: "proj-1",
+      commitSha,
+      branch: "develop",
+      trigger: "webhook",
+    });
+    deployJobRepository.jobs.set(job.id, job);
+    return job;
+  }
+
+  it("implanta o commit exato do job (nunca outro)", async () => {
+    const job = makeJob("abcdef1234567890");
+    await useCase.executeJob(job);
+
+    expect(cloner.lastParams).toEqual({ branch: "develop", commitSha: "abcdef1234567890" });
+  });
+
+  it("sucesso: remove o container de teste e registra a imagem em produção", async () => {
+    const job = makeJob();
+    await useCase.executeJob(job);
+
+    expect(orchestrator.stagingCalls).toBe(1);
+    expect(orchestrator.promoteCalls).toBe(1);
+    expect(orchestrator.removeStagingCalls).toBe(1);
+    expect(projectRepository.project?.status).toBe("running");
+    expect(projectRepository.project?.lastDeployStatus).toBe("succeeded");
+    // A imagem que estava em produção vira a "anterior" (é o alvo do
+    // rollback); a nova imagem é a atual.
+    expect(projectRepository.project?.previousImage).toBe("korrelo-x:commit-antiga");
+    expect(projectRepository.project?.currentImage).toContain("commit-aaaaaaabbbbb");
+  });
+
+  it("falha no staging: produção intacta, runtime NÃO vira 'failed' e staging é removido", async () => {
+    orchestrator.failStaging = true;
+    const job = makeJob();
+
+    await expect(useCase.executeJob(job)).rejects.toThrow("falha no staging");
+
+    expect(orchestrator.promoteCalls).toBe(0);
+    expect(orchestrator.removeStagingCalls).toBe(1);
+    expect(projectRepository.project?.status).not.toBe("failed");
+    expect(projectRepository.project?.lastDeployStatus).toBe("failed");
+  });
+
+  it("falha na promoção: faz ROLLBACK para a imagem anterior", async () => {
+    healthChecker.results = [true, false]; // staging ok, produção não responde
+    const job = makeJob();
+
+    await expect(useCase.executeJob(job)).rejects.toThrow();
+
+    expect(orchestrator.promoteCalls).toBe(1);
+    expect(orchestrator.rollbackCalls).toHaveLength(1);
+    expect(orchestrator.rollbackCalls[0].previousImage).toBe("korrelo-x:commit-antiga");
+    // O rollback devolvendo o app no ar: o runtime continua "running".
+    healthChecker.results = [true];
+    expect(projectRepository.project?.status).not.toBe("failed");
+  });
+
+  it("rollback que também falha: estado crítico registrado e runtime marcado como quebrado", async () => {
+    healthChecker.results = [true, false, false]; // staging ok, produção não, rollback também não
+    orchestrator.failRollback = true;
+    const job = makeJob();
+
+    await expect(useCase.executeJob(job)).rejects.toThrow();
+
+    const jobFinal = deployJobRepository.jobs.get(job.id);
+    expect(jobFinal?.rollbackAttempted).toBe(true);
+    expect(jobFinal?.rollbackSucceeded).toBe(false);
+    // Aqui a produçãoreally ficou sem resposta: o runtime é marcado como falho.
+    expect(projectRepository.project?.status).toBe("failed");
+    expect(projectRepository.project?.lastDeployStatus).toBe("failed");
+  });
+
+  it("o arquivo de ambiente do projeto fica FORA do diretório do projeto", async () => {
+    const job = makeJob();
+    await useCase.executeJob(job);
+
+    const projectDir = path.join(tempWorkspaceDir, "proj-1");
+    expect(fs.existsSync(path.join(projectDir, ".env.korrelo"))).toBe(false);
+    expect(fs.existsSync(path.join(tempWorkspaceDir, "proj-1-secrets", ".env.korrelo"))).toBe(true);
+    // E o .dockerignore obrigatório existe (o segredo não entra no contexto).
+    expect(fs.existsSync(path.join(projectDir, ".dockerignore"))).toBe(true);
+  });
+
+  it("projeto ADOTADO (grandfathered) mantém o limite de produção observado", async () => {
+    // Mesatta-like: o container de produção tem 1757 MB; a fórmula nova daria
+    // bem menos. O deploy NÃO pode reduzir.
+    const current = projectRepository.project as any;
+    projectRepository.project = current.withRuntimeObservation({
+      productionMemoryLimitMb: 1757,
+      runtimeSnapshot: null,
+      grandfathered: true,
+      grandfatheredAt: new Date(),
+      runtimeDriftDetected: false,
+      runtimeDriftDetails: null,
+    });
+
+    const job = makeJob();
+    await useCase.executeJob(job);
+
+    const compose = fs.readFileSync(
+      path.join(tempWorkspaceDir, "proj-1", "docker-compose.korrelo.yml"),
+      "utf-8",
+    );
+    // O limite de PRODUÇÃO é o observado (1757), não o calculado.
+    expect(compose).toContain("mem_limit: 1757m");
+    expect(compose).not.toContain("mem_limit: 486m");
+  });
+});

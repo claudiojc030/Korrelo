@@ -1,6 +1,6 @@
 import { Injectable, UnprocessableEntityException } from "@nestjs/common";
 import type { DetectedStack } from "@korrelo/shared-types";
-import type { DockerfileGenerator, GeneratedDockerfile } from "../domain/dockerfile-generator";
+import type { DockerfileGenerator, DockerfileGeneratorOptions, GeneratedDockerfile } from "../domain/dockerfile-generator";
 import { NodeDockerfileGenerator } from "./node-dockerfile-generator";
 import { PhpDockerfileGenerator } from "./php-dockerfile-generator";
 import { PythonDockerfileGenerator } from "./python-dockerfile-generator";
@@ -37,7 +37,7 @@ export class DockerfileGeneratorRegistry implements DockerfileGenerator {
     return this.generators.some((g) => g.supports(stack));
   }
 
-  generate(stack: DetectedStack): GeneratedDockerfile {
+  generate(stack: DetectedStack, options?: DockerfileGeneratorOptions): GeneratedDockerfile {
     const generator = this.generators.find((g) => g.supports(stack));
     if (!generator) {
       throw new UnprocessableEntityException(
@@ -45,6 +45,6 @@ export class DockerfileGeneratorRegistry implements DockerfileGenerator {
           "Suporte disponível hoje: Node.js, PHP, Python, Go, Rust, Java, .NET.",
       );
     }
-    return generator.generate(stack);
+    return generator.generate(stack, options);
   }
 }

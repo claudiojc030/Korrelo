@@ -2,6 +2,17 @@ import type { ProjectStatus } from "@korrelo/shared-types";
 
 export type DomainSslStatus = "none" | "pending" | "active" | "failed";
 
+/**
+ * Estado do deploy (≠ estado da aplicação).
+ *
+ * Wave 2: o estado de RUNTIME ("status") e o estado do ÚLTIMO DEPLOY
+ * ("lastDeployStatus") são coisas diferentes. Um deploy de staging que falhou
+ * NÃO significa que a aplicação em produção caiu - e, enquanto o deploy for
+ * tratado como "falha do projeto", o cron, o backup e o terminal param de
+ * funcionar numa aplicação que está no ar.
+ */
+export type LastDeployStatus = "queued" | "running" | "succeeded" | "failed" | "rolled-back" | "canceled" | "interrupted";
+
 export class Project {
   constructor(
     public readonly id: string,
@@ -17,19 +28,20 @@ export class Project {
     public readonly domainSslStatus: DomainSslStatus,
     public readonly autoDeployEnabled: boolean,
     public readonly deployBranch: string,
-    // Alerta (não bloqueio: o Docker padrão não segura quota de disco por
-    // container sem reparticionar a VPS inteira em XFS). Null = sem alerta.
     public readonly diskLimitMb: number | null,
-    // Projeto que segura conexão exclusiva com estado (ex.: sessão de
-    // WhatsApp) não pode ter dois processos vivos ao mesmo tempo apontando
-    // pro mesmo banco - o container de teste do deploy normal (blue-green)
-    // causa esse conflito. Com isso ligado, o deploy builda e troca a versão
-    // em produção direto, sem subir instância de teste antes.
     public readonly skipStagingTest: boolean,
-    // Null = rateio automático entre os projetos rodando (ResourceBudgetCalculator).
-    // Definido = usa esse valor fixo, ignorando o rateio - pra quem quer
-    // controlar manualmente quanto cada projeto pode usar.
     public readonly memoryLimitMb: number | null,
+    public readonly lastDeployStatus: LastDeployStatus | null,
+    public readonly currentImage: string | null,
+    public readonly previousImage: string | null,
+    public readonly healthcheckConfig: string | null,
+    public readonly productionMemoryLimitMb: number | null,
+    public readonly runtimeSnapshot: string | null,
+    public readonly grandfathered: boolean,
+    public readonly grandfatheredAt: Date | null,
+    public readonly runtimeDriftDetected: boolean,
+    public readonly runtimeDriftDetails: string | null,
+    public readonly memoryLimitReductionApproved: boolean,
     public readonly createdAt: Date,
   ) {}
 
@@ -51,6 +63,17 @@ export class Project {
       null,
       false,
       null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      false,
+      null,
+      false,
+      null,
+      false,
       new Date(),
     );
   }
@@ -73,6 +96,17 @@ export class Project {
       this.diskLimitMb,
       this.skipStagingTest,
       this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
       this.createdAt,
     );
   }
@@ -95,10 +129,26 @@ export class Project {
       this.diskLimitMb,
       this.skipStagingTest,
       this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
       this.createdAt,
     );
   }
 
+  /**
+   * Só é usado quando a APLICAÇÃO realmente parou de funcionar (produção
+   * quebrada e sem rollback possível). Falha de deploy que deixou a versão
+   * anterior no ar NÃO usa isto.
+   */
   withFailedDeployment(): Project {
     return new Project(
       this.id,
@@ -117,6 +167,17 @@ export class Project {
       this.diskLimitMb,
       this.skipStagingTest,
       this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
       this.createdAt,
     );
   }
@@ -139,6 +200,17 @@ export class Project {
       this.diskLimitMb,
       this.skipStagingTest,
       this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
       this.createdAt,
     );
   }
@@ -161,6 +233,17 @@ export class Project {
       this.diskLimitMb,
       this.skipStagingTest,
       this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
       this.createdAt,
     );
   }
@@ -183,6 +266,17 @@ export class Project {
       this.diskLimitMb,
       this.skipStagingTest,
       this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
       this.createdAt,
     );
   }
@@ -205,6 +299,17 @@ export class Project {
       diskLimitMb,
       this.skipStagingTest,
       this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
       this.createdAt,
     );
   }
@@ -227,6 +332,17 @@ export class Project {
       this.diskLimitMb,
       skipStagingTest,
       this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
       this.createdAt,
     );
   }
@@ -249,6 +365,203 @@ export class Project {
       this.diskLimitMb,
       this.skipStagingTest,
       memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
+      this.createdAt,
+    );
+  }
+
+  /** Estado do último deploy (independente do estado de runtime). */
+  withLastDeployStatus(lastDeployStatus: LastDeployStatus): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
+      this.diskLimitMb,
+      this.skipStagingTest,
+      this.memoryLimitMb,
+      lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
+      this.createdAt,
+    );
+  }
+
+  /** Imagem em produção e imagem anterior (usada no rollback). */
+  withImages(currentImage: string | null, previousImage: string | null): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
+      this.diskLimitMb,
+      this.skipStagingTest,
+      this.memoryLimitMb,
+      this.lastDeployStatus,
+      currentImage,
+      previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
+      this.createdAt,
+    );
+  }
+
+  /** Configuração de healthcheck Docker (JSON serializado). */
+  withHealthcheckConfig(healthcheckConfig: string | null): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
+      this.diskLimitMb,
+      this.skipStagingTest,
+      this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
+      this.createdAt,
+    );
+  }
+
+  /**
+   * Autorização explícita do admin para REDUZIR o limite de memória de um
+   * projeto em execução. Sem ela, a redução é ignorada.
+   */
+  withMemoryLimitReductionApproved(approved: boolean): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
+      this.diskLimitMb,
+      this.skipStagingTest,
+      this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      approved,
+      this.createdAt,
+    );
+  }
+
+  /**
+   * Wave 2.1: registra o estado de runtime observado no Docker.
+   *
+   * É só METADADO: nada aqui toca em container, volume, rede ou porta. O
+   * objetivo é que o Core saiba o limite real que o container de produção tem
+   * hoje (e nunca o reduza sozinho).
+   */
+  withRuntimeObservation(params: {
+    productionMemoryLimitMb: number | null;
+    runtimeSnapshot: string | null;
+    grandfathered: boolean;
+    grandfatheredAt: Date | null;
+    runtimeDriftDetected: boolean;
+    runtimeDriftDetails: string | null;
+  }): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
+      this.diskLimitMb,
+      this.skipStagingTest,
+      this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      params.productionMemoryLimitMb,
+      params.runtimeSnapshot,
+      params.grandfathered,
+      params.grandfatheredAt,
+      params.runtimeDriftDetected,
+      params.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
       this.createdAt,
     );
   }
