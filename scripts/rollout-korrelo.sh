@@ -6,9 +6,18 @@
 # processos PM2 do Korrelo e arquivos do Core.
 #
 # Uso:
-#   bash scripts/rollout-korrelo.sh            # dry-run (padrão, não altera nada)
+#   bash scripts/rollout-korrelo.sh            # DRY-RUN REAL (somente leitura)
+#   bash scripts/rollout-korrelo.sh --plan     # só imprime o plano teórico
 #   bash scripts/rollout-korrelo.sh --apply    # executa o rollout de verdade
-#   bash scripts/rollout-korrelo.sh --plan     # só imprime o plano
+#
+# Modos:
+#   --plan  = imprime o plano. NÃO fala com Docker, nem com o banco.
+#   (padrão)= DRY-RUN REAL: executa TODAS as verificações somente leitura
+#              (git, banco do Core, host, health e snapshot real dos
+#              containers dos projetos) e NÃO escreve nada: sem lock, sem
+#              drain, sem backup, sem migration, sem build, sem restart de
+#              PM2 e sem nenhum comando Docker de escrita.
+#   --apply = o rollout de verdade (o mesmo executor do botão "Atualizar agora").
 #
 # Stages (executados pelo CLI, na ordem):
 #    1. preflight             - ambiente, git, disco, Docker acessível

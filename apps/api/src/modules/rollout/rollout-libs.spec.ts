@@ -538,14 +538,16 @@ describe("rollout - executor", () => {
 
     expect(result.ok).toBe(true);
     expect(result.dryRun).toBe(true);
+    // Todo comando executado no dry-run é de LEITURA (mesma allowlist que o
+    // próprio lib usa para abortar comandos de escrita).
+    expect(calls.length).toBeGreaterThan(0);
     for (const call of calls) {
-      expect(["git", "sqlite3", "docker"]).toContain(call.command);
-      if (call.command === "git") expect(["status", "rev-parse"]).toContain(call.args[0]);
-      if (call.command === "docker") expect(["ps", "inspect"]).toContain(call.args[0]);
+      expect(rolloutLib.isReadOnlyCommand(call.command, call.args)).toBe(true);
     }
     // Nenhum arquivo criado (lock/drain/status).
     expect(fs.existsSync(path.join(tmpDir, "worker-drain"))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, "self-update.lock"))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, "rollouts"))).toBe(false);
   });
 
   it("22) migration falhando: o PM2 NÃO é reiniciado", async () => {

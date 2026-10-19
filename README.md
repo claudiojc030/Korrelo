@@ -329,12 +329,30 @@ O script `scripts/rollout-korrelo.sh` faz o rollout do Core com as
 proteções que importam quando existem aplicações no ar:
 
 ```bash
-# 1. Veja o que aconteceria (NÃO executa nada)
+# 1. Só o plano teórico (não fala com Docker nem com o banco)
+bash scripts/rollout-korrelo.sh --plan
+
+# 2. Dry-run REAL: todas as verificações somente leitura, nada é alterado
 bash scripts/rollout-korrelo.sh
 
-# 2. Executa de verdade
+# 3. Executa de verdade
 bash scripts/rollout-korrelo.sh --apply
 ```
+
+O dry-run (padrão) é uma verificação de verdade, só de leitura: checa Git
+(branch, commit, working tree, remoto e candidato local), o banco do Core
+(existe, `sqlite3` acessível, jobs `DeployJob` em andamento, migrations
+presentes), o host (disco, memória, Docker acessível, PM2 observável, health
+da API e do web) e tira um snapshot REAL dos containers dos projetos
+(Mesatta app + Mongo, Evolution app + Postgres + Redis) com Container ID,
+imagem, StartedAt, RestartCount, memória, swap, restart policy, health,
+redes, portas e mounts.
+
+Ele **não escreve nada**: sem lock, sem drain, sem backup, sem `git pull`,
+sem `npm install`/`build`, sem migration, sem `chmod`, sem restart de PM2,
+sem nenhum comando Docker de escrita e sem arquivo de status. Cada comando
+passa por uma allowlist de leitura — um comando de escrita aborta o dry-run
+com erro em vez de acontecer.
 
 O que ele garante:
 

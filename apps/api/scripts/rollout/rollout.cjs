@@ -4,12 +4,17 @@
 /**
  * CLI do rollout do Korrelo.
  *
- *   node apps/api/scripts/rollout/rollout.cjs            # dry-run (padrão)
- *   node apps/api/scripts/rollout/rollout.cjs --apply    # executa de verdade
- *   node apps/api/scripts/rollout/rollout.cjs --plan     # só imprime o plano
+ *   node apps/api/scripts/rollout/rollout.cjs --plan     # só o plano teórico
+ *   node apps/api/scripts/rollout/rollout.cjs             # dry-run REAL (read-only)
+ *   node apps/api/scripts/rollout/rollout.cjs --apply     # rollout de verdade
  *
- * O padrão é DRY-RUN: nada é escrito, nenhum container é tocado, nenhuma
- * migration é aplicada, o PM2 não é reiniciado.
+ * Modos:
+ *  - --plan: imprime o plano. NÃO fala com Docker nem com o banco.
+ *  - (sem argumentos): DRY-RUN REAL - executa todas as verificações somente
+ *    leitura (git, core, host, health, snapshot real dos projetos) e não
+ *    escreve NADA (sem lock, sem drain, sem backup, sem arquivo de status).
+ *  - --apply: o rollout de verdade (com backup, migration, build e restart
+ *    do Core).
  */
 
 const fs = require("node:fs");
@@ -67,13 +72,87 @@ function printPlan(plan) {
   }
 }
 
+function printPreflight(report) {
+  console.log("=== DRY-RUN REAL (somente leitura, nada foi alterado) ===");
+  console.log(`gerado em:            ${report.generatedAt}`);
+  console.log("");
+  console.log("-- GIT --");
+  console.log(`branch:               ${report.git.branch}`);
+  console.log(`commit:               ${report.git.commit}`);
+  console.log(`remoto:               ${report.git.remote ?? "?"}`);
+  console.log(`candidato (local):    ${report.git.candidateCommit ?? "?"}`);
+  console.log(`working tree:         ${report.git.dirty ? "SUJO" : "limpo"}`);
+  for (const file of report.git.trackedModified) console.log(`  modificado: ${file}`);
+  for (const file of report.git.untracked) console.log(`  untracked:  ${file}`);
+
+  console.log("");
+  console.log("-- CORE --");
+  console.log(`banco:                ${report.core.databasePath}`);
+  console.log(`existe:               ${report.core.databaseExists ? "sim" : "NÃO"}`);
+  console.log(`sqlite acessível:     ${report.core.sqliteAccessible ? "sim" : "NÃO"}`);
+  console.log(`deploys em andamento:  ${report.core.activeDeploys}`);
+  console.log(`migrations no repo:   ${report.core.migrations.join(", ") || "(nenhuma)"}`);
+
+  console.log("");
+  console.log("-- HOST --");
+  console.log(`docker acessível:     ${report.host.dockerAccessible ? "sim" : "NÃO"}`);
+  console.log(`containers docker:    ${report.host.dockerContainers.length}`);
+  console.log(`API (${report.host.apiHealthUrl}): ${report.host.apiHealth ? "responde" : "NÃO responde"}`);
+  console.log(`web (${report.host.webHealthUrl}): ${report.host.webHealth ? "responde" : "NÃO responde"}`);
+  if (report.host.disk) {
+    console.log("-- disco --");
+    console.log(report.host.disk);
+  }
+  if (report.host.memory) {
+    console.log("-- memória --");
+    console.log(report.host.memory);
+  }
+  if (Array.isArray(report.host.pm2)) {
+    console.log("-- PM2 --");
+    for (const app of report.host.pm2) {
+      console.log(`  ${app.name}: ${app.pm2_env?.status ?? "?"}`);
+    }
+  }
+
+  console.log("");
+  console.log("-- PROJETOS (snapshot somente leitura) --");
+  for (const [project, data] of Object.entries(report.projects)) {
+    for (const [container, info] of Object.entries(data.containers ?? {})) {
+      console.log(`  ${project}/${container}`);
+      console.log(`    id=${info.id}`);
+      console.log(`    image=${info.image}`);
+      console.log(`    startedAt=${info.startedAt}`);
+      console.log(`    restartCount=${info.restartCount}`);
+      console.log(`    memoria=${info.memoryLimitBytes} swap=${info.memorySwapBytes}`);
+      console.log(`    restartPolicy=${info.restartPolicy} health=${info.health ?? "n/a"}`);
+      console.log(`    networks=[${(info.networks ?? []).join(",")}] ports=[${(info.ports ?? []).join(",")}]`);
+      console.log(
+        `    mounts=[${(info.mounts ?? []).map((m) => `${m.name ?? ""}:${m.destination ?? ""}`).join(", ")}]`,
+      );
+    }
+  }
+
+  console.log("");
+  console.log("-- VERIFICAÇÕES --");
+  for (const check of report.checks) {
+    console.log(`  ${check.ok ? "OK  " : "FALHA"} ${check.name}${check.detail ? ` (${check.detail})` : ""}`);
+  }
+
+  console.log("");
+  console.log("-- COMANDOS EXECUTADOS (todos somente leitura) --");
+  for (const command of report.executedCommands) {
+    console.log(`  ${command}`);
+  }
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const apply = args.includes("--apply");
   const planOnly = args.includes("--plan");
   const config = loadConfig();
 
-  if (planOnly || !apply) {
+  // ------------------------------------------------------------------ --plan
+  if (planOnly) {
     const plan = await planRollout({ config, run });
     printPlan(plan);
     if (plan.git.dirty) {
@@ -86,10 +165,46 @@ async function main() {
       process.exit(2);
     }
     console.log("");
-    console.log("DRY-RUN: nada foi executado. Use --apply para rodar de verdade.");
+    console.log("PLANO apenas (--plan): nada foi executado e nada foi lido do Docker.");
     process.exit(0);
   }
 
+  // ------------------------------------------------------- dry-run (default)
+  if (!apply) {
+    const result = await executeRollout({
+      config,
+      run,
+      log: (line) => console.log(line),
+      dryRun: true,
+    });
+    const report = result.preflight;
+    if (!report) {
+      console.error("dry-run não produziu relatório");
+      process.exit(1);
+    }
+    printPreflight(report);
+    console.log("");
+    if (report.problems.length > 0) {
+      console.log("PROBLEMAS ENCONTRADOS (o rollout real seria abortado):");
+      for (const problem of report.problems) console.log(`  - ${problem}`);
+      console.log("");
+      console.log("Nada foi alterado: dry-run é somente leitura.");
+      if (report.git.dirty) {
+        console.log("");
+        console.log("Working tree contains local changes:");
+        for (const file of report.git.trackedModified) console.log(` ${file}`);
+        for (const file of report.git.untracked) console.log(` ${file}`);
+        console.log("");
+        console.log("Update aborted. Review or stash/restore explicitly.");
+        process.exit(2);
+      }
+      process.exit(1);
+    }
+    console.log("Nada foi alterado: dry-run é somente leitura.");
+    process.exit(0);
+  }
+
+  // ------------------------------------------------------------------ --apply
   const result = await executeRollout({
     config,
     run,

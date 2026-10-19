@@ -112,7 +112,7 @@ function defaultConfig(repoRoot) {
     projects: [],
     pm2Apps: ["korrelo-api", "korrelo-web"],
     apiHealthUrl: "http://127.0.0.1:3001/health",
-    webHealthUrl: "http://127.0.1:3000/",
+    webHealthUrl: "http://127.0.0.1:3000/",
     lockPath: defaultLockPath(),
     drainFilePath: path.join(os.homedir(), ".korrelo", "worker-drain"),
     statusDir: path.join(os.homedir(), ".korrelo", "rollouts"),
@@ -148,6 +148,203 @@ async function countActiveDeploys({ dbPath, run }) {
   if (result.code !== 0) return 0;
   const count = Number.parseInt(result.stdout.trim(), 10);
   return Number.isFinite(count) ? count : 0;
+}
+
+/**
+ * Comandos PERMITIDOS no dry-run (todos somente leitura).
+ *
+ * O dry-run passa por aqui: qualquer comando fora da lista aborta o
+ * dry-run com erro, em vez de escrever algo por acidente.
+ */
+const READ_ONLY_COMMANDS = {
+  git: ["status", "rev-parse", "remote", "log", "show", "branch", "diff", "config", "ls-remote"],
+  docker: ["ps", "inspect", "stats", "version", "info"],
+  pm2: ["jlist", "status", "describe", "pid"],
+  df: null,
+  free: null,
+  nproc: null,
+  curl: null,
+  sqlite3: null,
+};
+
+function isReadOnlyCommand(command, args) {
+  const allowed = READ_ONLY_COMMANDS[command];
+  if (allowed === undefined) return false;
+  if (allowed === null) {
+    // Comandos sem subcomando: valida os argumentos.
+    if (command === "sqlite3") {
+      const sql = String(args[1] ?? "");
+      return /^\s*(select|pragma)\b/i.test(sql);
+    }
+    if (command === "curl") {
+      const joined = args.join(" ");
+      if (/\s-X\s*(POST|PUT|DELETE|PATCH)\b/i.test(joined)) return false;
+      if (/(\s|^)(-d|--data|--data-raw|--data-binary|--data-urlencode|-T|--upload-file|-F|--form)\b/.test(joined)) {
+        return false;
+      }
+      return true;
+    }
+    return true;
+  }
+  return allowed.includes(String(args[0]));
+}
+
+/**
+ * Cria um runner que SÓ aceita comandos de leitura.
+ *
+ * Qualquer comando fora da allowlist aborta com erro - é a prova mecânica
+ * de que o dry-run não escreve nada. O array `executed` fica com o rastro
+ * de tudo que rodou (usado no relatório).
+ */
+function createReadOnlyRunner({ run, executed = [] }) {
+  // Runner já protegido: reaproveita (sem duplicar o registro de comandos).
+  if (run && run.__korreloReadOnlyRunner) {
+    return { run, executed: run.__korreloExecuted };
+  }
+  const readOnlyRun = async (command, args = [], options = {}) => {
+    if (!isReadOnlyCommand(command, args)) {
+      throw new Error(
+        `dry-run recusou o comando "${command} ${args[0] ?? ""}". O dry-run so executa leitura.`,
+      );
+    }
+    executed.push({ command, args });
+    return run(command, args, options);
+  };
+  readOnlyRun.__korreloReadOnlyRunner = true;
+  readOnlyRun.__korreloExecuted = executed;
+  return { run: readOnlyRun, executed };
+}
+
+/**
+ * DRY-RUN REAL: executa TODAS as verificações somente leitura e devolve um
+ * relatório. Não escreve NADA (nem lock, nem drain, nem backup, nem status).
+ *
+ * O runner é envolvido por um guard que aborta qualquer comando de escrita.
+ */
+async function runReadOnlyPreflight({ config, run, now = new Date(), executed = [] }) {
+  const problems = [];
+  const checks = [];
+
+  const { run: readOnlyRun, executed: executedCommands } = createReadOnlyRunner({ run, executed });
+
+  const check = (name, ok, detail) => {
+    checks.push({ name, ok, detail });
+    if (!ok) problems.push(`${name}: ${detail}`);
+    return ok;
+  };
+
+  // ---------------------------------------------------------------- 1) Git
+  const git = await inspectGitState({ cwd: config.repoRoot, run: readOnlyRun });
+  const remoteResult = await readOnlyRun("git", ["remote", "get-url", "origin"], {
+    cwd: config.repoRoot,
+    timeoutMs: 10_000,
+  });
+  const candidateResult = await readOnlyRun(
+    "git",
+    ["rev-parse", "--verify", "origin/main"],
+    { cwd: config.repoRoot, timeoutMs: 10_000 },
+  );
+  check(
+    "git: working tree limpo",
+    git.dirty === false,
+    git.dirty
+      ? `${git.trackedModified.length} modificado(s) e ${git.untracked.length} untracked`
+      : "limpo",
+  );
+
+  // ---------------------------------------------------------------- 2) Core
+  const databaseExists = fs.existsSync(config.coreDbPath);
+  const sqliteProbe = await readOnlyRun("sqlite3", [config.coreDbPath, "SELECT 1;"], { timeoutMs: 10_000 });
+  const sqliteAccessible = sqliteProbe.code === 0;
+  const activeDeploys = await countActiveDeploys({ dbPath: config.coreDbPath, run: readOnlyRun });
+  const migrations = listMigrations({ repoRoot: config.repoRoot });
+  check(
+    "core: banco do Core acessível",
+    databaseExists && sqliteAccessible,
+    databaseExists ? (sqliteAccessible ? "ok" : "sqlite3 não respondeu") : `não encontrado: ${config.coreDbPath}`,
+  );
+  check(
+    "core: nenhum deploy em andamento",
+    activeDeploys === 0,
+    activeDeploys === 0 ? "nenhum job running" : `${activeDeploys} job(s) running`,
+  );
+
+  // ---------------------------------------------------------------- 3) Host
+  const diskResult = await readOnlyRun("df", ["-h", "/"], { timeoutMs: 10_000 });
+  const memoryResult = await readOnlyRun("free", ["-m"], { timeoutMs: 10_000 });
+  const dockerPs = await readOnlyRun("docker", ["ps", "--format", "{{.Names}}"], { timeoutMs: 15_000 });
+  const dockerAccessible = dockerPs.code === 0;
+  const pm2Result = await readOnlyRun("pm2", ["jlist"], { timeoutMs: 15_000 });
+  const apiHealth = await readOnlyRun(
+    "curl",
+    ["-fsS", "--max-time", "10", config.apiHealthUrl],
+    { timeoutMs: 20_000 },
+  );
+  const webHealth = await readOnlyRun(
+    "curl",
+    ["-fsS", "-o", "/dev/null", "--max-time", "15", config.webHealthUrl],
+    { timeoutMs: 25_000 },
+  );
+  check("host: Docker acessível", dockerAccessible, dockerAccessible ? "ok" : "docker não respondeu");
+  check("host: API responde", apiHealth.code === 0, config.apiHealthUrl);
+  check("host: web responde", webHealth.code === 0, config.webHealthUrl);
+
+  // ---------------------------------------------------------------- 4) Projetos
+  const snapshot = await captureProjectSnapshot({ projects: config.projects, run: readOnlyRun, now });
+  const containerCount = Object.values(snapshot.projects).reduce(
+    (sum, project) => sum + Object.keys(project.containers ?? {}).length,
+    0,
+  );
+  check(
+    "projetos: containers inspecionados",
+    config.projects.length === 0 || containerCount > 0,
+    `${containerCount} container(s) de ${config.projects.length} projeto(s)`,
+  );
+
+  return {
+    generatedAt: now.toISOString(),
+    mode: "dry-run",
+    git: {
+      branch: git.branch,
+      commit: git.commit,
+      dirty: git.dirty,
+      trackedModified: git.trackedModified,
+      untracked: git.untracked,
+      ignored: git.ignored,
+      remote: remoteResult.code === 0 ? remoteResult.stdout.trim() : null,
+      candidateCommit: candidateResult.code === 0 ? candidateResult.stdout.trim() : null,
+    },
+    core: {
+      databasePath: config.coreDbPath,
+      databaseExists,
+      sqliteAccessible,
+      activeDeploys,
+      migrations,
+    },
+    host: {
+      disk: diskResult.code === 0 ? diskResult.stdout.trim() : null,
+      memory: memoryResult.code === 0 ? memoryResult.stdout.trim() : null,
+      dockerAccessible,
+      dockerContainers: dockerAccessible ? dockerPs.stdout.split("\n").filter(Boolean) : [],
+      pm2: pm2Result.code === 0 ? safeParseJson(pm2Result.stdout) : null,
+      apiHealth: apiHealth.code === 0,
+      webHealth: webHealth.code === 0,
+      apiHealthUrl: config.apiHealthUrl,
+      webHealthUrl: config.webHealthUrl,
+    },
+    projects: snapshot.projects,
+    problems,
+    checks,
+    executedCommands: executedCommands.map((entry) => `${entry.command} ${entry.args[0] ?? ""}`.trim()),
+  };
+}
+
+function safeParseJson(raw) {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -246,6 +443,38 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
   let snapshotBefore = null;
 
   try {
+    // ---------------------------------------------------------------- dry-run
+    if (dryRun) {
+      // DRY-RUN REAL: executa todas as verificações somente leitura (git,
+      // core, host, health e snapshot real dos projetos) e NÃO escreve nada -
+      // nem lock, nem drain, nem backup, nem arquivo de status.
+      //
+      // Tudo passa pelo runner com guard: um comando de escrita aborta o
+      // dry-run com erro em vez de acontecer de verdade.
+      const executed = [];
+      const { run: readOnlyRun } = createReadOnlyRunner({ run, executed });
+      const plan = await planRollout({ config, run: readOnlyRun, now });
+      state.previousCommit = plan.git.commit;
+      state.previousBranch = plan.git.branch;
+      state.candidateCommit = plan.git.commit;
+
+      const preflight = await runReadOnlyPreflight({ config, run: readOnlyRun, now, executed });
+      state.status = "dry-run";
+      log(`[rollout] dry-run: ${preflight.checks.length} verificação(ões) somente leitura concluída(s)`);
+      for (const problem of preflight.problems) {
+        log(`[rollout] dry-run: PROBLEMA - ${problem}`);
+      }
+      // Sem writeStatus(): o dry-run não deixa rastro em disco.
+      return {
+        ok: preflight.problems.length === 0,
+        dryRun: true,
+        state,
+        plan,
+        stages,
+        preflight,
+      };
+    }
+
     // ---------------------------------------------------------------- preflight
     const plan = await planRollout({ config, run, now });
     state.previousCommit = plan.git.commit;
@@ -260,16 +489,6 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
       );
     }
     record("preflight", "ok", `branch=${plan.git.branch} commit=${String(plan.git.commit).slice(0, 8)}`);
-
-    if (dryRun) {
-      record("lock", "skipped", "dry-run");
-      for (const stage of STAGES.slice(2)) {
-        record(stage.id, "planned", stage.writes ? "(escreveria)" : "(somente leitura)");
-      }
-      state.status = "dry-run";
-      writeStatus();
-      return { ok: true, dryRun: true, state, plan, stages };
-    }
 
     // ---------------------------------------------------------------- lock
     const lock = acquireLock({ lockPath: config.lockPath });
@@ -516,6 +735,10 @@ module.exports = {
   STAGES,
   STAGE_PERCENT,
   FORBIDDEN_DOCKER_COMMANDS,
+  READ_ONLY_COMMANDS,
+  isReadOnlyCommand,
+  createReadOnlyRunner,
+  runReadOnlyPreflight,
   planRollout,
   executeRollout,
   rollbackCore,
