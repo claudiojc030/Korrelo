@@ -45,6 +45,27 @@ const RESOURCE_BACKOFF_BASE_MS = 60_000;
  */
 const DRAIN_TTL_MS = 30 * 60 * 1000;
 
+/** O processo existe? (EPERM = existe, mas é de outro usuário). */
+function isProcessAlive(pid: number): boolean {
+  if (!pid || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return Boolean(error && (error as NodeJS.ErrnoException).code === "EPERM");
+  }
+}
+
+/** Lê o PID de um arquivo {pid} (o do runner detached). */
+function readPidFromFile(pidFile: string): number | null {
+  try {
+    const content = JSON.parse(fs.readFileSync(pidFile, "utf-8")) as { pid?: number };
+    return typeof content.pid === "number" ? content.pid : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface EnqueueParams {
   projectId: string;
   commitSha: string | null;
@@ -133,14 +154,30 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
    * O arquivo tem validade (DRAIN_TTL_MS): se um update morrer no meio e
    * ninguém liberar o drain, os deploys voltam sozinhos depois do TTL (melhor
    * do que deixar o Korrelo sem deploys para sempre).
+   *
+   * Wave 3: o arquivo carrega QUEM colocou o drain (owner + updateRunId) e
+   * o PID do processo responsável. Se esse PID não existir mais, o drain é
+   * órfão (o update morreu com a API) e o worker volta sozinho - em vez de
+   * ficar pausado até o TTL.
    */
-  async drain(reason: string): Promise<void> {
+  async drain(reason: string, owner?: { updateRunId?: string | null; pid?: number; pidFile?: string }): Promise<void> {
     this.draining = true;
     try {
       fs.mkdirSync(path.dirname(this.drainFilePath), { recursive: true });
       fs.writeFileSync(
         this.drainFilePath,
-        JSON.stringify({ at: new Date().toISOString(), reason, expiresAt: Date.now() + DRAIN_TTL_MS }),
+        JSON.stringify({
+          at: new Date().toISOString(),
+          reason,
+          expiresAt: Date.now() + DRAIN_TTL_MS,
+          owner: owner?.updateRunId ?? "self-update",
+          updateRunId: owner?.updateRunId ?? null,
+          pid: owner?.pid ?? process.pid,
+          // O runner detached grava o PID dele nesse arquivo (ele ainda não
+          // existe quando o drain é criado). O worker resolve o PID real por
+          // aqui para saber se o drain ainda tem dono vivo.
+          pidFile: owner?.pidFile ?? null,
+        }),
       );
       this.logger.warn(`[deploy] worker em DRAINING (${reason}) - nenhum novo deploy começa até liberar`);
     } catch (error) {
@@ -164,10 +201,29 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
     if (this.draining) return true;
     try {
       if (!fs.existsSync(this.drainFilePath)) return false;
-      const content = JSON.parse(fs.readFileSync(this.drainFilePath, "utf-8")) as { expiresAt?: number };
+      const content = JSON.parse(fs.readFileSync(this.drainFilePath, "utf-8")) as {
+        expiresAt?: number;
+        pid?: number;
+        pidFile?: string | null;
+      };
       if (content.expiresAt && content.expiresAt < Date.now()) {
         // Drain expirado (update morreu no meio): volta a Working sozinho.
         this.logger.warn("[deploy] drain expirado - worker voltando a aceitar jobs");
+        try {
+          fs.rmSync(this.drainFilePath, { force: true });
+        } catch {
+          /* best effort */
+        }
+        return false;
+      }
+      // Drain órfão: o processo que colocou o drain não existe mais (o
+      // update morreu junto com a API). Voltar a Working agora é melhor do
+      // que esperar o TTL.
+      const ownerPid = content.pidFile ? readPidFromFile(content.pidFile) : content.pid;
+      if (typeof ownerPid === "number" && ownerPid > 0 && !isProcessAlive(ownerPid)) {
+        this.logger.warn(
+          `[deploy] drain órfão (o processo ${ownerPid} não existe mais) - worker voltando a aceitar jobs`,
+        );
         try {
           fs.rmSync(this.drainFilePath, { force: true });
         } catch {

@@ -1,11 +1,28 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, CheckCircle2, XCircle, X } from "lucide-react";
-import { apiFetch } from "../../../lib/api-client";
+import { Loader2, CheckCircle2, XCircle, X, WifiOff } from "lucide-react";
+import {
+  apiFetch,
+  backoffDelay,
+  isAuthFailure,
+  isNetworkError,
+  isTransientServerError,
+} from "../../../lib/api-client";
 import { useTranslation } from "../../../lib/i18n/locale-provider";
 
-interface SelfUpdateStatus {
+interface SelfUpdateJob {
+  id: string;
+  status: string;
+  progress: number;
+  currentStage: string | null;
+  previousCommit: string | null;
+  candidateCommit: string | null;
+  recoveryStatus: string | null;
+  failureReason: string | null;
+}
+
+interface SelfUpdateCurrent {
   running: boolean;
   percent: number;
   label: string;
@@ -13,21 +30,43 @@ interface SelfUpdateStatus {
   success: boolean | null;
   errorMessage?: string;
   log: string;
+  jobId?: string | null;
+  jobStatus?: string | null;
+  currentStage?: string | null;
+  previousCommit?: string | null;
+  candidateCommit?: string | null;
+  recoveryStatus?: string | null;
+  interrupted?: boolean;
+  job?: SelfUpdateJob | null;
 }
 
-type Phase = "updating" | "restarting" | "done" | "failed";
+type Phase = "updating" | "reconnecting" | "restarting" | "done" | "failed" | "interrupted";
 
 const STATUS_POLL_MS = 1000;
 const HEALTH_POLL_MS = 1500;
-const HEALTH_TIMEOUT_MS = 90_000;
+const HEALTH_TIMEOUT_MS = 120_000;
 
-export function UpdateProgressModal({ onClose }: { onClose: () => void }) {
+/**
+ * Painel do SELF-UPDATE DESACOPLADO (Wave 3).
+ *
+ * O update NÃO depende mais do terminal/WebSocket: o backend dispara um
+ * processo detached e este painel apenas CONSULTA o estado (polling). Se a
+ * API reiniciar no meio (o próprio update reinicia a API!), o painel mostra
+ * "reconectando" e volta sozinho - sem virar "Não autenticado".
+ *
+ * O estado é recuperado do backend (GET /monitoring/self-update/current),
+ * então recarregar a página não perde o acompanhamento.
+ */
+export function UpdateProgressModal({ onClose, jobId }: { onClose: () => void; jobId?: string }) {
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>("updating");
   const [percent, setPercent] = useState(0);
   const [label, setLabel] = useState("");
   const [log, setLog] = useState("");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [stage, setStage] = useState<string | null>(null);
+  const [previousCommit, setPreviousCommit] = useState<string | null>(null);
+  const [candidateCommit, setCandidateCommit] = useState<string | null>(null);
   const logBoxRef = useRef<HTMLPreElement>(null);
   const phaseRef = useRef<Phase>("updating");
 
@@ -37,42 +76,84 @@ export function UpdateProgressModal({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
-    let statusTimer: ReturnType<typeof setInterval> | undefined;
-    let healthTimer: ReturnType<typeof setInterval> | undefined;
+    let statusTimer: ReturnType<typeof setTimeout> | undefined;
+    let healthTimer: ReturnType<typeof setTimeout> | undefined;
     let healthDeadline = 0;
+    let attempt = 0;
 
     async function pollStatus() {
       try {
-        const res = await apiFetch("/monitoring/update/status");
-        if (!res.ok || cancelled) return;
-        const data: SelfUpdateStatus = await res.json();
+        const res = await apiFetch("/monitoring/self-update/current");
         if (cancelled) return;
 
-        setPercent(data.percent);
-        setLabel(data.label);
-        setLog(data.log);
+        // 5xx = API reiniciando (transitório). Não é sessão inválida.
+        if (isTransientServerError(res)) {
+          attempt += 1;
+          scheduleStatus(backoffDelay(attempt));
+          return;
+        }
+        // 401 real = sessão inválida de verdade.
+        if (isAuthFailure(res)) {
+          window.location.href = "/login";
+          return;
+        }
+        if (!res.ok) {
+          attempt += 1;
+          scheduleStatus(backoffDelay(attempt));
+          return;
+        }
 
-        if (data.done && phaseRef.current === "updating") {
+        attempt = 0;
+        const data: SelfUpdateCurrent = await res.json();
+        if (cancelled) return;
+
+        setPercent(data.percent ?? 0);
+        setLabel(data.label ?? "");
+        setLog(data.log ?? "");
+        setStage(data.currentStage ?? data.job?.currentStage ?? null);
+        setPreviousCommit(data.previousCommit ?? data.job?.previousCommit ?? null);
+        setCandidateCommit(data.candidateCommit ?? data.job?.candidateCommit ?? null);
+
+        const jobStatus = data.jobStatus ?? data.job?.status ?? null;
+
+        if (data.interrupted || jobStatus === "interrupted") {
+          setErrorMessage(data.errorMessage ?? data.job?.failureReason ?? null);
+          setPhase("interrupted");
+          return;
+        }
+
+        if (data.done && phaseRef.current !== "restarting" && phaseRef.current !== "done") {
           if (data.success) {
-            if (statusTimer) clearInterval(statusTimer);
             setPhase("restarting");
             healthDeadline = Date.now() + HEALTH_TIMEOUT_MS;
-            healthTimer = setInterval(pollHealth, HEALTH_POLL_MS);
+            scheduleHealth();
           } else {
-            if (statusTimer) clearInterval(statusTimer);
             setErrorMessage(data.errorMessage ?? null);
             setPhase("failed");
           }
         }
-      } catch {
-        // A API pode estar momentaneamente fora do ar (ex.: durante o build
-        // da própria API); ignora e tenta de novo no próximo tick.
+      } catch (error) {
+        if (cancelled) return;
+        // Erro de rede: a API reiniciou (é o próprio update reiniciando a
+        // API). NÃO é "não autenticado": mostra reconectando e tenta de novo.
+        if (isNetworkError(error)) {
+          attempt += 1;
+          setPhase((current) => (current === "failed" || current === "done" ? current : "reconnecting"));
+          scheduleStatus(backoffDelay(attempt));
+          return;
+        }
+        attempt += 1;
+        scheduleStatus(backoffDelay(attempt));
       }
+    }
+
+    function scheduleStatus(delayMs: number) {
+      if (cancelled) return;
+      statusTimer = setTimeout(pollStatus, delayMs);
     }
 
     async function pollHealth() {
       if (Date.now() > healthDeadline) {
-        if (healthTimer) clearInterval(healthTimer);
         setErrorMessage(t.dashboard.updateStartFailed);
         setPhase("failed");
         return;
@@ -80,24 +161,29 @@ export function UpdateProgressModal({ onClose }: { onClose: () => void }) {
       try {
         const res = await apiFetch("/auth/has-user");
         if (res.ok && !cancelled) {
-          if (healthTimer) clearInterval(healthTimer);
           setPhase("done");
           setTimeout(() => window.location.reload(), 1200);
+          return;
         }
       } catch {
         // Esperado enquanto o PM2 ainda está religando os processos.
       }
+      scheduleHealth();
     }
 
-    statusTimer = setInterval(pollStatus, STATUS_POLL_MS);
+    function scheduleHealth() {
+      if (cancelled) return;
+      healthTimer = setTimeout(pollHealth, HEALTH_POLL_MS);
+    }
+
     pollStatus();
 
     return () => {
       cancelled = true;
-      if (statusTimer) clearInterval(statusTimer);
-      if (healthTimer) clearInterval(healthTimer);
+      if (statusTimer) clearTimeout(statusTimer);
+      if (healthTimer) clearTimeout(healthTimer);
     };
-  }, [t]);
+  }, [t, jobId]);
 
   useEffect(() => {
     logBoxRef.current?.scrollTo({ top: logBoxRef.current.scrollHeight });
@@ -109,29 +195,32 @@ export function UpdateProgressModal({ onClose }: { onClose: () => void }) {
     .filter((line) => !line.startsWith("__KORRELO_UPDATE_"))
     .join("\n");
 
+  const title = () => {
+    if (phase === "failed") return t.dashboard.updateFailedTitle;
+    if (phase === "interrupted") return t.dashboard.updateInterruptedTitle;
+    if (phase === "reconnecting") return t.dashboard.updateReconnectingTitle;
+    if (phase === "restarting") return t.dashboard.updateRestartingTitle;
+    if (phase === "done") return t.dashboard.updateDoneTitle;
+    return label || t.dashboard.updateNowButton;
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
       <div className="w-full max-w-lg rounded-xl border border-border-subtle bg-surface p-6 shadow-panel">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-2.5">
-            {phase === "failed" ? (
+            {phase === "failed" || phase === "interrupted" ? (
               <XCircle size={18} className="flex-none text-destructive" />
             ) : phase === "done" ? (
               <CheckCircle2 size={18} className="flex-none text-accent" />
+            ) : phase === "reconnecting" ? (
+              <WifiOff size={18} className="flex-none text-muted-foreground" />
             ) : (
               <Loader2 size={18} className="flex-none animate-spin text-accent" />
             )}
-            <h2 className="truncate text-[14.5px] font-semibold text-foreground">
-              {phase === "failed"
-                ? t.dashboard.updateFailedTitle
-                : phase === "restarting"
-                  ? t.dashboard.updateRestartingTitle
-                  : phase === "done"
-                    ? t.dashboard.updateDoneTitle
-                    : label || t.dashboard.updateNowButton}
-            </h2>
+            <h2 className="truncate text-[14.5px] font-semibold text-foreground">{title()}</h2>
           </div>
-          {phase === "failed" && (
+          {(phase === "failed" || phase === "interrupted") && (
             <button
               onClick={onClose}
               aria-label={t.dashboard.updateCloseButton}
@@ -144,17 +233,48 @@ export function UpdateProgressModal({ onClose }: { onClose: () => void }) {
 
         <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
           <div
-            className={`h-full rounded-full transition-all duration-500 ${phase === "failed" ? "bg-destructive" : "bg-accent"}`}
+            className={`h-full rounded-full transition-all duration-500 ${
+              phase === "failed" || phase === "interrupted" ? "bg-destructive" : "bg-accent"
+            }`}
             style={{ width: `${displayPercent}%` }}
           />
         </div>
         <p className="mt-1.5 text-right font-mono text-[12px] text-muted-foreground">{displayPercent}%</p>
 
+        {phase === "reconnecting" && (
+          <p className="mt-1 text-[13px] text-muted-foreground">{t.dashboard.updateReconnectingSubtitle}</p>
+        )}
         {phase === "restarting" && (
           <p className="mt-1 text-[13px] text-muted-foreground">{t.dashboard.updateRestartingSubtitle}</p>
         )}
         {phase === "done" && <p className="mt-1 text-[13px] text-muted-foreground">{t.dashboard.updateDoneSubtitle}</p>}
-        {phase === "failed" && errorMessage && <p className="mt-1 text-[13px] text-destructive">{errorMessage}</p>}
+        {(phase === "failed" || phase === "interrupted") && errorMessage && (
+          <p className="mt-1 text-[13px] text-destructive">{errorMessage}</p>
+        )}
+        {(phase === "failed" || phase === "interrupted") && (
+          <p className="mt-1 text-[13px] text-muted-foreground">{t.dashboard.updateProductionIntact}</p>
+        )}
+
+        {(stage || previousCommit || candidateCommit) && (
+          <div className="mt-3 space-y-1 text-[12px] text-muted-foreground">
+            {stage && (
+              <p>
+                {t.dashboard.updateStageLabel}: <span className="font-mono">{stage}</span>
+              </p>
+            )}
+            {previousCommit && (
+              <p>
+                {t.dashboard.updatePreviousVersion}: <span className="font-mono">{previousCommit.slice(0, 8)}</span>
+              </p>
+            )}
+            {candidateCommit && (
+              <p>
+                {t.dashboard.updateCandidateVersion}:{" "}
+                <span className="font-mono">{candidateCommit.slice(0, 8)}</span>
+              </p>
+            )}
+          </div>
+        )}
 
         <p className="mb-1.5 mt-4 text-[12px] font-medium text-muted-foreground">{t.dashboard.updateLogLabel}</p>
         <pre
@@ -164,7 +284,7 @@ export function UpdateProgressModal({ onClose }: { onClose: () => void }) {
           {visibleLog}
         </pre>
 
-        {phase === "failed" && (
+        {(phase === "failed" || phase === "interrupted") && (
           <button
             onClick={onClose}
             className="mt-4 w-full rounded-md bg-accent px-4 py-2.5 text-[13.5px] font-semibold text-accent-foreground hover:opacity-90"

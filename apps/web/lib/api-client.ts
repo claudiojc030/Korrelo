@@ -41,6 +41,43 @@ export interface ApiFetchOptions extends RequestInit {
   timeoutMs?: number;
 }
 
+/**
+ * Wave 3: a API do Korrelo reinicia durante o self-update. Um erro de
+ * rede (API fora do ar) ou um 5xx NÃO é "sessão inválida" - tratá-lo como
+ * logout expulsava o usuário da própria sessão durante a atualização.
+ *
+ * Só uma resposta 401 real (token/refresh inválido, sessão revogada) pode
+ * invalidar a sessão.
+ */
+export function isAuthFailure(response: Response): boolean {
+  return response.status === 401;
+}
+
+/** 502/503/504: o gateway/backend não respondeu agora - é transitório. */
+export function isTransientServerError(response: Response): boolean {
+  return [502, 503, 504].includes(response.status);
+}
+
+/** Erro de rede (API reiniciando, conexão recusada, timeout de socket). */
+export function isNetworkError(error: unknown): boolean {
+  if (!error) return false;
+  const name = (error as Error).name;
+  const message = String((error as Error).message ?? "");
+  if (name === "AbortError" || name === "TimeoutError") return true;
+  return /fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|network error|xhr poll error/i.test(message);
+}
+
+/**
+ * Backoff do polling durante a indisponibilidade transitória:
+ * 1s, 2s, 3s, 5s, 5s, 5s... (limitado).
+ */
+export const RECONNECT_BACKOFF_MS = [1000, 2000, 3000, 5000, 5000];
+
+export function backoffDelay(attempt: number): number {
+  const index = Math.min(Math.max(attempt, 0), RECONNECT_BACKOFF_MS.length - 1);
+  return RECONNECT_BACKOFF_MS[index];
+}
+
 export async function apiFetch(path: string, init: ApiFetchOptions = {}): Promise<Response> {
   const { timeoutMs = DEFAULT_CLIENT_TIMEOUT_MS, ...requestInit } = init;
   const controller = new AbortController();

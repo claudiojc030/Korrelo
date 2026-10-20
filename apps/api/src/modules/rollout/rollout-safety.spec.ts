@@ -11,6 +11,7 @@ jest.mock("node:child_process", () => {
 
 import { formatDirtyWorkingTreeMessage, inspectWorkingTree } from "../../infrastructure/git-working-tree";
 import { ScriptSelfUpdater } from "../monitoring/infrastructure/script-self-updater";
+import { FileSelfUpdateJobRepository } from "../monitoring/infrastructure/file-self-update-job.repository";
 import { DeployQueueService } from "../projects/infrastructure/deploy-queue.service";
 
 const mockedSpawn = spawn as unknown as jest.Mock;
@@ -76,6 +77,10 @@ describe("rollout - proteções na API", () => {
     } as unknown as DeployQueueService;
   }
 
+  function makeUpdater(queue: DeployQueueService): ScriptSelfUpdater {
+    return new ScriptSelfUpdater(queue, new FileSelfUpdateJobRepository());
+  }
+
   it("detecta working tree sujo e monta a mensagem padronizada", async () => {
     // Caso real da VPS: package-lock.json EXISTE e foi modificado.
     fs.writeFileSync(path.join(repoDir, "package-lock.json"), "{}\n");
@@ -105,7 +110,7 @@ describe("rollout - proteções na API", () => {
     git(["commit", "-m", "lockfile"]);
     fs.writeFileSync(path.join(repoDir, "package-lock.json"), '{ "muda": true }\n');
     const drained: string[] = [];
-    const updater = new ScriptSelfUpdater(fakeQueue({ drained }));
+    const updater = makeUpdater(fakeQueue({ drained }));
 
     await expect(updater.start()).rejects.toThrow(/Working tree contains local changes/);
     // Nada foi executado e o worker nem entrou em drain.
@@ -115,27 +120,33 @@ describe("rollout - proteções na API", () => {
 
   it("o self-update ABORTA quando existe deploy de projeto em andamento", async () => {
     const drained: string[] = [];
-    const updater = new ScriptSelfUpdater(fakeQueue({ activeJob: true, drained }));
+    const updater = makeUpdater(fakeQueue({ activeJob: true, drained }));
 
     await expect(updater.start()).rejects.toThrow(/deploy de projeto em andamento/);
     expect(mockedSpawn).not.toHaveBeenCalled();
     expect(drained).toEqual([]);
   });
 
-  it("com tudo livre, o self-update drena o worker e dispara o script", async () => {
+  it("com tudo livre, o self-update drena o worker e dispara o runner DETACHED", async () => {
     const drained: string[] = [];
-    const updater = new ScriptSelfUpdater(fakeQueue({ drained }));
+    const updater = makeUpdater(fakeQueue({ drained }));
 
     mockedSpawn.mockImplementation(() => ({ unref: () => undefined, pid: 1234 }) as never);
 
     const result = await updater.start();
 
     expect(result.alreadyRunning).toBe(false);
+    expect(result.jobId).toBeTruthy();
     expect(drained).toHaveLength(1);
     expect(mockedSpawn).toHaveBeenCalledTimes(1);
-    const [command, args] = mockedSpawn.mock.calls[0];
-    expect(command).toBe("bash");
-    expect(String(args[0])).toContain("self-update.sh");
+    const [command, args, options] = mockedSpawn.mock.calls[0];
+    // Wave 3: quem é disparado é o LAUNCHER detached (double fork) - não o
+    // rollout direto (que morria junto com a API no `pm2 restart`).
+    expect(command).toBe(process.execPath);
+    expect(String(args[0])).toContain("launch-detached.cjs");
+    expect(String(args)).toContain("self-update.sh");
+    // E o processo é desacoplado (detached + unref).
+    expect((options as { detached?: boolean }).detached).toBe(true);
   });
 
   it("análise estática: nenhum hook de boot escreve no Docker", () => {

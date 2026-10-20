@@ -13,10 +13,13 @@ import { PrismaMetricSampleRepository } from "./infrastructure/prisma-metric-sam
 import { MetricsCollectorSchedulerService } from "./infrastructure/metrics-collector-scheduler.service";
 import { GitUpdateChecker } from "./infrastructure/git-update-checker";
 import { ScriptSelfUpdater } from "./infrastructure/script-self-updater";
+import { FileSelfUpdateJobRepository } from "./infrastructure/file-self-update-job.repository";
+import { SelfUpdateRecoveryService } from "./infrastructure/self-update-recovery.service";
 import { SYSTEM_METRICS_COLLECTOR } from "./domain/system-metrics-collector";
 import { METRIC_SAMPLE_REPOSITORY } from "./domain/metric-sample.repository";
 import { UPDATE_CHECKER } from "./domain/update-checker";
 import { SELF_UPDATER } from "./domain/self-updater";
+import { SELF_UPDATE_JOB_REPOSITORY } from "./domain/self-update-job.entity";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
 @Module({
@@ -34,10 +37,12 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     StartSelfUpdateUseCase,
     GetSelfUpdateStatusUseCase,
     MetricsCollectorSchedulerService,
+    SelfUpdateRecoveryService,
     { provide: SYSTEM_METRICS_COLLECTOR, useClass: OsSystemMetricsCollector },
     { provide: METRIC_SAMPLE_REPOSITORY, useClass: PrismaMetricSampleRepository },
     { provide: UPDATE_CHECKER, useClass: GitUpdateChecker },
     { provide: SELF_UPDATER, useClass: ScriptSelfUpdater },
+    { provide: SELF_UPDATE_JOB_REPOSITORY, useClass: FileSelfUpdateJobRepository },
   ],
 })
 export class MonitoringModule {}

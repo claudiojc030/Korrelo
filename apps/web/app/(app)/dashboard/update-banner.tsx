@@ -27,6 +27,7 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const [updateJobId, setUpdateJobId] = useState<string | undefined>(undefined);
   const [startError, setStartError] = useState<string | null>(null);
 
   if (!status.updateAvailable) {
@@ -48,17 +49,21 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
   async function handleUpdateNow() {
     setStartError(null);
     try {
-      const res = await apiFetch("/monitoring/update/start", { method: "POST" });
+      // Wave 3: o POST dispara o update num processo DESACOPLADO e volta
+      // na hora (com o id do job). Não fica esperando o rollout terminar -
+      // se ficasse esperando, o restart da API cortaria a requisição.
+      const res = await apiFetch("/monitoring/self-update", { method: "POST" });
       if (!res.ok) {
         setStartError(t.dashboard.updateStartFailed);
         return;
       }
-      const data: { alreadyRunning: boolean } = await res.json();
+      const data: { jobId?: string; alreadyRunning?: boolean } = await res.json();
       if (data.alreadyRunning) {
         setStartError(t.dashboard.updateAlreadyRunning);
       }
-      // Mesmo se já estava rodando, abre o modal pra acompanhar o progresso
+      // Mesmo se já estava rodando, abre o painel pra acompanhar o progresso
       // em vez de deixar o usuário sem feedback nenhum.
+      setUpdateJobId(data.jobId);
       setUpdating(true);
     } catch {
       setStartError(t.dashboard.updateStartFailed);
@@ -114,7 +119,7 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
         </div>
       )}
 
-      {updating && <UpdateProgressModal onClose={() => setUpdating(false)} />}
+      {updating && <UpdateProgressModal jobId={updateJobId} onClose={() => setUpdating(false)} />}
     </div>
   );
 }

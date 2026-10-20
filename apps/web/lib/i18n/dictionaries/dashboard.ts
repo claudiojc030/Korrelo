@@ -68,6 +68,15 @@ export interface DashboardDict {
   updateFailedTitle: string;
   updateLogLabel: string;
   updateCloseButton: string;
+  /** Wave 3: o update roda desacoplado - a API pode reiniciar no meio. */
+  updateReconnectingTitle: string;
+  updateReconnectingSubtitle: string;
+  updateInterruptedTitle: string;
+  updateInterruptedSubtitle: string;
+  updateProductionIntact: string;
+  updateStageLabel: string;
+  updatePreviousVersion: string;
+  updateCandidateVersion: string;
 }
 
 export const dashboardEn: DashboardDict = {
@@ -140,6 +149,14 @@ export const dashboardEn: DashboardDict = {
   updateFailedTitle: "Update failed",
   updateLogLabel: "Process log",
   updateCloseButton: "Close",
+  updateReconnectingTitle: "Korrelo is restarting...",
+  updateReconnectingSubtitle: "Waiting for the API to come back. The update continues on its own.",
+  updateInterruptedTitle: "Update interrupted",
+  updateInterruptedSubtitle: "The update process stopped before finishing.",
+  updateProductionIntact: "Your projects were not changed.",
+  updateStageLabel: "Stage",
+  updatePreviousVersion: "Previous version",
+  updateCandidateVersion: "Updating to",
 };
 
 export const dashboardPt: DashboardDict = {
@@ -212,4 +229,13 @@ export const dashboardPt: DashboardDict = {
   updateFailedTitle: "Falha na atualização",
   updateLogLabel: "Log do processo",
   updateCloseButton: "Fechar",
+  updateReconnectingTitle: "O Korrelo está reiniciando...",
+  updateReconnectingSubtitle:
+    "Esperando a API voltar. A atualização continua sozinha - não precisa recarregar a página.",
+  updateInterruptedTitle: "Atualização interrompida",
+  updateInterruptedSubtitle: "O processo da atualização parou antes de terminar.",
+  updateProductionIntact: "Seus projetos de produção não foram alterados.",
+  updateStageLabel: "Etapa",
+  updatePreviousVersion: "Versão anterior",
+  updateCandidateVersion: "Atualizando para",
 };
