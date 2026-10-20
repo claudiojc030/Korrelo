@@ -32,6 +32,48 @@ import {
   type HostResourceProvider,
 } from "../../../infrastructure/host-resources";
 
+// O preflight consulta o disco (`df`) e o Docker pelo command-runner: sem
+// este mock, o resultado depende da MÁQUINA que roda o Jest (no CI o disco
+// e o load reais decides os testes).
+jest.mock("../../../infrastructure/command-runner", () => ({
+  runCommand: jest.fn(async (command: string) => {
+    if (command === "df") {
+      // 24 GB livres: sempre acima de qualquer limite de build testado.
+      return {
+        stdout:
+          "Filesystem 1K-blocks Used Available Use% Mounted on\n" +
+          "/dev/sda1 50000000 25000000 25000000 50% /\n",
+        stderr: "",
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        truncated: false,
+        durationMs: 3,
+      };
+    }
+    if (command === "docker") {
+      return {
+        stdout: "korrelo-mesatta-8452004c\n",
+        stderr: "",
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        truncated: false,
+        durationMs: 3,
+      };
+    }
+    return {
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      truncated: false,
+      durationMs: 3,
+    };
+  }),
+}));
+
 const { ResourcePreflightService } = require("../infrastructure/resource-preflight.service");
 const { DeployProjectUseCase } = require("../application/deploy-project.use-case");
 const { DeployJob: DeployJobEntity } = require("../domain/deploy-job.entity");
@@ -446,7 +488,7 @@ describe("deploy de projeto - proteção da produção", () => {
     it("F) health do staging falha: a CURRENT fica intacta (sem promote)", async () => {
       const harness = buildHarness({ failStagingHealth: true });
 
-      await harness.useCase.executeJob(harness.job).catch((e: any) => { console.log('ERRO-A:', e && e.message); });
+      await harness.useCase.executeJob(harness.job).catch(() => undefined);
 
       expect(harness.orchestrator.calls).not.toContain("promote");
       expect(harness.orchestrator.calls).not.toContain("rollback");
