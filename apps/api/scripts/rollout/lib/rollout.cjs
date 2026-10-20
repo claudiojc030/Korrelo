@@ -733,6 +733,7 @@ async function executeRollout({
   run,
   log = () => {},
   step = () => {},
+  meta = () => {},
   dryRun = false,
   now = new Date(),
   readResources = null,
@@ -916,6 +917,17 @@ async function executeRollout({
     state.previousBranch = plan.git.branch;
     state.candidateCommit = plan.target.candidateCommit;
     state.targetCandidateCommit = plan.target.candidateCommit;
+
+    // Metadados ESTRUTURADOS do update (o painel e o job persistido usam
+    // isto): commit do executor, commit anterior do alvo, branch e candidato.
+    try {
+      meta("executorCommit", plan.executor.commit);
+      meta("previousCommit", plan.git.commit);
+      meta("previousBranch", plan.git.branch);
+      meta("candidateCommit", plan.target.candidateCommit);
+    } catch {
+      /* metadados são best effort */
+    }
 
     // Nenhum rollout do Core começa no meio de um deploy de projeto.
     if (plan.activeDeploys > 0) {

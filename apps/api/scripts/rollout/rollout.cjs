@@ -41,9 +41,66 @@ const {
   inspectTargetRepo,
 } = require("./lib/rollout.cjs");
 const { parseArgs, USAGE } = require("./lib/cli-args.cjs");
+const { applyMarker, parseMarker, sanitizeReason, updateJob } = require("./lib/self-update-job.cjs");
 
 const EXECUTOR_ROOT = path.resolve(__dirname, "..", "..", "..", "..");
 const CONFIG_PATH = path.join(EXECUTOR_ROOT, "apps", "api", "scripts", "rollout", "rollout.config.json");
+
+/**
+ * Arquivo do job de self-update (quando este rollout foi disparado pelo
+ * painel do Korrelo).
+ *
+ * O RUNNER é o DONO da atualização: quem escreve o progresso e o resultado
+ * final é o próprio rollout - a API pode estar reiniciando no meio e não
+ * pode ser dependência. Sem o job (rollout externo por SSH), nada muda.
+ */
+const JOB_FILE = (() => {
+  const argv = process.argv.slice(2);
+  const index = argv.indexOf("--job-file");
+  if (index >= 0 && argv[index + 1]) return argv[index + 1];
+  return process.env.KORRELO_SELF_UPDATE_JOB_FILE || null;
+})();
+/** Aplica um marcador (STEP/DONE/META) ao job persistido. */
+function persistMarker(marker) {
+  if (!JOB_FILE) return;
+  try {
+    applyMarker(JOB_FILE, marker);
+  } catch {
+    /* persistência é best effort: nunca deve derrubar o rollout */
+  }
+}
+
+/** Atualiza o job persistido com um patch. */
+function persistJob(patch) {
+  if (!JOB_FILE) return;
+  try {
+    updateJob(JOB_FILE, patch);
+  } catch {
+    /* best effort */
+  }
+}
+
+/**
+ * Finaliza o job com uma falha.
+ *
+ * O job NUNCA pode ficar "running" eternamente: qualquer saída do CLI (abort
+ * de validação, erro inesperado, falha do rollout) precisa deixar o estado
+ * final gravado - é a API que vai ler esse estado para a UI.
+ */
+function failJob(reason) {
+  if (!JOB_FILE) return;
+  const message = sanitizeReason(reason);
+  try {
+    updateJob(JOB_FILE, {
+      status: "failed",
+      finishedAt: new Date().toISOString(),
+      result: "failed",
+      failureReason: message,
+    });
+  } catch {
+    /* best effort */
+  }
+}
 
 /**
  * Monta a config do rollout.
@@ -219,6 +276,7 @@ async function main() {
     console.error(`[rollout] ERRO: ${error.message}`);
     console.error(`[rollout] ${USAGE}`);
     console.error("[rollout] nada foi executado (sem lock, sem drain, sem backup).");
+    failJob(error.message);
     process.exit(1);
   }
 
@@ -229,6 +287,7 @@ async function main() {
   if (target.error) {
     console.error(`[rollout] ERRO: checkout alvo inválido: ${target.error}`);
     console.error("[rollout] nada foi executado (sem lock, sem drain, sem backup).");
+    failJob(`checkout alvo inválido: ${target.error}`);
     process.exit(1);
   }
 
@@ -240,6 +299,7 @@ async function main() {
       "[rollout] ERRO: o checkout alvo está em detached HEAD: o rollout do Core só roda em uma branch.",
     );
     console.error("[rollout] nada foi executado (sem lock, sem drain, sem backup).");
+    failJob("o checkout alvo está em detached HEAD");
     process.exit(1);
   }
 
@@ -304,7 +364,16 @@ async function main() {
     // Marcadores de progresso no formato que a UI do Korrelo consome
     // (o botão "Atualizar agora" mostra a barra de progresso e o log).
     step: (percent, label) => {
-      console.log(`__KORRELO_UPDATE_STEP__|${percent}|${label}`);
+      const line = `__KORRELO_UPDATE_STEP__|${percent}|${label}`;
+      console.log(line);
+      // O runner persiste o progresso no job (a API pode reiniciar).
+      persistMarker(parseMarker(line));
+    },
+    // Metadados estruturados do update (commits e branch).
+    meta: (key, value) => {
+      const line = `__KORRELO_UPDATE_META__|${key}|${value}`;
+      console.log(line);
+      persistMarker(parseMarker(line));
     },
   });
   if (!result.ok) {
@@ -329,18 +398,35 @@ async function main() {
             : `Rollback do Core falhou: ${result.rollback.reason}`,
         );
       }
+      // O estado da recuperação entra no job (RECOVERY_DEFERRED/REQUIRED).
+      if (result.rollback.status) {
+        persistJob({
+          recoveryStatus: result.rollback.status,
+          status: result.rollback.deferred ? "recovery_deferred" : "failed",
+        });
+      }
     }
-    console.log(`__KORRELO_UPDATE_DONE__|failed|${String(result.error).slice(0, 200)}`);
+    const failedLine = `__KORRELO_UPDATE_DONE__|failed|${sanitizeReason(result.error)}`;
+    console.log(failedLine);
+    persistMarker(parseMarker(failedLine));
     process.exit(1);
   }
 
   console.log("");
   console.log("ROLLOUT CONCLUÍDO. Containers de projeto idênticos ao snapshot anterior.");
-  console.log("__KORRELO_UPDATE_DONE__|success|");
+  const doneLine = "__KORRELO_UPDATE_DONE__|success|";
+  console.log(doneLine);
+  persistMarker(parseMarker(doneLine));
   process.exit(0);
 }
 
 main().catch((error) => {
-  console.error(`erro no rollout: ${error && error.message ? error.message : error}`);
+  const message = error && error.message ? error.message : String(error);
+  console.error(`erro no rollout: ${message}`);
+  // O job não pode ficar "running" eternamente: se o rollout morreu antes do
+  // marcador final, o job é finalizado aqui.
+  const failedLine = `__KORRELO_UPDATE_DONE__|failed|${sanitizeReason(message)}`;
+  console.log(failedLine);
+  persistMarker(parseMarker(failedLine));
   process.exit(1);
 });

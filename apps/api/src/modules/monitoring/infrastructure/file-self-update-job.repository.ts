@@ -103,7 +103,9 @@ export class FileSelfUpdateJobRepository implements SelfUpdateJobRepository {
 
   private readJob(filePath: string): SelfUpdateJob | null {
     try {
-      return JSON.parse(fs.readFileSync(filePath, "utf-8")) as SelfUpdateJob;
+      // Tira o BOM: um arquivo gravado com BOM quebraria o JSON.parse.
+      const raw = fs.readFileSync(filePath, "utf-8").replace(/^\uFEFF/, "");
+      return JSON.parse(raw) as SelfUpdateJob;
     } catch {
       this.logger.warn(`[update] job ilegível: ${filePath}`);
       return null;

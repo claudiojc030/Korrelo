@@ -16,9 +16,12 @@
  *   --repo-root <path>  checkout ALVO (o que será atualizado). Padrão: o
  *                       próprio repositório do executor.
  *   --repo-root=<path>  forma equivalente
+ *   --job-file <path>   arquivo do job de self-update (o runner persiste
+ *                       nele o progresso e o resultado final). Também pode
+ *                       vir pela env KORRELO_SELF_UPDATE_JOB_FILE.
  */
 
-const ALLOWED_FLAGS = ["--plan", "--apply", "--repo-root"];
+const ALLOWED_FLAGS = ["--plan", "--apply", "--repo-root", "--job-file"];
 
 const USAGE = "uso: rollout.cjs [--plan | --apply] [--repo-root <path>]";
 
@@ -30,6 +33,7 @@ function parseArgs(argv = []) {
   const parsed = {
     mode: "dry-run",
     repoRoot: null,
+    jobFile: null,
   };
   let sawPlan = false;
   let sawApply = false;
@@ -44,6 +48,28 @@ function parseArgs(argv = []) {
 
     if (arg === "--apply") {
       sawApply = true;
+      continue;
+    }
+
+    if (arg === "--job-file") {
+      const value = argv[index + 1];
+      if (value === undefined || value === null || String(value).trim() === "") {
+        throw new Error("--job-file requer um caminho");
+      }
+      if (String(value).startsWith("--")) {
+        throw new Error("--job-file requer um caminho");
+      }
+      parsed.jobFile = String(value);
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--job-file=")) {
+      const value = arg.slice("--job-file=".length).trim();
+      if (!value) {
+        throw new Error("--job-file requer um caminho");
+      }
+      parsed.jobFile = value;
       continue;
     }
 

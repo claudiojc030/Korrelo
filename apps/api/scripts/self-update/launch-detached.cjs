@@ -30,7 +30,14 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 
 function parseArgs(argv) {
-  const options = { pidFile: null, logFile: null, cwd: process.cwd(), command: null, args: [] };
+  const options = {
+    pidFile: null,
+    logFile: null,
+    jobFile: null,
+    cwd: process.cwd(),
+    command: null,
+    args: [],
+  };
   let index = 0;
   while (index < argv.length) {
     const arg = argv[index];
@@ -41,6 +48,11 @@ function parseArgs(argv) {
     }
     if (arg === "--log-file") {
       options.logFile = argv[index + 1];
+      index += 2;
+      continue;
+    }
+    if (arg === "--job-file") {
+      options.jobFile = argv[index + 1];
       index += 2;
       continue;
     }
@@ -79,7 +91,11 @@ function main() {
     cwd: options.cwd,
     detached: true,
     stdio,
-    env: process.env,
+    // O arquivo do job vai por env: o rollout (e não a API) é quem persiste
+    // o progresso e o resultado final - a API pode reiniciar no meio.
+    env: options.jobFile
+      ? { ...process.env, KORRELO_SELF_UPDATE_JOB_FILE: options.jobFile }
+      : process.env,
   });
 
   // O PID do processo real (o que fica desacoplado).

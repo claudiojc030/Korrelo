@@ -123,17 +123,24 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       expect(() => cliArgs.parseArgs(["--plan", "--apply"])).toThrow(/não podem ser usados juntos/);
     });
 
-    it("aceita apenas --plan, --apply e --repo-root <path>", () => {
-      expect(cliArgs.parseArgs([])).toEqual({ mode: "dry-run", repoRoot: null });
-      expect(cliArgs.parseArgs(["--plan"])).toEqual({ mode: "plan", repoRoot: null });
-      expect(cliArgs.parseArgs(["--apply"])).toEqual({ mode: "apply", repoRoot: null });
+    it("aceita apenas --plan, --apply, --repo-root <path> e --job-file <path>", () => {
+      expect(cliArgs.parseArgs([])).toEqual({ mode: "dry-run", repoRoot: null, jobFile: null });
+      expect(cliArgs.parseArgs(["--plan"])).toEqual({ mode: "plan", repoRoot: null, jobFile: null });
+      expect(cliArgs.parseArgs(["--apply"])).toEqual({ mode: "apply", repoRoot: null, jobFile: null });
       expect(cliArgs.parseArgs(["--repo-root", "/home/korrelo/korrelo"])).toEqual({
         mode: "dry-run",
         repoRoot: "/home/korrelo/korrelo",
+        jobFile: null,
       });
       expect(cliArgs.parseArgs(["--repo-root=/tmp/x", "--apply"])).toEqual({
         mode: "apply",
         repoRoot: "/tmp/x",
+        jobFile: null,
+      });
+      expect(cliArgs.parseArgs(["--job-file", "/tmp/job.json"])).toEqual({
+        mode: "dry-run",
+        repoRoot: null,
+        jobFile: "/tmp/job.json",
       });
     });
 

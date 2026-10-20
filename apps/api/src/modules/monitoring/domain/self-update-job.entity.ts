@@ -48,6 +48,8 @@ export interface SelfUpdateJob {
   recoveryStatus: string | null;
   /** Mensagem mais recente do runner (sanitizada). */
   lastMessage: string | null;
+  /** Última vez que o job foi gravado (runner ou API). */
+  updatedAt?: string | null;
 }
 
 export const SELF_UPDATE_JOB_REPOSITORY = Symbol("SELF_UPDATE_JOB_REPOSITORY");

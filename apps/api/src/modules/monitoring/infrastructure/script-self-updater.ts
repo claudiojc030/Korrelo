@@ -132,6 +132,8 @@ export class ScriptSelfUpdater implements SelfUpdater {
         pidFile,
         "--log-file",
         logFile,
+        "--job-file",
+        jobRepo.jobPath(job.id),
         "--cwd",
         this.repoDir,
         "--",
@@ -260,17 +262,22 @@ export class ScriptSelfUpdater implements SelfUpdater {
   private statusFromJob(job: SelfUpdateJob): SelfUpdateStatus {
     const log = this.getJobLogSync(job.id);
     const parsed = this.parseLog(log);
+    // O progresso vem do JOB PERSISTIDO (o runner é quem o atualiza, mesmo
+    // com a API reiniciando no meio). O log é o fallback quando o job ainda
+    // não tem progresso gravado.
+    const percent = job.progress > 0 ? job.progress : parsed.percent;
+    const label = job.currentStage ?? parsed.label ?? "";
     const status: SelfUpdateStatus = {
       running: this.isJobActive(job) && this.isRunnerAlive(job),
-      percent: parsed.done ? 100 : job.progress,
-      label: parsed.label || job.currentStage || "",
+      percent: parsed.done ? 100 : percent,
+      label,
       done: parsed.done || ["completed", "failed", "interrupted"].includes(job.status),
       success: parsed.done ? parsed.success : job.status === "completed" ? true : null,
       errorMessage: parsed.errorMessage ?? job.failureReason ?? undefined,
       log,
       jobId: job.id,
       jobStatus: job.status,
-      currentStage: job.currentStage,
+      currentStage: job.currentStage ?? parsed.label ?? null,
       previousCommit: job.previousCommit,
       candidateCommit: job.candidateCommit,
       previousBranch: job.previousBranch,
