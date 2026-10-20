@@ -221,6 +221,56 @@ calcularia, o limite efetivo (o que valeria), os limites dos bancos, se
 existe divergência entre o Core e o Docker e se um deploy seria possível
 agora (e por quê não).
 
+### O deploy nunca para a produção para compilar
+
+O fluxo do deploy é sempre:
+
+```
+CURRENT continua atendendo
+  ↓ preflight (RAM, disco, Docker, builds ativos)
+  ↓ espera o host ficar seguro (cooldown)
+  ↓ build do CANDIDATO (imagem versionada por commit)
+  ↓ container de TESTE (staging) em rede/porta separadas
+  ↓ health do CANDIDATO
+  ↓ só então PROMOVE (troca o container de produção)
+  ↓ health da produção
+  ↓ rollback (imagem anterior, sem rebuild) se a nova versão falhar
+```
+
+O container **CURRENT** (Mesatta, Evolution) **não é parado, recriado nem
+reiniciado** em nenhum momento do build ou do staging. Se o build ou o
+staging falhar, a versão que está no ar continua exatamente como estava
+(mesmo container ID, mesmo StartedAt, mesmo RestartCount, mesmas networks e
+volumes).
+
+**Guard de recursos do build:** antes de começar o build, o Korrelo mede
+MemAvailable, load, disco, **atividade de swap** e **PSI de memória**. Se o
+host estiver sobrecarregado, o deploy **espera** (cooldown de 10 s, até 180 s
+por padrão) em vez de derrubar a VPS. Swap usada alta **sozinha** não bloqueia
+(o Linux mantém páginas antigas em swap mesmo depois da pressão passar) — o
+que bloqueia é a atividade de swap e o PSI.
+
+| env | default |
+| --- | --- |
+| `KORRELO_BUILD_MEM_AVAILABLE_MB` | 512 |
+| `KORRELO_BUILD_LOAD1_MAX` | 1.5 |
+| `KORRELO_BUILD_DISK_FREE_MB` | 2000 |
+| `KORRELO_BUILD_SWAP_ACTIVITY_MAX_PAGES` | 512 |
+| `KORRELO_BUILD_PSI_MEMORY_SOME_MAX` | 1 |
+| `KORRELO_BUILD_PSI_MEMORY_FULL_MAX` | 0.01 |
+| `KORRELO_BUILD_WAIT_TIMEOUT_SEC` | 180 |
+| `KORRELO_BUILD_WAIT_INTERVAL_SEC` | 10 |
+
+O build também roda com prioridade baixa (`nice -n 10` + `ionice -c 3`,
+quando existem no host). O work pesado do build acontece dentro do daemon do
+Docker, então o que de fato protege a produção é o guard de recursos.
+
+**Dry-run do deploy** (read-only, sem tocar em Docker):
+`GET /projects/:id/deploy-dry-run?commit=<sha>&branch=<branch>` mostra
+projeto, commit atual/candidato, recursos do host, imagem e container atuais,
+limites, banco gerenciado, staging planejado, health planejado, promoção
+planejada e se há rollback disponível.
+
 ### O boot do Korrelo é somente leitura
 
 Reiniciar ou atualizar o Korrelo **nunca** altera um container que já

@@ -14,6 +14,7 @@ import { CreateProjectUseCase } from "./application/create-project.use-case";
 import { DetectProjectStackUseCase } from "./application/detect-project-stack.use-case";
 import { ImportProjectUseCase } from "./application/import-project.use-case";
 import { DeployProjectUseCase } from "./application/deploy-project.use-case";
+import { PreviewProjectDeployUseCase } from "./application/preview-project-deploy.use-case";
 import { DeleteProjectUseCase } from "./application/delete-project.use-case";
 import { ListEnvVarsUseCase } from "./application/list-env-vars.use-case";
 import { SetEnvVarsUseCase } from "./application/set-env-vars.use-case";
@@ -146,6 +147,7 @@ import { CompatibilityDryRunService } from "./infrastructure/compatibility-dry-r
     DetectProjectStackUseCase,
     ImportProjectUseCase,
     DeployProjectUseCase,
+    PreviewProjectDeployUseCase,
     DeleteProjectUseCase,
     ListEnvVarsUseCase,
     SetEnvVarsUseCase,

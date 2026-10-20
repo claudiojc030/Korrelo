@@ -102,6 +102,14 @@ class FakeResourcePreflight {
       },
     };
   }
+
+  /**
+   * Espera de recursos antes do build. No teste o host é considerado
+   * sempre seguro (as métricas reais da máquina não podem decidir o teste).
+   */
+  async waitForSafeHost(): Promise<{ safe: boolean; reason: string | null; waitedSec: number; attempts: number }> {
+    return { safe: true, reason: null, waitedSec: 0, attempts: 1 };
+  }
 }
 
 class FakeHealthChecker {

@@ -126,7 +126,7 @@ export function computeAvailablePoolMb(totalMemMb: number, config: MemoryBudgetC
 export interface EffectiveMemoryLimit {
   /** Limite que deve ser usado no compose. */
   effectiveLimitMb: number;
-  /** Limite que a F�RMULA NOVA calculates (o que seria usado sem grandfathering). */
+  /** Limite que a F�RMULA NOVA calculates (o que seria usado sem grandfathering). */
   calculatedLimitMb: number;
   /** De onde veio o valor. */
   source: "observed" | "admin" | "calculated";
@@ -331,6 +331,23 @@ export interface DeploymentMemoryPlan {
  * que SERIA aplicado). Assim o painel nunca mente: o que o dry-run mostra é
  * exatamente o que o deploy faria.
  */
+/**
+ * Plano de memória de UM projeto (deploy e dry-run usam o mesmo cálculo).
+ */
+export function computeProjectDeploymentPlan(params: {
+  totalMemMb: number;
+  activeProjects: number;
+  observedProductionLimitMb: number | null;
+  adminLimitMb: number | null;
+  isRunning: boolean;
+  isGrandfathered: boolean;
+  adminReductionApproved?: boolean;
+  databases: DatabaseBudgetInput[];
+  config?: MemoryBudgetConfig;
+}): DeploymentMemoryPlan {
+  return computeDeploymentMemoryPlan(params);
+}
+
 export function computeDeploymentMemoryPlan(params: {
   totalMemMb: number;
   activeProjects: number;

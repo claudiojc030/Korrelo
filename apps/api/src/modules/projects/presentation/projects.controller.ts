@@ -9,6 +9,7 @@ import { DeleteProjectUseCase } from "../application/delete-project.use-case";
 import { ListEnvVarsUseCase } from "../application/list-env-vars.use-case";
 import { SetEnvVarsUseCase } from "../application/set-env-vars.use-case";
 import { GetProjectDiskUsageUseCase } from "../application/get-project-disk-usage.use-case";
+import { PreviewProjectDeployUseCase } from "../application/preview-project-deploy.use-case";
 import { ProvisionDatabaseUseCase } from "../application/provision-database.use-case";
 import { DeprovisionDatabaseUseCase } from "../application/deprovision-database.use-case";
 import { GetManagedDatabaseUseCase } from "../application/get-managed-database.use-case";
@@ -61,6 +62,7 @@ export class ProjectsController {
     private readonly listEnvVars: ListEnvVarsUseCase,
     private readonly setEnvVars: SetEnvVarsUseCase,
     private readonly getProjectDiskUsage: GetProjectDiskUsageUseCase,
+    private readonly previewProjectDeploy: PreviewProjectDeployUseCase,
     private readonly provisionDatabase: ProvisionDatabaseUseCase,
     private readonly deprovisionDatabase: DeprovisionDatabaseUseCase,
     private readonly getManagedDatabase: GetManagedDatabaseUseCase,
@@ -107,6 +109,15 @@ export class ProjectsController {
   @Get(":id/disk-usage")
   diskUsage(@Param("id") id: string) {
     return this.getProjectDiskUsage.execute(id);
+  }
+
+  /**
+   * DRY-RUN do deploy: mostra o que o deploy faria (recursos, limites,
+   * staging, health, promoção e rollback) SEM tocar em Docker.
+   */
+  @Get(":id/deploy-dry-run")
+  deployDryRun(@Param("id") id: string, @Query("commit") commit?: string, @Query("branch") branch?: string) {
+    return this.previewProjectDeploy.execute(id, { commit: commit ?? null, branch: branch ?? null });
   }
 
   @Get(":id/env")

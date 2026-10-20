@@ -52,10 +52,64 @@ export function splitImageReference(reference: string): { name: string; tag: str
   return { name, tag };
 }
 
+/**
+ * PRIORIDADE DO BUILD.
+ *
+ * O build de um projeto roda na MESMA VPS que serve a produção. O processo
+ * do `docker compose` (e o que ele faz no host) roda com prioridade
+ * baixa: `ionice -c 3` (classe de I/O ociosa) + `nice -n 10`.
+ *
+ * Observação honesta: o trabalho PESADO do build acontece dentro do daemon
+ * do Docker (BuildKit), que NÃO é filho deste processo - então nice/ionice
+ * não limitam o daemon. O que de fato protege a produção é o resource
+ * guard (não iniciar build com o host carregado) + o limite de memória do
+ * build gerado no Dockerfile. O nice/ionice aqui reduz o impacto do
+ * trabalho do CLI e de qualquer passo local do compose.
+ */
+const BUILD_NICE_LEVEL = 10;
+
 @Injectable()
 export class DockerComposeOrchestrator implements ContainerOrchestrator {
   private readonly logger = new Logger(DockerComposeOrchestrator.name);
   private buildKitSupport: boolean | null = null;
+  private priorityTools: { nice: boolean; ionice: boolean } | null = null;
+
+  /** Detecta (uma vez) se `nice`/`ionice` existem no host. */
+  private async detectPriorityTools(): Promise<{ nice: boolean; ionice: boolean }> {
+    if (this.priorityTools) return this.priorityTools;
+    const probe = async (command: string, args: string[]): Promise<boolean> => {
+      try {
+        await execFile(command, args, { timeout: 5_000 });
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    this.priorityTools = {
+      nice: await probe("nice", ["--version"]),
+      ionice: await probe("ionice", ["-c", "3", "true"]),
+    };
+    return this.priorityTools;
+  }
+
+  /** Envolve o comando com nice/ionice (se existirem). */
+  private async withLowPriority(
+    command: string,
+    args: string[],
+  ): Promise<{ command: string; args: string[] }> {
+    const tools = await this.detectPriorityTools();
+    let finalCommand = command;
+    let finalArgs = [...args];
+    if (tools.ionice) {
+      finalArgs = ["-c", "3", finalCommand, ...finalArgs];
+      finalCommand = "ionice";
+    }
+    if (tools.nice) {
+      finalArgs = ["-n", String(BUILD_NICE_LEVEL), finalCommand, ...finalArgs];
+      finalCommand = "nice";
+    }
+    return { command: finalCommand, args: finalArgs };
+  }
 
   // A rede é "external: true" no compose de todo projeto (ver
   // docker-compose-file-builder.ts) - se ela não existir ainda no host, o
@@ -84,13 +138,24 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       // A imagem gerada é TAGUEADA por commit (ver imageTag no compose), o
       // que permite promover sem rebuild e fazer rollback pra uma versão
       // anterior concreta.
-      const { stdout, stderr } = await execFile(
-        "docker",
-        ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "up", "-d", "--build", "app_staging"],
+      // Prioridade baixa: o build não disputa I/O/CPU com a produção.
+      const build = await this.withLowPriority("docker", [
+        "compose",
+        "-f",
+        COMPOSE_FILENAME,
+        "-p",
+        config.containerName,
+        "up",
+        "-d",
+        "--build",
+        "app_staging",
+      ]);
+      const { stdout, stderr } = await execFile(build.command, build.args, {
         // 15min: exportar a imagem pro storage do Docker pode ser lento numa
         // VPS pequena sob carga (I/O de disco), 5min matava builds legítimos.
-        { cwd: config.projectPath, timeout: STAGING_TIMEOUT_MS },
-      );
+        cwd: config.projectPath,
+        timeout: STAGING_TIMEOUT_MS,
+      });
       return combineOutput(stdout, stderr);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

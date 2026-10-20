@@ -209,6 +209,10 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     const { DockerComposeFileBuilder } = require("../infrastructure/docker-compose-file-builder");
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { DeployLogger } = require("../infrastructure/deploy-logger");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { ResourcePreflightService } = require("../infrastructure/resource-preflight.service");
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { safeHostResourceProvider } = require("../../../infrastructure/host-resources");
 
     useCase = new DeployProjectUseCase(
       projectRepository,
@@ -225,6 +229,9 @@ describe("DeployProjectUseCase (Wave 2)", () => {
       new DockerComposeFileBuilder(),
       deployJobRepository,
       new DeployLogger(),
+      // Preflight com métricas de host FIXAS: o deploy de teste não pode
+      // depender do load/RAM da máquina que roda o Jest.
+      new ResourcePreflightService(safeHostResourceProvider()),
     );
   });
 

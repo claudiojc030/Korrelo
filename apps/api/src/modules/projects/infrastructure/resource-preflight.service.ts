@@ -1,7 +1,16 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import * as os from "node:os";
 import { readFileSync } from "node:fs";
 import { runCommand } from "../../../infrastructure/command-runner";
+import {
+  evaluateHostResources,
+  readBuildThresholds,
+  readHostResources,
+  realHostResourceProvider,
+  type HostResourceEvaluation,
+  type HostResourceProvider,
+
+} from "../../../infrastructure/host-resources";
 
 /**
  * Verificação de recursos ANTES de começar um build.
@@ -40,10 +49,15 @@ export interface PreflightResult {
   ok: boolean;
   reason: string | null;
   metrics: PreflightMetrics;
+  /** Avaliação detalhada dos sinais do host (load, swap, PSI). */
+  host?: HostResourceEvaluation;
 }
 
 const DOCKER_CHECK_TIMEOUT_MS = 3_000;
 const DISK_CHECK_TIMEOUT_MS = 5_000;
+
+/** Token do provider de métricas do host (injetável nos testes). */
+export const HOST_RESOURCE_PROVIDER = Symbol("HOST_RESOURCE_PROVIDER");
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -62,6 +76,93 @@ export const DEFAULT_BUILD_SAFETY_MARGIN_MB = envInt("KORRELO_BUILD_SAFETY_MARGI
 @Injectable()
 export class ResourcePreflightService {
   private readonly logger = new Logger(ResourcePreflightService.name);
+
+  /**
+   * Provider das métricas do host (injetável para os testes; em produção
+   * é o provider real).
+   */
+  private readonly resourceProvider: HostResourceProvider;
+
+  constructor(
+    @Optional()
+    @Inject(HOST_RESOURCE_PROVIDER)
+    resourceProvider?: HostResourceProvider,
+  ) {
+    this.resourceProvider = resourceProvider ?? realHostResourceProvider;
+  }
+
+  /**
+   * Espera (com cooldown) o host ficar seguro para um build pesado.
+   *
+   * Não é o mesmo que o preflight: aqui a espera acontece NOVAIS, dentro
+   * do job de deploy, logo antes do build começar. A pressão depois do
+   * `npm ci`/fetch é transitória - abortar o deploy por causa dela é
+   * desperdício.
+   *
+   * A produção em execução NUNCA é parada, reduzida ou reiniciada para
+   * liberar recurso: no máximo o build espera.
+   */
+  async waitForSafeHost(options: {
+    timeoutSec?: number;
+    intervalSec?: number;
+    requiredMemoryMb?: number;
+    requiredDiskMb?: number;
+    sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
+    log?: (message: string) => void;
+  } = {}): Promise<{ safe: boolean; reason: string | null; waitedSec: number; attempts: number }> {
+    const timeoutSec = options.timeoutSec ?? envInt("KORRELO_BUILD_WAIT_TIMEOUT_SEC", 180);
+    const intervalSec = Math.max(1, options.intervalSec ?? envInt("KORRELO_BUILD_WAIT_INTERVAL_SEC", 10));
+    const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    const now = options.now ?? (() => Date.now());
+    const log = options.log ?? ((message: string) => this.logger.warn(message));
+    const thresholds = readBuildThresholds();
+
+    const startedAt = now();
+    let attempts = 0;
+    let lastReason: string | null = null;
+
+    for (;;) {
+      attempts += 1;
+      const resources = await readHostResources({
+        provider: this.resourceProvider,
+        measureSwapActivity: true,
+      });
+      const evaluation = evaluateHostResources({
+        resources,
+        thresholds: {
+          ...thresholds,
+          memAvailableMb: options.requiredMemoryMb ?? thresholds.memAvailableMb,
+          diskFreeMb: options.requiredDiskMb ?? thresholds.diskFreeMb,
+        },
+      });
+      if (evaluation.safe) {
+        if (attempts > 1) {
+          log(
+            `[deploy] recursos normalizados após ${Math.round((now() - startedAt) / 1000)}s ` +
+              `(${evaluation.reason})`,
+          );
+        }
+        return {
+          safe: true,
+          reason: null,
+          waitedSec: Math.round((now() - startedAt) / 1000),
+          attempts,
+        };
+      }
+
+      lastReason = evaluation.reason;
+      const elapsedSec = Math.round((now() - startedAt) / 1000);
+      if (elapsedSec + intervalSec > timeoutSec) {
+        return { safe: false, reason: lastReason, waitedSec: elapsedSec, attempts };
+      }
+      log(
+        `[deploy] aguardando recursos para o build (${evaluation.reason}); ` +
+          `tentativa=${attempts}, próxima checagem em ${intervalSec}s`,
+      );
+      await sleep(intervalSec * 1000);
+    }
+  }
 
   /**
    * Verifica se há headroom para um build + container de teste.
@@ -84,6 +185,8 @@ export class ResourcePreflightService {
     stagingReservationMb?: number;
     /** Soma dos limites dos containers de produção já rodando. */
     productionReservedMb?: number;
+    /** Informa se o Docker responde (evita a sonda real - usado nos testes). */
+    dockerReachable?: boolean;
   }): Promise<PreflightResult> {
     const requiredMemoryMb = params.requiredMemoryMb ?? DEFAULT_BUILD_MEMORY_REQUIREMENT_MB;
     const requiredDiskMb = params.requiredDiskMb ?? DEFAULT_BUILD_DISK_REQUIREMENT_MB;
@@ -92,11 +195,16 @@ export class ResourcePreflightService {
     const productionReservedMb = params.productionReservedMb ?? 0;
 
     const totalMemMb = Math.round(os.totalmem() / 1024 / 1024);
-    const freeMemMb = Math.round(os.freemem() / 1024 / 1024);
+    // A memória livre vem do PROVIDER (mesma fonte dos outros sinais do
+    // host: /proc/meminfo). O os.freemem() fica como fallback quando o
+    // provider não tem a métrica.
+    const providerMem = await this.resourceProvider.getMemInfo();
+    const freeMemMb = providerMem?.memAvailableMb ?? Math.round(os.freemem() / 1024 / 1024);
     const { swapTotalMb, swapFreeMb } = this.readSwap();
 
     const diskFreeMb = await this.readDiskFreeMb();
-    const dockerReachable = await this.isDockerReachable();
+    const dockerReachable =
+      params.dockerReachable ?? (await this.isDockerReachable());
 
     const availableForBuildMb = Math.max(
       0,
@@ -123,6 +231,29 @@ export class ResourcePreflightService {
         ok: false,
         reason: `já existe ${activeBuilds} build(s) em andamento`,
         metrics,
+      };
+    }
+
+    // ------------------------------------------------------------------
+    // Sinais do HOST (load, swap, PSI) - o mesmo conjunto validado no
+    // rollout do Core. Uma VPS saturada NÃO deve começar um build: é
+    // exatamente o que derrubou o Mesatta no incidente.
+    // ------------------------------------------------------------------
+    const hostThresholds = readBuildThresholds();
+    const hostResources = await readHostResources({
+      provider: this.resourceProvider,
+      measureSwapActivity: true,
+    });
+    const hostEvaluation = evaluateHostResources({
+      resources: hostResources,
+      thresholds: { ...hostThresholds, memAvailableMb: 0, diskFreeMb: 0 },
+    });
+    if (!hostEvaluation.safe) {
+      return {
+        ok: false,
+        reason: `host sobrecarregado para build (${hostEvaluation.reason}). A produção não é tocada.`,
+        metrics,
+        host: hostEvaluation,
       };
     }
 

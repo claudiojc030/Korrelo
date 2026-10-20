@@ -40,6 +40,7 @@ import {
 } from "../infrastructure/memory-budget";
 import { ensureDockerignore } from "../infrastructure/dockerignore";
 import { DeployLogger } from "../infrastructure/deploy-logger";
+import { ResourcePreflightService } from "../infrastructure/resource-preflight.service";
 import { DEPLOY_JOB_REPOSITORY, type DeployJobRepository } from "../domain/deploy-job.repository";
 import { DeployJob, type DeployJobStage } from "../domain/deploy-job.entity";
 import type { HealthcheckConfig } from "../domain/container-orchestrator";
@@ -98,6 +99,7 @@ export class DeployProjectUseCase {
     private readonly composeFileBuilder: DockerComposeFileBuilder,
     @Inject(DEPLOY_JOB_REPOSITORY) private readonly deployJobRepository: DeployJobRepository,
     private readonly deployLogger: DeployLogger,
+    private readonly resourcePreflight: ResourcePreflightService,
   ) {}
 
   async executeJob(job: DeployJob): Promise<void> {
@@ -286,9 +288,26 @@ export class DeployProjectUseCase {
 
       // ------------------------------------------------------------------
       // 5. staging: builda e sobe a instância de teste
+      //
+      // Antes do build pesado, ESPERA o host ficar seguro (load, RAM, disco,
+      // swap/PSI). A pressão depois do clone/fetch é transitória - abortar o
+      // deploy por causa dela é desperdício. A produção em execução NUNCA é
+      // parada, reduzida ou reiniciada para liberar recurso.
       // ------------------------------------------------------------------
       if (!project.skipStagingTest) {
         await this.setStage(job, "staging-start", context);
+        const hostWait = await this.resourcePreflight.waitForSafeHost({
+          requiredMemoryMb: plan.productionLimitMb,
+          requiredDiskMb: undefined,
+          log: (message) => this.deployLogger.log("staging-start", context, message),
+        });
+        if (!hostWait.safe) {
+          throw new DeployFailure(
+            `O host não ficou com recursos para o build em ${hostWait.waitedSec}s (${hostWait.reason}). ` +
+              "A versão em produção não foi tocada - o deploy pode ser tentado de novo mais tarde.",
+            false,
+          );
+        }
         const buildStartedAt = Date.now();
         const stagingLog = await this.orchestrator.deployStaging(deployConfig);
         const buildDurationMs = Date.now() - buildStartedAt;
