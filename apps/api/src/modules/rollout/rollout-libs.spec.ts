@@ -443,6 +443,8 @@ describe("rollout - executor", () => {
             stderr: "",
           };
         }
+        if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--is-inside-work-tree") return { code: 0, stdout: "true\n", stderr: "" };
+        if (gitArgs[0] === "branch" && gitArgs[1] === "--show-current") return { code: 0, stdout: "main\n", stderr: "" };
         if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--abbrev-ref") return { code: 0, stdout: "main\n", stderr: "" };
         if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--verify") return { code: 0, stdout: "af1205a\n", stderr: "" };
         if (gitArgs[0] === "rev-parse") return { code: 0, stdout: "af1205a\n", stderr: "" };

@@ -135,6 +135,8 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
       if (command === "git") {
         const gitArgs = args[0] === "-C" ? args.slice(2) : args;
         if (gitArgs[0] === "status") return { code: 0, stdout: "", stderr: "" };
+        if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--is-inside-work-tree") return { code: 0, stdout: "true\n", stderr: "" };
+        if (gitArgs[0] === "branch" && gitArgs[1] === "--show-current") return { code: 0, stdout: "main\n", stderr: "" };
         if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--abbrev-ref") return { code: 0, stdout: "main\n", stderr: "" };
         if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--verify") return { code: 0, stdout: "c2c2c2c\n", stderr: "" };
         if (gitArgs[0] === "rev-parse") return { code: 0, stdout: "c1c1c1c\n", stderr: "" };
@@ -205,7 +207,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
     };
   }
 
-  /** Leitor de recursos falso (a sequência define quando a pressão aparece). */
+  /** Sequência de leituras de recursos falsa (a sequência define quando a pressão aparece). */
   function makeResourceReader(sequence: Record<string, unknown>[]) {
     let index = 0;
     return async () => {
@@ -213,6 +215,15 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
       index += 1;
       return { ...OK_RESOURCES, ...item };
     };
+  }
+
+  /** Cooldown curto e sem dormir de verdade (o teste não espera 10s). */
+  const TEST_WAIT = { intervalSec: 1, timeoutSec: 2 };
+  const instantSleep = async () => undefined;
+
+  /** Rollout de teste: cooldown curto e sleep instantâneo. */
+  function runRollout(options: Record<string, unknown>) {
+    return rolloutLib.executeRollout({ sleep: instantSleep, waitConfig: TEST_WAIT, ...options });
   }
 
   /** Desembrulha nice/ionice: devolve o comando real e seus argumentos. */
@@ -245,7 +256,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("1) RAM suficiente: o rollout roda até o fim", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([OK_RESOURCES]),
@@ -258,7 +269,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("2) RAM insuficiente: aborta ANTES do npm install (nenhum build começa)", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([{ memAvailableMb: 400 }]),
@@ -277,7 +288,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
   it("3) pressão antes do build-api: o build da API não começa", async () => {
     const run = makeRunner();
     // Leituras: preflight, install, build-shared (ok) e build-api (pressão).
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([
@@ -298,7 +309,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("4) pressão antes do build-web: o build do web não começa", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([
@@ -318,7 +329,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("5) swap acima do threshold: aborta (swap não substitui RAM)", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([{ swapUsedMb: 1500 }]),
@@ -334,14 +345,14 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
     const resources = makeResourceReader([{ load1: 3.2 }]);
 
     // Default (1.5) bloqueia.
-    const blocked = await rolloutLib.executeRollout({ config: makeConfig(), run, readResources: resources });
+    const blocked = await runRollout({ config: makeConfig(), run, readResources: resources });
     expect(blocked.ok).toBe(false);
     expect(blocked.error).toContain("load average");
 
     // Política relaxada por env: o mesmo load passa.
     process.env.KORRELO_ROLLOUT_LOAD1_MAX = "5";
     const run2 = makeRunner();
-    const allowed = await rolloutLib.executeRollout({
+    const allowed = await runRollout({
       config: makeConfig(),
       run: run2,
       readResources: makeResourceReader([{ load1: 3.2 }]),
@@ -351,7 +362,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("7) disco baixo: aborta antes do build", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([{ diskAvailableGb: 0.4 }]),
@@ -364,7 +375,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("8) ao abortar por recurso, a produção não é tocada", async () => {
     const run = makeRunner();
-    await rolloutLib.executeRollout({
+    await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([{ memAvailableMb: 200 }]),
@@ -385,7 +396,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("9) nice é usado quando existe", async () => {
     const run = makeRunner({ nice: true, ionice: false });
-    await rolloutLib.executeRollout({
+    await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([OK_RESOURCES]),
@@ -402,7 +413,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("10) sem nice (e sem ionice) o rollout continua funcionando", async () => {
     const run = makeRunner({ nice: false, ionice: false });
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([OK_RESOURCES]),
@@ -418,7 +429,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("11) os builds continuam estritamente sequenciais (shared -> api -> web)", async () => {
     const run = makeRunner();
-    await rolloutLib.executeRollout({
+    await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([OK_RESOURCES]),
@@ -434,7 +445,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("12) o teto de heap vale SÓ para os subprocessos de install/build", async () => {
     const run = makeRunner();
-    await rolloutLib.executeRollout({
+    await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([OK_RESOURCES]),
@@ -453,7 +464,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("13) o dry-run mostra a checagem de recursos real", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       dryRun: true,
@@ -475,7 +486,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
   it("14) o dry-run continua sem nenhuma escrita", async () => {
     const config = makeConfig();
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config,
       run,
       dryRun: true,
@@ -491,7 +502,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("15) migration_lock.toml NÃO aparece como migration", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       dryRun: true,
@@ -506,7 +517,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
   });
 
   it("16) rollout normal com recursos suficientes continua funcionando", async () => {    const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([OK_RESOURCES]),
@@ -534,7 +545,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
     });
 
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config,
       run,
       readResources: makeResourceReader([OK_RESOURCES]),
@@ -548,7 +559,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   it("18) o rollback continua sendo só do Core", async () => {
     const run = makeRunner({ healthFails: true });
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: makeResourceReader([OK_RESOURCES]),
@@ -577,7 +588,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
       const loadavg = jest.spyOn(os, "loadavg").mockReturnValue([10, 10, 10]);
       try {
         // 1) SEM provider injetado: o host real manda -> o rollout aborta.
-        const blocked = await rolloutLib.executeRollout({
+        const blocked = await runRollout({
           config: makeConfig(),
           run: makeRunner(),
         });
@@ -587,7 +598,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
         // 2) COM o provider injetado (load 0.1): o rollout passa, mesmo com o
         //    host real carregado (load 10) - a medição do teste é a que vale.
-        const injected = await rolloutLib.executeRollout({
+        const injected = await runRollout({
           config: makeConfig(),
           run: makeRunner(),
           resourceProvider: safeResourceProvider({ load1: 0.1 }),
@@ -602,7 +613,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
     it("o provider injetado com load alto aborta (o valor do teste manda)", async () => {
       const loadavg = jest.spyOn(os, "loadavg").mockReturnValue([0.1, 0.1, 0.1]);
       try {
-        const blocked = await rolloutLib.executeRollout({
+        const blocked = await runRollout({
           config: makeConfig(),
           run: makeRunner(),
           resourceProvider: safeResourceProvider({ load1: 2.0 }),
@@ -678,7 +689,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
         thresholds: guard.readThresholds({}),
       });
       expect(evaluation.safeToBuild).toBe(true);
-      expect(evaluation.reason).toContain("indisponíveis");
+      expect(evaluation.reason).toContain("limites");
     });
 
     it("avaliação: cada limite é respeitado", () => {

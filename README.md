@@ -386,9 +386,46 @@ máquina) e seus equivalentes por env:
 | teto de heap do build | 1024 MB | `KORRELO_ROLLOUT_BUILD_HEAP_MB` |
 | nice dos builds | 10 | `KORRELO_ROLLOUT_NICE_LEVEL` |
 | ionice dos builds | ligado | `KORRELO_ROLLOUT_IONICE=0` desliga |
+| intervalo do cooldown | 10 s | `KORRELO_ROLLOUT_RESOURCE_WAIT_INTERVAL_SEC` |
+| timeout do cooldown | 180 s | `KORRELO_ROLLOUT_RESOURCE_WAIT_TIMEOUT_SEC` |
 
 Swap livre **não** conta como RAM: MemAvailable físico é o critério
-principal. O dry-run mostra a checagem completa (`rolloutResourceCheck`).
+principal. O dry-run mostra a checagem completa (`rolloutResourceCheck`) e a
+configuração do cooldown (`resourceWaitConfig`).
+
+#### Cooldown: esperar a pressão transitória passar
+
+No primeiro rollout real na VPS, o `npm ci` terminou e o `load1` ficou em
+**3.19** (limite 1.5): o build foi bloqueado — corretamente, mas a pressão
+era **transitória** (minutos depois, sem nada pesado, o load caiu para
+0.77). Abortar ali era um timeout evitável.
+
+Agora, antes de cada operação pesada (`npm ci`, `build-shared`, `build-api`,
+`build-web`) e antes do rebuild do rollback, o rollout:
+
+1. mede os recursos;
+2. se estiver seguro → segue;
+3. se estiver inseguro **de forma transitória** (load alto, swap um pouco
+   alta, memória temporariamente abaixo) → **espera** `intervalSec` (sem busy
+   loop), mede de novo e repete;
+4. se for **hard failure** → aborta na hora: disco abaixo do mínimo, erro de
+   leitura de métrica essencial ou memória crítica (< 256 MB);
+5. se o timeout estourar → aborta (o rollback entra em recuperação segura).
+
+Os thresholds de produção **não mudam**: o cooldown não afrouxa a proteção,
+só espera a pressão passar.
+
+Logs (sem spam):
+
+```
+[rollout] build-shared: aguardando recursos
+load average (1min)=3.19 (limite 1.5)
+tentativa=1
+próxima checagem em 10s
+...
+[rollout] build-shared: recursos normalizados após 30s
+load1=1.31
+```
 
 #### Rollout consciente dos recursos (nunca sacrificar a produção)
 
@@ -404,8 +441,22 @@ O rollback é **consciente dos recursos e do stage da falha**:
 | onde a falha aconteceu | o que o rollback faz |
 | --- | --- |
 | antes do `git update` | **nenhum rollback** (nada foi alterado no alvo) |
-| depois do `git update`, **antes** de qualquer restart de PM2 | o Core em execução continua na versão anterior. Sem recurso: restaura o Git do alvo para o `previousCommit` e os artefatos do Core (por **cópia**, sem compilação), **não compila** e **não reinicia o PM2** → `RECOVERY_DEFERRED` |
+| depois do `git update`, **antes** de qualquer restart de PM2 | o Core em execução continua na versão anterior. Sem recurso: restaura o **Git do alvo (branch + commit)** e os artefatos do Core (por **cópia**, sem compilação), **não compila** e **não reinicia o PM2** → `RECOVERY_DEFERRED` |
 | depois do restart de PM2 | o Core pode estar com a versão nova (ou quebrada). Sem recurso: o rebuild é **adiado** → `RECOVERY_REQUIRED` / `CRITICAL`, com rebuild + restart do Core pendentes para quando o host tiver folga |
+
+O rollback/recovery **nunca termina em detached HEAD**: ele restaura a
+**branch original** no **commit anterior** (`git checkout <branch>` +
+`git reset --hard <previousCommit>`, só na branch local — o remoto nunca é
+tocado) e confirma `git branch --show-current` + `git rev-parse HEAD`. No
+sucesso, o alvo é validado da mesma forma (branch original + commit
+candidato); branch vazia = rollout não concluído.
+
+Se o alvo tiver **alteração tracked inesperada** durante a recuperação, nada
+é resetado: a restauração é interrompida com
+`RECOVERY_REQUIRED` e a mensagem
+`working tree contém alterações inesperadas; restauração automática da
+branch foi interrompida para não perder dados` (com os caminhos, nunca o
+conteúdo).
 
 Em nenhum dos casos o rollback toca container, volume, rede ou porta de
 projeto: **Mesatta e Evolution têm prioridade sobre o painel do Korrelo** —

@@ -84,9 +84,15 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
   /**
    * Todo rollout de teste roda com métricas de recurso FIXAS: o resultado
    * nunca pode depender do load/RAM/disco da máquina (nem do runner do CI).
+   * O cooldown também é curto e sem dormir de verdade.
    */
   function runRollout(options: Record<string, unknown>) {
-    return rolloutLib.executeRollout({ resourceProvider: safeResourceProvider(), ...options });
+    return rolloutLib.executeRollout({
+      resourceProvider: safeResourceProvider(),
+      sleep: async () => undefined,
+      waitConfig: { intervalSec: 1, timeoutSec: 2 },
+      ...options,
+    });
   }
 
   beforeEach(() => {
@@ -435,9 +441,17 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       // O executor não foi tocado.
       expect(git(["rev-parse", "HEAD"], repos.executor).trim()).toBe(repos.newSha);
 
-      const checkout = calls.find((call) => call.command === "git" && call.args.includes("checkout"));
+      const checkout = calls.find(
+        (call) => call.command === "git" && call.args.includes("checkout") && call.args.includes("main"),
+      );
       expect(checkout).toBeDefined();
-      expect(checkout?.args).toEqual(["-C", repos.target, "checkout", repos.oldSha]);
+      // A branch local é movida de volta ao commit anterior (remoto intacto).
+      const reset = calls.find((call) => call.command === "git" && call.args.includes("reset"));
+      expect(reset?.args).toEqual(["-C", repos.target, "reset", "--hard", repos.oldSha]);
+
+      // O alvo termina NA BRANCH original, no commit anterior (nunca detached).
+      expect(git(["rev-parse", "--abbrev-ref", "HEAD"], repos.target).trim()).toBe("main");
+      expect(git(["rev-parse", "HEAD"], repos.target).trim()).toBe(repos.oldSha);
 
       // O rollback reinicia SÓ o Core.
       const pm2Calls = calls.filter((call) => call.command === "pm2" && call.args[0] === "restart");
@@ -447,8 +461,44 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       }
     });
 
-    it("alvo detached: aborta antes de qualquer escrita Git", async () => {
+    it("recovery adiado (recursos insuficientes) termina em main @ C1 - nunca detached", async () => {
       const repos = createRepos();
+      const config = makeConfig(repos);
+      const calls: Call[] = [];
+      const run = makeRunner(calls);
+
+      // Recursos: OK no preflight, mas o build_shared falha e o recovery
+      // encontra o host carregado -> recuperação adiada.
+      const lowResources = async () => ({
+        memAvailableMb: 400,
+        memTotalMb: 3915,
+        swapUsedMb: 120,
+        swapTotalMb: 2047,
+        load1: 0.32,
+        load5: 0.3,
+        load15: 0.2,
+        diskAvailableGb: 26.9,
+        diskTotalGb: 40,
+        measurable: true,
+      });
+      const reads: unknown[] = [];
+      const readResources = async () => {
+        const item = reads.length === 0 ? { ...(await lowResources()), memAvailableMb: 2305 } : await lowResources();
+        reads.push(item);
+        return item;
+      };
+
+      const result = await runRollout({ config, run, readResources });
+
+      expect(result.ok).toBe(false);
+      // O recovery preserva a BRANCH original e o commit anterior.
+      expect(git(["rev-parse", "--abbrev-ref", "HEAD"], repos.target).trim()).toBe("main");
+      expect(git(["rev-parse", "HEAD"], repos.target).trim()).toBe(repos.oldSha);
+      // O executor não foi tocado.
+      expect(git(["rev-parse", "HEAD"], repos.executor).trim()).toBe(repos.newSha);
+    });
+
+    it("alvo detached: aborta antes de qualquer escrita Git", async () => {      const repos = createRepos();
       git(["checkout", "--detach", repos.oldSha], repos.target);
       const config = makeConfig(repos);
       const calls: Call[] = [];

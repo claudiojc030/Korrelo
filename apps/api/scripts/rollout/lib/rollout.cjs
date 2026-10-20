@@ -17,7 +17,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
-const { inspectGitState, formatDirtyTreeMessage } = require("./git-state.cjs");
+const { inspectGitState, formatDirtyTreeMessage, restoreTargetGitState, verifyTargetGitState } = require("./git-state.cjs");
 const { backupCoreDatabase, timestamp } = require("./core-backup.cjs");
 const {
   captureProjectSnapshot,
@@ -28,9 +28,12 @@ const { acquireLock, releaseLock, defaultLockPath } = require("./self-update-loc
 const { captureArtifacts, restoreArtifacts } = require("./artifact-backup.cjs");
 const {
   readThresholds,
+  readWaitConfig,
   readHostResources,
   realResourceProvider,
   evaluateResources,
+  waitForSafeResources,
+  defaultSleep,
   wrapBuildCommand,
   buildEnv,
 } = require("./resource-guard.cjs");
@@ -69,6 +72,11 @@ const STAGES = [
   { id: "health-core", title: "Health do Core (API, web, PM2, banco)", writes: false },
   { id: "snapshot-after", title: "Snapshot dos containers de projeto (leitura)", writes: false },
   { id: "compare-projects", title: "Comparar snapshots (divergência = falha crítica)", writes: false },
+  {
+    id: "git-verify",
+    title: "Verificar branch e commit final do checkout alvo",
+    writes: false,
+  },
   { id: "worker-release", title: "Liberar o worker de deploy", writes: true },
   { id: "complete", title: "Concluído", writes: false },
 ];
@@ -116,6 +124,7 @@ const STAGE_PERCENT = {
   "health-core": 96,
   "snapshot-after": 98,
   "compare-projects": 99,
+  "git-verify": 99,
   "worker-release": 100,
   complete: 100,
 };
@@ -415,6 +424,7 @@ async function runReadOnlyPreflight({
 
   const { targetRepoRoot, executorRoot } = resolveRoots(config);
   const thresholds = readThresholds();
+  const waitConfig = readWaitConfig();
 
   // ---------------------------------------------------------------- 1) Git do ALVO
   const git = await inspectGitState({ cwd: targetRepoRoot, run: readOnlyRun });
@@ -596,6 +606,18 @@ async function runReadOnlyPreflight({
       safeToBuild: resourceEvaluation.safeToBuild,
       reason: resourceEvaluation.reason,
     },
+    resourceWaitConfig: {
+      intervalSec: waitConfig.intervalSec,
+      timeoutSec: waitConfig.timeoutSec,
+      thresholds: {
+        memRequiredMb: thresholds.memRequiredMb,
+        swapUsedMaxMb: thresholds.swapUsedMaxMb,
+        load1Max: thresholds.load1Max,
+        diskFreeMinGb: thresholds.diskFreeMinGb,
+        buildHeapMb: thresholds.buildHeapMb,
+        niceLevel: thresholds.niceLevel,
+      },
+    },
     executedCommands: executedCommands.map((entry) => `${entry.command} ${entry.args[0] ?? ""}`.trim()),
   };
 }
@@ -702,6 +724,8 @@ async function executeRollout({
   now = new Date(),
   readResources = null,
   resourceProvider = null,
+  sleep = defaultSleep,
+  waitConfig: waitConfigOverride = null,
 }) {
   const startedAt = new Date();
   const stages = [];
@@ -729,11 +753,47 @@ async function executeRollout({
   };
 
   const thresholds = readThresholds();
+  const waitConfig = waitConfigOverride ?? readWaitConfig();
+
+  /** Leitor de recursos (injetável: provider real em produção, fake nos testes). */
+  const readHost =
+    readResources ?? ((opts) => readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider }));
+
+  /**
+   * Aguarda os recursos ficarem seguros (cooldown) e registra o estado.
+   *
+   * A pressão depois de um `npm ci` é TRANSITÓRIA: o load average ainda
+   * reflete a carga recente. Em vez de abortar, o rollout espera o host
+   * normalizar (sem busy loop) e só então compila.
+   */
+  const waitForResources = async (label) => {
+    const wait = await waitForSafeResources({
+      readHost: () => readHost({ run }),
+      thresholds,
+      waitConfig,
+      label,
+      sleep,
+      log,
+    });
+    state.resourceCheck = {
+      at: new Date().toISOString(),
+      label,
+      safeToBuild: wait.ok,
+      waited: wait.waited === true,
+      waitedSec: wait.elapsedSec ?? 0,
+      attempts: wait.attempts ?? 0,
+      timeout: wait.timeout === true,
+      hard: wait.hard === true,
+      reason: wait.evaluation.reason,
+      checks: wait.evaluation.checks,
+      resources: wait.resources,
+    };
+    return wait;
+  };
 
   /** Lê e avalia os recursos do host (read-only). */
   const evaluateHostResources = async (runner) => {
-    const reader = readResources ?? ((opts) => readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider }));
-    const resources = await reader({ run: runner });
+    const resources = await readHost({ run: runner });
     const evaluation = evaluateResources({ resources, thresholds });
     state.resourceCheck = {
       at: new Date().toISOString(),
@@ -903,18 +963,20 @@ async function executeRollout({
     record("git-check", "ok", `working tree limpo, branch=${targetBranch}, fast-forward ok`);
 
     // ---------------------------------------------------------------- recursos
-    // Antes de QUALQUER build/install: mede RAM, swap, load e disco. Se não
-    // houver recurso para compilar com segurança, o rollout é ADIADO - sem
-    // parar projeto, sem reduzir memória de projeto, sem reiniciar nada.
-    const preflightResources = await evaluateHostResources(run);
-    if (!preflightResources.evaluation.safeToBuild) {
-      record("resource-preflight", "failed", preflightResources.evaluation.reason);
+    // Antes de QUALQUER build/install: mede RAM, swap, load e disco. Se a
+    // pressão for TRANSITÓRIA, espera o host normalizar (cooldown); se for
+    // HARD (disco, leitura de métrica, memória crítica), aborta na hora.
+    // Em nenhum caso o rollout para/reduz/reinicia projeto para liberar
+    // recurso.
+    const preflightWait = await waitForResources("resource-preflight");
+    if (!preflightWait.ok) {
+      record("resource-preflight", "failed", preflightWait.evaluation.reason);
       throw new Error(
-        `Rollout adiado: recursos insuficientes para compilar o Core com segurança (${preflightResources.evaluation.reason}). ` +
+        `Rollout adiado: recursos insuficientes para compilar o Core com segurança (${preflightWait.evaluation.reason}). ` +
           "Os projetos em produção não foram tocados.",
       );
     }
-    record("resource-preflight", "ok", preflightResources.evaluation.reason);
+    record("resource-preflight", "ok", preflightWait.evaluation.reason);
 
     // ---------------------------------------------------------------- snapshot before
     snapshotBefore = await captureProjectSnapshot({ projects: config.projects, run, now });
@@ -992,15 +1054,16 @@ async function executeRollout({
     buildEnvVars = buildEnv({ buildHeapMb: thresholds.buildHeapMb });
 
     /**
-     * Roda um passo de build/install: revalida os recursos do host (e aborta
-     * se a condição piorou), aplica nice/ionice e o teto de heap.
+     * Roda um passo de build/install: AGUARDA os recursos ficarem seguros
+     * (cooldown: pressão transitória passa sozinha), aplica nice/ionice e o
+     * teto de heap.
      */
     const runBuildStep = async ({ stageId, command, args, cwd, timeoutMs }) => {
-      const resources = await evaluateHostResources(run);
-      if (!resources.evaluation.safeToBuild) {
-        record(stageId, "failed", `recursos insuficientes: ${resources.evaluation.reason}`);
+      const wait = await waitForResources(stageId);
+      if (!wait.ok) {
+        record(stageId, "failed", `recursos insuficientes: ${wait.evaluation.reason}`);
         throw new Error(
-          `Rollout adiado: recursos insuficientes para compilar o Core com segurança (${resources.evaluation.reason}). ` +
+          `Rollout adiado: recursos insuficientes para compilar o Core com segurança (${wait.evaluation.reason}). ` +
             "Os projetos em produção não foram tocados.",
         );
       }
@@ -1169,6 +1232,25 @@ async function executeRollout({
     }
     record("compare-projects", "ok", "containers de projeto idênticos");
 
+    // ---------------------------------------------------------------- git final
+    // O alvo tem que terminar NA BRANCH original, no commit candidato. Se
+    // estiver em detached HEAD, o rollout não é considerado concluído.
+    const finalGit = await verifyTargetGitState({
+      targetRepoRoot,
+      expectedBranch: state.previousBranch,
+      expectedCommit: state.candidateCommit,
+      run,
+    });
+    state.finalGitState = { branch: finalGit.branch, commit: finalGit.commit, ok: finalGit.ok };
+    if (!finalGit.ok) {
+      record("git-verify", "failed", finalGit.problems.join("; "));
+      throw new Error(
+        `estado final do Git do alvo inválido: ${finalGit.problems.join("; ")}. ` +
+          "O rollout não é considerado concluído (o alvo não pode ficar em detached HEAD).",
+      );
+    }
+    record("git-verify", "ok", `${finalGit.branch} @ ${String(finalGit.commit).slice(0, 8)}`);
+
     // ---------------------------------------------------------------- liberar worker
     try {
       fs.rmSync(config.drainFilePath, { force: true });
@@ -1206,17 +1288,20 @@ async function executeRollout({
           thresholds,
           readResources,
           resourceProvider,
-        })
-      : {
+          previousBranch: state.previousBranch,
+          allowedPaths: state.worktreeModifiedAfterInstall ?? [],
+          waitConfig,
+          sleep,
+        })      : {
           ok: false,
           skipped: true,
           reason: "o checkout alvo não foi atualizado (abortado antes do git update): nada a reverter",
           steps: [],
         };
     state.rollback = rollback;
-    if (rollback.deferred) {
-      state.recoveryRequired = rollback.status === "RECOVERY_REQUIRED";
-      state.recoveryStatus = rollback.status;
+    if (rollback.deferred || rollback.status) {
+      state.recoveryRequired = rollback.recoveryRequired === true || rollback.status === "RECOVERY_REQUIRED";
+      state.recoveryStatus = rollback.status ?? null;
       state.recoveryCritical = rollback.critical === true;
     }
 
@@ -1272,53 +1357,96 @@ async function rollbackCore({
   thresholds = null,
   readResources = null,
   resourceProvider = null,
+  previousBranch = null,
+  allowedPaths = [],
+  waitConfig = null,
+  sleep = defaultSleep,
 }) {
   if (!previousCommit) {
     return { ok: false, reason: "commit anterior desconhecido" };
   }
   const { targetRepoRoot } = resolveRoots(config);
   const limits = thresholds ?? readThresholds();
+  const wait = waitConfig ?? readWaitConfig();
   const readHost =
     readResources ?? ((opts) => readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider }));
   const steps = [];
 
-  /** Recuperação adiada: sem build, sem restart de PM2. */
-  const deferred = (reason, detail) => {
+  /**
+   * Recuperação adiada: sem build, sem restart de PM2 - mas o Git do alvo
+   * volta para a BRANCH original no commit anterior (nunca detached HEAD).
+   */
+  const deferred = async (reason) => {
     const restore = restoreArtifacts({ snapshot: artifactSnapshot, targetRepoRoot });
     steps.push({ step: "restore-artifacts", code: restore.code, detail: restore.detail });
+
+    // Git: branch + commit (sem tocar no remoto).
+    const gitRestore = await restoreTargetGitState({
+      targetRepoRoot,
+      previousBranch,
+      previousCommit,
+      allowedPaths,
+      run,
+    });
+    steps.push({ step: "restore-git", code: gitRestore.ok ? 0 : 1, detail: gitRestore.reason ?? null });
+
     const status = pm2Restarted ? "RECOVERY_REQUIRED" : "RECOVERY_DEFERRED";
+    const gitNote = gitRestore.ok
+      ? `Git do alvo restaurado: ${gitRestore.branch} @ ${String(gitRestore.commit).slice(0, 8)}.`
+      : `Git do alvo NÃO pôde ser restaurado automaticamente: ${gitRestore.reason}.`;
     const message = pm2Restarted
       ? `Core pode estar com versão inconsistente após o restart do PM2; recuperação ADIADA por pressão de recursos (${reason}). ` +
         "Os projetos de produção NÃO foram tocados e não serão sacrificados para recuperar o painel do Korrelo. " +
-        "Rebuild + restart do Core serão necessários quando o host tiver folga."
+        `Rebuild + restart do Core serão necessários quando o host tiver folga. ${gitNote}`
       : `Core em execução permaneceu na versão anterior; rebuild de recuperação adiado por pressão de recursos (${reason}). ` +
-        "Nenhum build foi iniciado e o PM2 não foi reiniciado. Os projetos de produção não foram tocados.";
+        `Nenhum build foi iniciado e o PM2 não foi reiniciado. Os projetos de produção não foram tocados. ${gitNote}`;
     return {
       ok: false,
       deferred: true,
-      critical: pm2Restarted,
-      status,
-      recoveryRequired: pm2Restarted,
+      critical: pm2Restarted || !gitRestore.ok,
+      status: gitRestore.ok ? status : "RECOVERY_REQUIRED",
+      recoveryRequired: pm2Restarted || !gitRestore.ok,
       reason: message,
+      git: gitRestore,
       steps,
     };
   };
 
-  // 1) O checkout do alvo volta para o commit anterior (barato e seguro).
-  const checkout = await run("git", ["-C", targetRepoRoot, "checkout", previousCommit], {
-    cwd: targetRepoRoot,
-    timeoutMs: 60_000,
+  // 1) O checkout do alvo volta para a BRANCH original no commit anterior
+  //    (nunca detached HEAD; o remoto nunca é tocado).
+  const gitRestore = await restoreTargetGitState({
+    targetRepoRoot,
+    previousBranch,
+    previousCommit,
+    allowedPaths,
+    run,
   });
-  steps.push({ step: "git-checkout", code: checkout.code });
-  if (checkout.code !== 0) {
-    return { ok: false, reason: `git checkout falhou: ${checkout.stderr.trim()}`, steps };
+  steps.push({ step: "restore-git", code: gitRestore.ok ? 0 : 1, detail: gitRestore.reason ?? null });
+  if (!gitRestore.ok) {
+    return {
+      ok: false,
+      critical: true,
+      status: "RECOVERY_REQUIRED",
+      recoveryRequired: true,
+      reason: `Git do alvo não pôde ser restaurado automaticamente: ${gitRestore.reason}`,
+      git: gitRestore,
+      steps,
+    };
   }
 
-  // 2) Recursos: sem folga, NÃO se compila e NÃO se reinicia o PM2.
-  const resources = await readHost({ run });
-  const evaluation = evaluateResources({ resources, thresholds: limits });
-  if (!evaluation.safeToBuild) {
-    const result = deferred(evaluation.reason);
+  // 2) Recursos: o rebuild só começa quando o host tem folga. A espera é
+  //    LIMITADA (mesmo mecanismo do rollout) - se não normalizar, a
+  //    recuperação é adiada (nunca se pressiona Mesatta para o Core).
+  const resourcesWait = await waitForSafeResources({
+    readHost: () => readHost({ run }),
+    thresholds: limits,
+    waitConfig: wait,
+    label: "rollback-rebuild",
+    sleep,
+    log,
+  });
+  if (!resourcesWait.ok) {
+    const result = await deferred(resourcesWait.evaluation.reason);
     log(`[rollout] ${result.status}: ${result.reason}`);
     return result;
   }
@@ -1326,10 +1454,16 @@ async function rollbackCore({
   // 3) Rebuild sequencial (com nice/heap). Os recursos são reavaliados
   //    antes de cada build: se a condição piorar, o rebuild para.
   for (const workspace of ["packages/shared-types", "apps/api", "apps/web"]) {
-    const stepResources = await readHost({ run });
-    const stepEvaluation = evaluateResources({ resources: stepResources, thresholds: limits });
-    if (!stepEvaluation.safeToBuild) {
-      const result = deferred(stepEvaluation.reason);
+    const stepWait = await waitForSafeResources({
+      readHost: () => readHost({ run }),
+      thresholds: limits,
+      waitConfig: wait,
+      label: `rollback-${workspace}`,
+      sleep,
+      log,
+    });
+    if (!stepWait.ok) {
+      const result = await deferred(stepWait.evaluation.reason);
       log(`[rollout] ${result.status}: ${result.reason}`);
       return result;
     }

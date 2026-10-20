@@ -132,6 +132,8 @@ describe("rollout - rollback resource-safe e npm ci", () => {
           }
           return { code: 0, stdout: "", stderr: "" };
         }
+        if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--is-inside-work-tree") return { code: 0, stdout: "true\n", stderr: "" };
+        if (gitArgs[0] === "branch" && gitArgs[1] === "--show-current") return { code: 0, stdout: "main\n", stderr: "" };
         if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--abbrev-ref") return { code: 0, stdout: "main\n", stderr: "" };
         if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--verify") return { code: 0, stdout: "c2c2c2c\n", stderr: "" };
         if (gitArgs[0] === "rev-parse") return { code: 0, stdout: "c1c1c1c\n", stderr: "" };
@@ -211,6 +213,15 @@ describe("rollout - rollback resource-safe e npm ci", () => {
     };
   }
 
+  /** Cooldown curto e sem dormir de verdade (o teste não espera 10s). */
+  const TEST_WAIT = { intervalSec: 1, timeoutSec: 2 };
+  const instantSleep = async () => undefined;
+
+  /** Rollout de teste: cooldown curto e sleep instantâneo. */
+  function runRollout(options: Record<string, unknown>) {
+    return rolloutLib.executeRollout({ sleep: instantSleep, waitConfig: TEST_WAIT, ...options });
+  }
+
   function unwrap(call: Call): { command: string; args: string[] } {
     let command = call.command;
     let args = call.args;
@@ -235,7 +246,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
 
   it("1) pressão ANTES do git update: nenhum rollback (nada foi alterado)", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: reader([LOW_RESOURCES]),
@@ -254,7 +265,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
     const run = makeRunner({ buildFails: true });
     // Leituras: preflight, install, build-shared, build-api (falha) e o
     // rollback (pressão).
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: reader([OK_RESOURCES, OK_RESOURCES, OK_RESOURCES, OK_RESOURCES, LOW_RESOURCES]),
@@ -275,7 +286,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
 
   it("3) PM2 antigo ainda executando: o rollback não reinicia o PM2", async () => {
     const run = makeRunner({ buildFails: true });
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: reader([OK_RESOURCES, OK_RESOURCES, OK_RESOURCES, OK_RESOURCES, LOW_RESOURCES]),
@@ -290,7 +301,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
 
   it("4) rollback pós-PM2 também respeita a segurança dos projetos", async () => {
     const run = makeRunner({ healthFails: true });
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       // O PM2 restart acontece; a pressão aparece no rollback.
@@ -320,7 +331,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
 
   it("5) falta de recurso durante o recovery nunca toca o Docker dos projetos", async () => {
     const run = makeRunner({ healthFails: true });
-    await rolloutLib.executeRollout({
+    await runRollout({
       config: makeConfig(),
       run,
       readResources: reader([OK_RESOURCES, OK_RESOURCES, OK_RESOURCES, OK_RESOURCES, OK_RESOURCES, LOW_RESOURCES]),
@@ -335,7 +346,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
 
   it("6) Mesatta tem prioridade sobre a recuperação do Core", async () => {
     const run = makeRunner({ healthFails: true });
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: reader([OK_RESOURCES, OK_RESOURCES, OK_RESOURCES, OK_RESOURCES, OK_RESOURCES, LOW_RESOURCES]),
@@ -352,7 +363,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
 
   it("7) o install usa npm ci", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: reader([OK_RESOURCES]),
@@ -365,7 +376,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
 
   it("8) npm install NÃO aparece no rollout", async () => {
     const run = makeRunner();
-    await rolloutLib.executeRollout({
+    await runRollout({
       config: makeConfig(),
       run,
       readResources: reader([OK_RESOURCES]),
@@ -382,7 +393,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
     const config = makeConfig();
     fs.rmSync(path.join(config.repoRoot, "package-lock.json"));
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config,
       run,
       readResources: reader([OK_RESOURCES]),
@@ -399,7 +410,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
   it("10) lockfile modificado após o install: detectado e reportado, nunca descartado", async () => {
     const config = makeConfig();
     const run = makeRunner({ lockModifiedAfterInstall: true });
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config,
       run,
       readResources: reader([OK_RESOURCES]),
@@ -432,7 +443,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
     });
 
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config,
       run,
       readResources: reader([OK_RESOURCES]),
@@ -447,7 +458,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
   it("12) o dry-run continua read-only (nenhum lock, drain, status ou backup)", async () => {
     const config = makeConfig();
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config,
       run,
       dryRun: true,
@@ -464,7 +475,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
 
   it("13) o resource guard continua funcionando (pressão aborta antes do install)", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: reader([LOW_RESOURCES]),
@@ -477,7 +488,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
 
   it("14) fluxo normal com recursos suficientes continua completo", async () => {
     const run = makeRunner();
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run,
       readResources: reader([OK_RESOURCES]),
