@@ -103,7 +103,9 @@ describe("rollout - rollback resource-safe e npm ci", () => {
       lockModifiedAfterInstall?: boolean;
     } = {},
   ) {
-    let healthAlreadyFailed = false;
+    // Contador de restarts do PM2: o health da API falha durante a fase do
+    // rollout e volta a funcionar na fase do rollback (2o restart).
+    let pm2Restarts = 0;
     let installDone = false;
     return async (
       command: string,
@@ -196,11 +198,15 @@ describe("rollout - rollback resource-safe e npm ci", () => {
 
       if (realCommand === "curl") {
         const url = String(realArgs[realArgs.length - 1] ?? "");
-        if (options.healthFails && url.includes("3001") && !healthAlreadyFailed) {
-          healthAlreadyFailed = true;
+        if (options.healthFails && url.includes("3001") && pm2Restarts < 2) {
           return { code: 7, stdout: "", stderr: "falhou" };
         }
         return { code: 0, stdout: "ok", stderr: "" };
+      }
+
+      if (realCommand === "pm2") {
+        if (realArgs[0] === "restart") pm2Restarts += 1;
+        return { code: 0, stdout: "", stderr: "" };
       }
 
       return { code: 0, stdout: "", stderr: "" };
@@ -220,10 +226,17 @@ describe("rollout - rollback resource-safe e npm ci", () => {
   /** Cooldown curto e sem dormir de verdade (o teste não espera 10s). */
   const TEST_WAIT = { intervalSec: 1, timeoutSec: 2 };
   const instantSleep = async () => undefined;
+  /** Janela de health curta (o rollout nao espera 60s nos testes). */
+  const TEST_HEALTH = { timeoutSec: 2, intervalSec: 1, initialDelaySec: 0 };
 
   /** Rollout de teste: cooldown curto e sleep instantâneo. */
   function runRollout(options: Record<string, unknown>) {
-    return rolloutLib.executeRollout({ sleep: instantSleep, waitConfig: TEST_WAIT, ...options });
+    return rolloutLib.executeRollout({
+      sleep: instantSleep,
+      waitConfig: TEST_WAIT,
+      healthConfig: TEST_HEALTH,
+      ...options,
+    });
   }
 
   function unwrap(call: Call): { command: string; args: string[] } {

@@ -368,7 +368,15 @@ describe("rollout - executor", () => {
    * quebrou uma suite inteira no CI).
    */
   function runRollout(options: Record<string, unknown>) {
-    return rolloutLib.executeRollout({ resourceProvider: safeResourceProvider(), ...options });
+    return rolloutLib.executeRollout({
+      resourceProvider: safeResourceProvider(),
+      // Sleep instantâneo e janelas curtas: o rollout de teste não espera 60s
+      // de health nem 10s de cooldown.
+      sleep: async () => undefined,
+      waitConfig: { intervalSec: 1, timeoutSec: 2 },
+      healthConfig: { timeoutSec: 2, intervalSec: 1, initialDelaySec: 0 },
+      ...options,
+    });
   }
   let tmpDir: string;
   let repoRoot: string;
@@ -417,7 +425,9 @@ describe("rollout - executor", () => {
     inspectOverride?: Record<string, unknown>;
   } = {}) {
     const calls: { command: string; args: string[] }[] = [];
-    let healthAlreadyFailed = false;
+    // Contador de restarts do PM2: o health da API falha durante a fase do
+    // rollout e volta a responder na fase do rollback (2o restart).
+    let pm2Restarts = 0;
     let inspectRound = 0;
     const run = async (command: string, args: string[] = []): Promise<RunResult> => {
       calls.push({ command, args });
@@ -506,13 +516,15 @@ describe("rollout - executor", () => {
         return overrides.migrationFails ? { code: 1, stdout: "", stderr: "migration falhou" } : { code: 0, stdout: "", stderr: "" };
       }
 
-      if (realCommand === "pm2") return { code: 0, stdout: "", stderr: "" };
+      if (realCommand === "pm2") {
+          if (realArgs[0] === "restart") pm2Restarts += 1;
+          return { code: 0, stdout: "", stderr: "" };
+        }
 
       if (command === "curl") {
-        if (overrides.healthFails && String(args[args.length - 1]).includes("3001") && !healthAlreadyFailed) {
+        if (overrides.healthFails && String(args[args.length - 1]).includes("3001") && pm2Restarts < 2) {
           // Só a PRIMEIRA checagem de health falha (simula o Core novo
           // quebrado; o rollback, com o Core antigo, responde de novo).
-          healthAlreadyFailed = true;
           return { code: 7, stdout: "", stderr: "falhou" };
         }
         return { code: 0, stdout: "ok", stderr: "" };

@@ -115,7 +115,9 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
   /** Runner falso: git/sqlite/docker/curl/etc. e probes de nice/ionice. */
   function makeRunner(options: { nice?: boolean; ionice?: boolean; healthFails?: boolean } = {}) {
-    let healthAlreadyFailed = false;
+    // Contador de restarts do PM2: o health da API falha durante a fase do
+    // rollout e volta a funcionar na fase do rollback (2o restart).
+    let pm2Restarts = 0;
     return async (
       command: string,
       args: string[] = [],
@@ -198,11 +200,15 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
 
       if (command === "curl") {
         const url = String(args[args.length - 1] ?? "");
-        if (options.healthFails && url.includes("3001") && !healthAlreadyFailed) {
-          healthAlreadyFailed = true;
+        if (options.healthFails && url.includes("3001") && pm2Restarts < 2) {
           return { code: 7, stdout: "", stderr: "falhou" };
         }
         return { code: 0, stdout: "ok", stderr: "" };
+      }
+
+      if (command === "pm2") {
+        if (args[0] === "restart") pm2Restarts += 1;
+        return { code: 0, stdout: "", stderr: "" };
       }
 
       return { code: 0, stdout: "", stderr: "" };
@@ -222,10 +228,17 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
   /** Cooldown curto e sem dormir de verdade (o teste não espera 10s). */
   const TEST_WAIT = { intervalSec: 1, timeoutSec: 2 };
   const instantSleep = async () => undefined;
+  /** Janela de health curta (o rollout nao espera 60s nos testes). */
+  const TEST_HEALTH = { timeoutSec: 2, intervalSec: 1, initialDelaySec: 0 };
 
   /** Rollout de teste: cooldown curto e sleep instantâneo. */
   function runRollout(options: Record<string, unknown>) {
-    return rolloutLib.executeRollout({ sleep: instantSleep, waitConfig: TEST_WAIT, ...options });
+    return rolloutLib.executeRollout({
+      sleep: instantSleep,
+      waitConfig: TEST_WAIT,
+      healthConfig: TEST_HEALTH,
+      ...options,
+    });
   }
 
   /** Desembrulha nice/ionice: devolve o comando real e seus argumentos. */

@@ -251,6 +251,8 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   const TEST_WAIT = { intervalSec: 1, timeoutSec: 5 };
   const instantSleep = async () => undefined;
+  /** Janela de health curta (o rollout nao espera 60s nos testes). */
+  const TEST_HEALTH = { timeoutSec: 2, intervalSec: 1, initialDelaySec: 0 };
 
   /**
    * Rollout de teste: SEMPRE com métricas de recurso FIXAS.
@@ -265,6 +267,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
       resourceProvider: safeResourceProvider(),
       sleep: instantSleep,
       waitConfig: TEST_WAIT,
+      healthConfig: TEST_HEALTH,
       ...options,
     });
   }

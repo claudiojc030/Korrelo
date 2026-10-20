@@ -323,6 +323,31 @@ cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
 pm2 restart ecosystem.config.js
 ```
 
+#### Health do Core após o restart (aguarda a API subir)
+
+Depois do `pm2 restart korrelo-api` / `korrelo-web`, o rollout **aguarda a
+API ficar saudável** em vez de consultar o health uma vez só: nos primeiros
+segundos a API ainda não está escutando (ECONNREFUSED) e isso **não** é
+prova de que o Core quebrou.
+
+```
+restart -> espera o delay inicial -> health -> falhou -> espera -> health ...
+       -> só declara falha se a API continuar ruim durante TODA a janela
+```
+
+Defaults (configuráveis por env):
+
+| env | default | o que é |
+| --- | --- | --- |
+| `KORRELO_ROLLOUT_HEALTH_TIMEOUT_SEC` | **60 s** | janela total de espera pelo health |
+| `KORRELO_ROLLOUT_HEALTH_INTERVAL_SEC` | **2 s** | intervalo entre as checagens |
+| `KORRELO_ROLLOUT_HEALTH_INITIAL_DELAY_SEC` | **2 s** | espera antes da 1ª checagem (o PM2 ainda está religando) |
+
+Falhas **transitórias** (conexão recusada, timeout, socket reset, 502/503/504,
+API ainda não escutando) mantêm a espera — nunca são tratadas como sucesso.
+O **rollback usa a mesma estratégia**: um recovery não é marcado como falho
+porque a API ainda não voltou.
+
 ### Rollout seguro (recomendado em produção)
 
 O script `scripts/rollout-korrelo.sh` faz o rollout do Core com as

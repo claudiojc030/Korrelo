@@ -91,6 +91,8 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       resourceProvider: safeResourceProvider(),
       sleep: async () => undefined,
       waitConfig: { intervalSec: 1, timeoutSec: 2 },
+      // Janela de health curta: o teste não espera 60s pelo Core subir.
+      healthConfig: { timeoutSec: 2, intervalSec: 1, initialDelaySec: 0 },
       ...options,
     });
   }
@@ -293,7 +295,9 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
 
     /** Runner híbrido: Git de verdade, o resto fake. */
     function makeRunner(calls: Call[], options: { healthFails?: boolean } = {}) {
-      let healthAlreadyFailed = false;
+    // Contador de restarts do PM2: o health da API falha durante a fase do
+    // rollout e volta a responder na fase do rollback (2o restart).
+    let pm2Restarts = 0;
       return async (command: string, args: string[] = [], opts: { cwd?: string } = {}): Promise<RunResult> => {
         calls.push({ command, args, cwd: opts.cwd });
 
@@ -343,14 +347,18 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
 
         if (command === "curl") {
           const url = String(args[args.length - 1] ?? "");
-          if (options.healthFails && url.includes("3001") && !healthAlreadyFailed) {
-            healthAlreadyFailed = true;
+          if (options.healthFails && url.includes("3001") && pm2Restarts < 2) {
             return { code: 7, stdout: "", stderr: "falhou" };
           }
           return { code: 0, stdout: "ok", stderr: "" };
         }
 
-        // npm, npx, pm2, chmod, node: tudo falso.
+        if (command === "pm2") {
+          if (args[0] === "restart") pm2Restarts += 1;
+          return { code: 0, stdout: "", stderr: "" };
+        }
+
+        // npm, npx, chmod, node: tudo falso.
         return { code: 0, stdout: "", stderr: "" };
       };
     }

@@ -27,6 +27,7 @@ const {
 const { acquireLock, releaseLock, defaultLockPath } = require("./self-update-lock.cjs");
 const { captureArtifacts, restoreArtifacts } = require("./artifact-backup.cjs");
 const { checkBuildToolchain, formatCommandFailure } = require("./toolchain.cjs");
+const { readHealthConfig, waitForHealthyEndpoint } = require("./health-check.cjs");
 const {
   readThresholds,
   readWaitConfig,
@@ -733,6 +734,7 @@ async function executeRollout({
   resourceProvider = null,
   sleep = defaultSleep,
   waitConfig: waitConfigOverride = null,
+  healthConfig: healthConfigOverride = null,
 }) {
   const startedAt = new Date();
   const stages = [];
@@ -761,6 +763,10 @@ async function executeRollout({
 
   const thresholds = readThresholds();
   const waitConfig = waitConfigOverride ?? readWaitConfig();
+  // Janela de health do Core (depois do restart do PM2). O rollback usa a
+  // MESMA janela - é o que evita o rollback ser marcado como falho só porque
+  // a API ainda não estava escutando.
+  const healthConfig = healthConfigOverride ?? readHealthConfig();
 
   /** Leitor de recursos (injetável: provider real em produção, fake nos testes). */
   const readHost =
@@ -1227,19 +1233,40 @@ async function executeRollout({
     record("pm2-restart", "ok", config.pm2Apps.join(", "));
 
     // ---------------------------------------------------------------- health do Core
-    const apiHealth = await run("curl", ["-fsS", "--max-time", "10", config.apiHealthUrl], { timeoutMs: 20_000 });
-    if (apiHealth.code !== 0) {
-      throw new Error(`health da API falhou: ${config.apiHealthUrl}`);
+    // O Core foi reiniciado: a API (e o web) precisam de alguns segundos
+    // para voltar a escutar. Uma conexão recusada nos primeiros segundos é
+    // TRANSIITÓRIA, não prova de que o Core quebrou - por isso o health é
+    // polled durante a janela configurada (o timeout total decide).
+    const apiHealth = await waitForHealthyEndpoint({
+      url: config.apiHealthUrl,
+      label: "pm2-health: API",
+      run,
+      log,
+      config: healthConfig,
+      sleep,
+    });
+    if (!apiHealth.ok) {
+      record("health-core", "failed", apiHealth.reason);
+      throw new Error(`health da API falhou: ${config.apiHealthUrl}. ${apiHealth.reason}`);
     }
-    const webHealth = await run(
-      "curl",
-      ["-fsS", "-o", "/dev/null", "--max-time", "15", config.webHealthUrl],
-      { timeoutMs: 25_000 },
+
+    const webHealth = await waitForHealthyEndpoint({
+      url: config.webHealthUrl,
+      label: "pm2-health: web",
+      run,
+      log,
+      config: healthConfig,
+      sleep,
+    });
+    if (!webHealth.ok) {
+      record("health-core", "failed", webHealth.reason);
+      throw new Error(`health do web falhou: ${config.webHealthUrl}. ${webHealth.reason}`);
+    }
+    record(
+      "health-core",
+      "ok",
+      `API e web respondendo (API em ${apiHealth.elapsedSec}s, web em ${webHealth.elapsedSec}s)`,
     );
-    if (webHealth.code !== 0) {
-      throw new Error(`health do web falhou: ${config.webHealthUrl}`);
-    }
-    record("health-core", "ok", "API e web respondendo");
 
     // ---------------------------------------------------------------- snapshot after + comparação
     const snapshotAfter = await captureProjectSnapshot({ projects: config.projects, run, now });
@@ -1320,6 +1347,7 @@ async function executeRollout({
           previousBranch: state.previousBranch,
           allowedPaths: state.worktreeModifiedAfterInstall ?? [],
           waitConfig,
+          healthConfig,
           sleep,
         })      : {
           ok: false,
@@ -1389,6 +1417,7 @@ async function rollbackCore({
   previousBranch = null,
   allowedPaths = [],
   waitConfig = null,
+  healthConfig = null,
   sleep = defaultSleep,
 }) {
   if (!previousCommit) {
@@ -1397,6 +1426,8 @@ async function rollbackCore({
   const { targetRepoRoot } = resolveRoots(config);
   const limits = thresholds ?? readThresholds();
   const wait = waitConfig ?? readWaitConfig();
+  // A janela de health do rollback é a mesma do rollout (mesmos env).
+  const healthSettings = healthConfig ?? readHealthConfig();
   const readHost =
     readResources ?? ((opts) => readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider }));
   const steps = [];
@@ -1543,10 +1574,24 @@ async function rollbackCore({
     return { ok: false, reason: "pm2 restart falhou no rollback", steps };
   }
 
-  const health = await run("curl", ["-fsS", "--max-time", "10", config.apiHealthUrl], { timeoutMs: 20_000 });
-  steps.push({ step: "health-api", code: health.code });
-  if (health.code !== 0) {
-    return { ok: false, reason: "health da API falhou após rollback", steps };
+  // O Core acabou de reiniciar: o health é polled (mesma estratégia do
+  // rollout). Sem isso, o rollback era marcado como falho só porque a API
+  // ainda não estava escutando - e o recovery "concluído" era perdido.
+  const health = await waitForHealthyEndpoint({
+    url: config.apiHealthUrl,
+    label: "rollback-health: API",
+    run,
+    log,
+    config: healthSettings,
+    sleep,
+  });
+  steps.push({ step: "health-api", code: health.ok ? 0 : 1, detail: health.reason ?? null });  if (!health.ok) {
+    return {
+      ok: false,
+      reason: `health da API falhou após rollback: ${health.reason}`,
+      git: gitRestore,
+      steps,
+    };
   }
 
   log("[rollout] rollback do Core concluído (projetos não foram tocados)");
