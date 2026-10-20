@@ -59,6 +59,8 @@ export class PrismaProjectRepository implements ProjectRepository {
         runtimeDriftDetected: project.runtimeDriftDetected,
         runtimeDriftDetails: project.runtimeDriftDetails,
         memoryLimitReductionApproved: project.memoryLimitReductionApproved,
+        stagingMemoryLimitMb: project.stagingMemoryLimitMb,
+        stagingHealthTimeoutSeconds: project.stagingHealthTimeoutSeconds,
         createdAt: project.createdAt,
       },
       update: {
@@ -88,6 +90,8 @@ export class PrismaProjectRepository implements ProjectRepository {
         runtimeDriftDetected: project.runtimeDriftDetected,
         runtimeDriftDetails: project.runtimeDriftDetails,
         memoryLimitReductionApproved: project.memoryLimitReductionApproved,
+        stagingMemoryLimitMb: project.stagingMemoryLimitMb,
+        stagingHealthTimeoutSeconds: project.stagingHealthTimeoutSeconds,
       },
     });
     return this.toDomain(row);
@@ -125,6 +129,8 @@ export class PrismaProjectRepository implements ProjectRepository {
     runtimeDriftDetected: boolean;
     runtimeDriftDetails: string | null;
     memoryLimitReductionApproved: boolean;
+    stagingMemoryLimitMb: number | null;
+    stagingHealthTimeoutSeconds: number | null;
     createdAt: Date;
   }): Project {
     return new Project(
@@ -155,6 +161,8 @@ export class PrismaProjectRepository implements ProjectRepository {
       row.runtimeDriftDetected,
       row.runtimeDriftDetails,
       row.memoryLimitReductionApproved,
+      row.stagingMemoryLimitMb,
+      row.stagingHealthTimeoutSeconds,
       row.createdAt,
     );
   }

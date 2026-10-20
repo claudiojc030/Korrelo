@@ -116,6 +116,8 @@ function makeProject(params: {
     false,
     null,
     false,
+    null, // stagingMemoryLimitMb
+    null, // stagingHealthTimeoutSeconds
     new Date(),
   );
 }

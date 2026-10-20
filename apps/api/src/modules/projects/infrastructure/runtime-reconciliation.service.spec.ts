@@ -132,6 +132,8 @@ describe("RuntimeReconciliationService", () => {
       false, // runtimeDriftDetected
       null, // runtimeDriftDetails
       false, // memoryLimitReductionApproved
+      null, // stagingMemoryLimitMb
+      null, // stagingHealthTimeoutSeconds
       new Date(),
     );
   }

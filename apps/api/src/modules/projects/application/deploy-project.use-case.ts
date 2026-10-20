@@ -43,9 +43,22 @@ import { DeployLogger } from "../infrastructure/deploy-logger";
 import { ResourcePreflightService } from "../infrastructure/resource-preflight.service";
 import { DEPLOY_JOB_REPOSITORY, type DeployJobRepository } from "../domain/deploy-job.repository";
 import { DeployJob, type DeployJobStage } from "../domain/deploy-job.entity";
+import { decideStagingHealthTimeout } from "../domain/staging-config";
 import type { HealthcheckConfig } from "../domain/container-orchestrator";
 
 const HEALTH_CHECK_TIMEOUT_MS = 30_000;
+
+/**
+ * Timeout (segundos) da espera de health do container de TESTE.
+ *
+ * O default é o mesmo de sempre (30s). Um projeto pode ter o SEU próprio
+ * timeout - o Mesatta, por exemplo, tem `start_period: 90s` no healthcheck
+ * Docker e o bootstrap do Next numa VPS de 1 vCPU demora mais que 30s.
+ *
+ * Este timeout vale SÓ para o staging: a espera de health da PRODUÇÃO
+ * continua com `HEALTH_CHECK_TIMEOUT_MS`.
+ */
+const DEFAULT_STAGING_HEALTH_TIMEOUT_SECONDS = HEALTH_CHECK_TIMEOUT_MS / 1000;
 
 /** Erro de deploy com a informação de se a produção foi afetada. */
 class DeployFailure extends Error {
@@ -171,8 +184,16 @@ export class DeployProjectUseCase {
         limitSource: plan.effective.source,
         grandfathered: plan.effective.grandfathered,
         stagingLimitMb: plan.stagingLimitMb,
+        stagingLimitSource: plan.stagingLimitSource,
         databaseBudgetTotalMb: plan.databaseBudgetTotalMb,
       });
+      if (plan.stagingLimitNote) {
+        this.deployLogger.log("fetching", context, plan.stagingLimitNote, {
+          stagingLimitMb: plan.stagingLimitMb,
+          stagingLimitSource: plan.stagingLimitSource,
+          productionLimitMb: plan.productionLimitMb,
+        });
+      }
 
       if (plan.requiresExplicitConfirmation) {
         // O admin pediu um limite MENOR que o do container em execução:
@@ -319,13 +340,25 @@ export class DeployProjectUseCase {
         );
 
         await this.setStage(job, "staging-health", context);
+        // O timeout do staging é configurável POR PROJETO (o default é o de
+        // sempre). O da produção não muda.
+        const stagingHealthTimeout = decideStagingHealthTimeout({
+          overrideSeconds: project.stagingHealthTimeoutSeconds,
+          defaultSeconds: DEFAULT_STAGING_HEALTH_TIMEOUT_SECONDS,
+        });
+        if (stagingHealthTimeout.applied) {
+          this.deployLogger.log("staging-health", context, stagingHealthTimeout.note ?? "", {
+            timeoutSeconds: stagingHealthTimeout.seconds,
+            source: stagingHealthTimeout.source,
+          });
+        }
         const stagingHealthy = await this.healthChecker.waitUntilHealthy(
           deployConfig.staging.hostPort,
-          HEALTH_CHECK_TIMEOUT_MS,
+          stagingHealthTimeout.seconds * 1000,
         );
         if (!stagingHealthy) {
           throw new DeployFailure(
-            `Container de teste subiu mas não respondeu em ${HEALTH_CHECK_TIMEOUT_MS / 1000}s. A versão em produção não foi tocada.`,
+            `Container de teste subiu mas não respondeu em ${stagingHealthTimeout.seconds}s. A versão em produção não foi tocada.`,
             false,
           );
         }
@@ -589,6 +622,9 @@ export class DeployProjectUseCase {
           type: db.type as "postgres" | "redis" | "mongodb",
           observedLimitMb: db.memoryLimitMb,
         })),
+      // Configuração de staging DESTE projeto (null = automático). Só o
+      // container de TESTE usa isso - produção e banco não são tocados.
+      stagingOverrideLimitMb: project.stagingMemoryLimitMb,
     });
   }
 

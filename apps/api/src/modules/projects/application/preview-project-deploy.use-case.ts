@@ -11,9 +11,16 @@ import {
   type ContainerInspector,
   type ContainerTruth,
 } from "../infrastructure/docker-container-inspector";
+import { decideStagingHealthTimeout } from "../domain/staging-config";
 
 /** Token do inspetor de container (injetável nos testes). */
 export const CONTAINER_INSPECTOR = Symbol("CONTAINER_INSPECTOR");
+
+/**
+ * Timeout (segundos) da espera de health do container de TESTE - o mesmo
+ * default que o deploy usa. Configurável por projeto.
+ */
+const DEFAULT_STAGING_HEALTH_TIMEOUT_SECONDS = 30;
 
 /**
  * DRY-RUN DO DEPLOY DE PROJETO (read-only).
@@ -77,6 +84,9 @@ export class PreviewProjectDeployUseCase {
           type: db.type as "postgres" | "redis" | "mongodb",
           observedLimitMb: db.memoryLimitMb,
         })),
+      // Configuração de staging DESTE projeto (null = automático). Só o
+      // container de TESTE usa isso - produção e banco não são tocados.
+      stagingOverrideLimitMb: project.stagingMemoryLimitMb,
     });
     const hostResources = await readHostResources({ measureSwapActivity: false });
     const preflight = await this.preflight.check({
@@ -119,6 +129,19 @@ export class PreviewProjectDeployUseCase {
       "O container de TESTE compartilha o volume 'uploads-data' com a produção: " +
         "o staging pode escrever no volume de uploads em produção.",
     );
+
+    // A configuração de staging deste projeto (o que seria aplicado no
+    // container de TESTE) - o mesmo cálculo que o deploy faz.
+    const stagingHealthTimeout = decideStagingHealthTimeout({
+      overrideSeconds: project.stagingHealthTimeoutSeconds,
+      defaultSeconds: DEFAULT_STAGING_HEALTH_TIMEOUT_SECONDS,
+    });
+    if (plan.stagingLimitNote) {
+      warnings.push(plan.stagingLimitNote);
+    }
+    if (stagingHealthTimeout.note) {
+      warnings.push(stagingHealthTimeout.note);
+    }
 
     return {
       dryRun: true,
@@ -171,6 +194,13 @@ export class PreviewProjectDeployUseCase {
         containerName: `${containerName}-staging`,
         hostPort: (project.assignedPort ?? stack.recommendedPort ?? 3000) + 1,
         memoryLimitMb: plan.stagingLimitMb,
+        // De onde veio o limite: configuração do projeto ou rateio automático.
+        memoryLimitSource: plan.stagingLimitSource,
+        memoryLimitApplied: plan.stagingLimitApplied,
+        // Timeout da espera de health do container de TESTE.
+        healthTimeoutSeconds: stagingHealthTimeout.seconds,
+        healthTimeoutSource: stagingHealthTimeout.source,
+        healthTimeoutApplied: stagingHealthTimeout.applied,
         isolated: true,
         // O staging sobe com --no-deps: o Korrelo NUNCA inicia nem recria o
         // banco/volume de produção.

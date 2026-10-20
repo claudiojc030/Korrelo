@@ -1,6 +1,11 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { apiError } from "../../../infrastructure/api-error";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
+import {
+  MAX_STAGING_HEALTH_TIMEOUT_SECONDS,
+  MIN_STAGING_HEALTH_TIMEOUT_SECONDS,
+  MIN_STAGING_MEMORY_LIMIT_MB,
+} from "../domain/staging-config";
 import type { Project } from "../domain/project.entity";
 
 const BRANCH_NAME_PATTERN = /^[A-Za-z0-9._/-]+$/;
@@ -30,6 +35,19 @@ export interface UpdateProjectSettingsInput {
     retries?: number;
     startPeriodSeconds?: number;
   } | null;
+  /**
+   * Limite de memória do container de TESTE (staging) deste projeto, em MB.
+   * undefined = não mexe; null = volta pro rateio automático; número = fixa.
+   * Vale SÓ para o container de teste - produção, banco e outros projetos
+   * não são afetados.
+   */
+  stagingMemoryLimitMb?: number | null;
+  /**
+   * Timeout (segundos) da espera de health do container de TESTE.
+   * undefined = não mexe; null = volta pro default; número = fixa.
+   * Vale SÓ para o staging - a espera de health da produção não muda.
+   */
+  stagingHealthTimeoutSeconds?: number | null;
 }
 
 @Injectable()
@@ -58,6 +76,63 @@ export class UpdateProjectSettingsUseCase {
     if (input.memoryLimitMb !== undefined && input.memoryLimitMb !== null && input.memoryLimitMb < 128) {
       throw new BadRequestException(
         apiError("INVALID_MEMORY_LIMIT", "O limite de memória precisa ser de pelo menos 128 MB (ou vazio pra voltar ao rateio automático)."),
+      );
+    }
+
+    // ------------------------------------------------------------------
+    // Configuração de STAGING (só o container de TESTE).
+    //
+    // Validação CONSERVADORA:
+    // - o limite de staging nunca pode ser menor que o piso de container;
+    // - o limite de staging nunca pode passar do limite de PRODUÇÃO
+    //   (container de teste maior que o app real não faz sentido e aperta a
+    //   VPS): o que o Core conhece da produção é o limite OBSERVADO no
+    //   Docker e, na falta dele, o limite fixo escolhido pelo admin;
+    // - o timeout de health do staging fica entre 10 e 300s.
+    // ------------------------------------------------------------------
+    if (
+      input.stagingMemoryLimitMb !== undefined &&
+      input.stagingMemoryLimitMb !== null &&
+      input.stagingMemoryLimitMb < MIN_STAGING_MEMORY_LIMIT_MB
+    ) {
+      throw new BadRequestException(
+        apiError(
+          "INVALID_STAGING_MEMORY_LIMIT",
+          `O limite de memória do staging precisa ser de pelo menos ${MIN_STAGING_MEMORY_LIMIT_MB} MB ` +
+            "(ou vazio pra voltar ao rateio automático).",
+        ),
+      );
+    }
+
+    const knownProductionLimitMb = project.productionMemoryLimitMb ?? project.memoryLimitMb ?? null;
+    if (
+      input.stagingMemoryLimitMb !== undefined &&
+      input.stagingMemoryLimitMb !== null &&
+      knownProductionLimitMb !== null &&
+      input.stagingMemoryLimitMb > knownProductionLimitMb
+    ) {
+      throw new BadRequestException(
+        apiError(
+          "INVALID_STAGING_MEMORY_LIMIT",
+          `O limite de memória do staging (${input.stagingMemoryLimitMb} MB) não pode passar do limite de ` +
+            `produção do projeto (${knownProductionLimitMb} MB). O staging é um container de TESTE temporário - ` +
+            `dar mais memória a ele do que ao app em produção aperta a VPS sem ganho.`,
+        ),
+      );
+    }
+
+    if (
+      input.stagingHealthTimeoutSeconds !== undefined &&
+      input.stagingHealthTimeoutSeconds !== null &&
+      (input.stagingHealthTimeoutSeconds < MIN_STAGING_HEALTH_TIMEOUT_SECONDS ||
+        input.stagingHealthTimeoutSeconds > MAX_STAGING_HEALTH_TIMEOUT_SECONDS)
+    ) {
+      throw new BadRequestException(
+        apiError(
+          "INVALID_STAGING_HEALTH_TIMEOUT",
+          `O timeout de health do staging precisa ficar entre ${MIN_STAGING_HEALTH_TIMEOUT_SECONDS} e ` +
+            `${MAX_STAGING_HEALTH_TIMEOUT_SECONDS} segundos (ou vazio pra voltar ao default).`,
+        ),
       );
     }
 
@@ -101,6 +176,19 @@ export class UpdateProjectSettingsUseCase {
       updated = updated.withHealthcheckConfig(
         input.healthcheck === null ? null : JSON.stringify(normalizeHealthcheck(input.healthcheck)),
       );
+    }
+    if (input.stagingMemoryLimitMb !== undefined || input.stagingHealthTimeoutSeconds !== undefined) {
+      // undefined = não mexe; null = volta ao automático/default.
+      updated = updated.withStagingConfig({
+        stagingMemoryLimitMb:
+          input.stagingMemoryLimitMb !== undefined
+            ? input.stagingMemoryLimitMb
+            : project.stagingMemoryLimitMb,
+        stagingHealthTimeoutSeconds:
+          input.stagingHealthTimeoutSeconds !== undefined
+            ? input.stagingHealthTimeoutSeconds
+            : project.stagingHealthTimeoutSeconds,
+      });
     }
 
     return this.repository.save(updated);

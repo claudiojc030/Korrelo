@@ -39,6 +39,16 @@ export interface Project {
   previousImage?: string | null;
   /** Healthcheck Docker configurado (JSON serializado). */
   healthcheckConfig?: string | null;
+  /**
+   * Limite de memória do container de TESTE (staging) deste projeto, em MB.
+   * Ausente/null = rateio automático. Vale SÓ para o container de teste.
+   */
+  stagingMemoryLimitMb?: number | null;
+  /**
+   * Timeout (segundos) da espera de health do container de TESTE.
+   * Ausente/null = default. Vale SÓ para o staging.
+   */
+  stagingHealthTimeoutSeconds?: number | null;
   createdAt: string;
 }
 

@@ -55,6 +55,16 @@ model Project {
   // memória de um projeto que está rodando (sem isso, a redução é ignorada
   // e o container continua com o limite atual).
   memoryLimitReductionApproved Boolean @default(false)
+  // --- Configuração de STAGING POR PROJETO ---------------------------
+  // Limite de memória do container de TESTE (staging) deste projeto.
+  // Null = usa o rateio automático (mesmo comportamento de sempre).
+  // Quando definido, vale SÓ para o container de teste: o limite de
+  // produção, o do banco e os de outros projetos NÃO são afetados.
+  stagingMemoryLimitMb Int?
+  // Timeout (segundos) da espera de health do container de TESTE.
+  // Null = usa o default existente (30s). Só vale para o staging: a espera
+  // de health da PRODUÇÃO continua com o default.
+  stagingHealthTimeoutSeconds Int?
   createdAt        DateTime @default(now())
   envVars          EnvVar[]
   managedDatabases ManagedDatabase[]

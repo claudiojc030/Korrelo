@@ -81,7 +81,13 @@ class FakeOrchestrator {
 
 class FakeHealthChecker {
   results: boolean[] = [];
-  async waitUntilHealthy(): Promise<boolean> {
+  /** Timeout (ms) de cada chamada, na ordem em que foram feitas. */
+  timeouts: number[] = [];
+  /** Porta de cada chamada, na ordem em que foram feitas. */
+  ports: number[] = [];
+  async waitUntilHealthy(port?: number, timeoutMs?: number): Promise<boolean> {
+    this.ports.push(port as number);
+    this.timeouts.push(timeoutMs as number);
     return this.results.length > 0 ? (this.results.shift() as boolean) : true;
   }
 }
@@ -194,6 +200,8 @@ describe("DeployProjectUseCase (Wave 2)", () => {
   const deployRecordRepository = new FakeDeployRecordRepository();
   const deployJobRepository = new FakeDeployJobRepository();
   const cloner = new FakeCloner();
+  /** Porta alocada seguinte (a de produção vem antes da do staging). */
+  let nextPort = 3200;
 
   beforeAll(() => {
     tempWorkspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), "korrelo-deploy-"));
@@ -225,7 +233,10 @@ describe("DeployProjectUseCase (Wave 2)", () => {
       cloner,
       { createInstallationToken: async () => ({ token: "t", expiresAt: new Date() }) },
       { findLatest: async () => null },
-      { allocate: async () => 3200 },
+      // Portas sequenciais: a de produção e a do staging são DIFERENTES
+      // (o staging é o container de teste) - é o que permite provar qual
+      // espera de health é a do staging.
+      { allocate: async () => nextPort++ },
       new DockerComposeFileBuilder(),
       deployJobRepository,
       new DeployLogger(),
@@ -287,6 +298,8 @@ describe("DeployProjectUseCase (Wave 2)", () => {
       false, // runtimeDriftDetected
       null, // runtimeDriftDetails
       false, // memoryLimitReductionApproved
+      null, // stagingMemoryLimitMb
+      null, // stagingHealthTimeoutSeconds
       new Date(),
     );
   });
@@ -368,7 +381,6 @@ describe("DeployProjectUseCase (Wave 2)", () => {
   it("o arquivo de ambiente do projeto fica FORA do diretório do projeto", async () => {
     const job = makeJob();
     await useCase.executeJob(job);
-
     const projectDir = path.join(tempWorkspaceDir, "proj-1");
     expect(fs.existsSync(path.join(projectDir, ".env.korrelo"))).toBe(false);
     expect(fs.existsSync(path.join(tempWorkspaceDir, "proj-1-secrets", ".env.korrelo"))).toBe(true);
@@ -399,5 +411,80 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     // O limite de PRODUÇÃO é o observado (1757), não o calculado.
     expect(compose).toContain("mem_limit: 1757m");
     expect(compose).not.toContain("mem_limit: 486m");
+  });
+
+  it("staging por projeto: o limite configurado vale SÓ no container de TESTE", async () => {
+    // Mesatta-like: produção observada em 1757 MB, staging pedido em 600 MB.
+    const current = projectRepository.project as any;
+    projectRepository.project = current
+      .withRuntimeObservation({
+        productionMemoryLimitMb: 1757,
+        runtimeSnapshot: null,
+        grandfathered: true,
+        grandfatheredAt: new Date(),
+        runtimeDriftDetected: false,
+        runtimeDriftDetails: null,
+      })
+      .withStagingConfig({
+        stagingMemoryLimitMb: 600,
+        stagingHealthTimeoutSeconds: 120,
+      });
+
+    const job = makeJob();
+    await useCase.executeJob(job);
+
+    const compose = fs.readFileSync(
+      path.join(tempWorkspaceDir, "proj-1", "docker-compose.korrelo.yml"),
+      "utf-8",
+    );
+    // O container de TESTE recebeu os 600 MB pedidos.
+    expect(compose).toContain("mem_limit: 600m");
+    // A PRODUÇÃO continua em 1757 MB (não foi tocada).
+    expect(compose).toContain("mem_limit: 1757m");
+    // A produção do projeto segue com o limite observado.
+    expect(projectRepository.project?.productionMemoryLimitMb).toBe(1757);
+  });
+
+  it("staging por projeto: o timeout customizado vale SÓ na espera do staging", async () => {
+    const current = projectRepository.project as any;
+    projectRepository.project = current
+      .withRuntimeObservation({
+        productionMemoryLimitMb: 1757,
+        runtimeSnapshot: null,
+        grandfathered: true,
+        grandfatheredAt: new Date(),
+        runtimeDriftDetected: false,
+        runtimeDriftDetails: null,
+      })
+      .withStagingConfig({
+        stagingMemoryLimitMb: 600,
+        stagingHealthTimeoutSeconds: 120,
+      });
+
+    healthChecker.timeouts = [];
+    healthChecker.ports = [];
+    const job = makeJob();
+    await useCase.executeJob(job);
+
+    // A 1ª espera é a do STAGING e usa 120s (o override do projeto).
+    // As portas são alocadas em ordem (produção primeiro, staging depois) e
+    // as esperas de health acontecem na ordem staging -> produção: a 1ª
+    // espera é, portanto, a do container de TESTE, numa porta diferente da
+    // de produção.
+    expect(healthChecker.ports[0]).not.toBe(healthChecker.ports[1]);
+    expect(healthChecker.timeouts[0]).toBe(120_000);
+    // A 2ª é a da PRODUÇÃO e continua com 30s (o override é SÓ do staging).
+    expect(healthChecker.timeouts[1]).toBe(30_000);
+  });
+
+  it("staging por projeto: SEM override, o staging continua com 30s e o automático", async () => {
+    healthChecker.timeouts = [];
+    healthChecker.ports = [];
+    const job = makeJob();
+    await useCase.executeJob(job);
+
+    // Sem override: o default de 30s vale para o staging.
+    expect(healthChecker.timeouts[0]).toBe(30_000);
+    expect(healthChecker.timeouts[1]).toBe(30_000);
   });
 });

@@ -54,6 +54,8 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
   const [branchInput, setBranchInput] = useState("");
   const [diskLimitInput, setDiskLimitInput] = useState("");
   const [memoryLimitInput, setMemoryLimitInput] = useState("");
+  const [stagingMemoryInput, setStagingMemoryInput] = useState("");
+  const [stagingTimeoutInput, setStagingTimeoutInput] = useState("");
   const [healthcheckEnabled, setHealthcheckEnabled] = useState(false);
   const [healthcheckPath, setHealthcheckPath] = useState("/");
   const [healthcheckValues, setHealthcheckValues] = useState({
@@ -72,6 +74,10 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
           setBranchInput(p.deployBranch);
           setDiskLimitInput(p.diskLimitMb ? String(Math.round(p.diskLimitMb / 1024)) : "");
           setMemoryLimitInput(p.memoryLimitMb ? String(p.memoryLimitMb) : "");
+          setStagingMemoryInput(p.stagingMemoryLimitMb ? String(p.stagingMemoryLimitMb) : "");
+          setStagingTimeoutInput(
+            p.stagingHealthTimeoutSeconds ? String(p.stagingHealthTimeoutSeconds) : "",
+          );
           // Healthcheck (Wave 2): o projeto guarda a configuração em JSON.
           try {
             const parsed = p.healthcheckConfig ? JSON.parse(p.healthcheckConfig) : null;
@@ -107,6 +113,8 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
     diskLimitMb?: number | null;
     skipStagingTest?: boolean;
     memoryLimitMb?: number | null;
+    stagingMemoryLimitMb?: number | null;
+    stagingHealthTimeoutSeconds?: number | null;
     healthcheck?: {
       enabled?: boolean;
       path?: string;
@@ -239,6 +247,67 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
             <button
               onClick={() =>
                 updateSettings({ memoryLimitMb: memoryLimitInput.trim() ? Number(memoryLimitInput) : null })
+              }
+              disabled={saving}
+              className="rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {t.common.save}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p className="mb-2 mt-6 text-[13.5px] font-medium text-foreground">{t.projectSettings.stagingMemoryTitle}</p>
+      <p className="mb-2 text-[12.5px] text-muted-foreground">{t.projectSettings.stagingMemoryDescription}</p>
+      <div className="rounded-xl border border-border-subtle bg-surface px-4">
+        <div className="flex items-center justify-between py-4">
+          <div>
+            <p className="text-[13.5px] font-medium text-foreground">{t.projectSettings.stagingMemoryLabel}</p>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t.projectSettings.stagingMemoryHint}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              value={stagingMemoryInput}
+              onChange={(e) => setStagingMemoryInput(e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder={t.projectSettings.stagingMemoryPlaceholder}
+              inputMode="numeric"
+              className="w-24 rounded-md border border-border-subtle bg-transparent px-2.5 py-1.5 text-right font-mono text-[13px] text-foreground outline-none focus:border-accent"
+            />
+            <span className="text-[12.5px] text-muted-foreground">MB</span>
+            <button
+              onClick={() =>
+                updateSettings({
+                  stagingMemoryLimitMb: stagingMemoryInput.trim() ? Number(stagingMemoryInput) : null,
+                })
+              }
+              disabled={saving}
+              className="rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {t.common.save}
+            </button>
+          </div>
+        </div>
+        <div className="flex items-center justify-between py-4">
+          <div>
+            <p className="text-[13.5px] font-medium text-foreground">{t.projectSettings.stagingTimeoutLabel}</p>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t.projectSettings.stagingTimeoutHint}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              value={stagingTimeoutInput}
+              onChange={(e) => setStagingTimeoutInput(e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder={t.projectSettings.stagingTimeoutPlaceholder}
+              inputMode="numeric"
+              className="w-24 rounded-md border border-border-subtle bg-transparent px-2.5 py-1.5 text-right font-mono text-[13px] text-foreground outline-none focus:border-accent"
+            />
+            <span className="text-[12.5px] text-muted-foreground">s</span>
+            <button
+              onClick={() =>
+                updateSettings({
+                  stagingHealthTimeoutSeconds: stagingTimeoutInput.trim()
+                    ? Number(stagingTimeoutInput)
+                    : null,
+                })
               }
               disabled={saving}
               className="rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"

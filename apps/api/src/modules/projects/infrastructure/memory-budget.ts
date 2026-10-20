@@ -33,6 +33,8 @@
  * getMemoryBudgetConfig) porque o hardware de cada instalação é diferente.
  */
 
+import { decideStagingMemoryLimit, type StagingLimitSource } from "../domain/staging-config";
+
 export interface MemoryBudgetConfig {
   /** SO + serviços de base (sshd, cron, journald, fail2ban...). */
   hostReserveMb: number;
@@ -314,6 +316,12 @@ export interface DeploymentMemoryPlan {
   productionLimitMb: number;
   /** Limite do container de staging (temporário). */
   stagingLimitMb: number;
+  /** De onde veio o limite de staging ("project-override" | "automatic"). */
+  stagingLimitSource: StagingLimitSource;
+  /** true quando o override de staging foi usado como configurado. */
+  stagingLimitApplied: boolean;
+  /** Explicação do override de staging (aparece no dry-run/log). */
+  stagingLimitNote: string | null;
   /** Budget TOTAL de banco do projeto. */
   databaseBudgetTotalMb: number;
   /** Limite de cada banco (soma ≤ budget total). */
@@ -343,6 +351,12 @@ export function computeProjectDeploymentPlan(params: {
   isGrandfathered: boolean;
   adminReductionApproved?: boolean;
   databases: DatabaseBudgetInput[];
+  /**
+   * Limite de staging configurado PARA ESTE PROJETO (null = automático).
+   * Vale SÓ para o container de teste: produção, banco e os outros
+   * projetos não são afetados.
+   */
+  stagingOverrideLimitMb?: number | null;
   config?: MemoryBudgetConfig;
 }): DeploymentMemoryPlan {
   return computeDeploymentMemoryPlan(params);
@@ -363,6 +377,12 @@ export function computeDeploymentMemoryPlan(params: {
   adminReductionApproved?: boolean;
   /** Bancos gerenciados do projeto (com o limite observado, se houver). */
   databases: DatabaseBudgetInput[];
+  /**
+   * Limite de staging configurado PARA ESTE PROJETO (null = automático).
+   * Vale SÓ para o container de teste: produção, banco e os outros
+   * projetos não são afetados.
+   */
+  stagingOverrideLimitMb?: number | null;
   config?: MemoryBudgetConfig;
 }): DeploymentMemoryPlan {
   const config = params.config ?? getMemoryBudgetConfig();
@@ -395,11 +415,23 @@ export function computeDeploymentMemoryPlan(params: {
     config,
   });
 
+  // O staging automático: calculado a partir da fatia do projeto (e nunca
+  // maior que o app), mas também pode ser limitado pela folga real.
+  const automaticStagingLimitMb = Math.min(base.stagingLimitMb, effective.effectiveLimitMb);
+  // O override por projeto só pode MUDAR o staging. O limite de produção e
+  // o budget de banco acima já foram calculados e NÃO são tocados aqui.
+  const stagingDecision = decideStagingMemoryLimit({
+    overrideLimitMb: params.stagingOverrideLimitMb ?? null,
+    automaticLimitMb: automaticStagingLimitMb,
+    productionLimitMb: effective.effectiveLimitMb,
+  });
+
   return {
     productionLimitMb: effective.effectiveLimitMb,
-    // O staging é sempre calculado a partir da fatia do projeto (e nunca
-    // maior que o app), mas também pode ser limitado pela folga real.
-    stagingLimitMb: Math.min(base.stagingLimitMb, effective.effectiveLimitMb),
+    stagingLimitMb: stagingDecision.stagingLimitMb,
+    stagingLimitSource: stagingDecision.source,
+    stagingLimitApplied: stagingDecision.applied,
+    stagingLimitNote: stagingDecision.note,
     databaseBudgetTotalMb,
     databaseLimits: databaseBudget.limits,
     effective,

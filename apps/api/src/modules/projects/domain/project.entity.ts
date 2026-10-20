@@ -42,6 +42,8 @@ export class Project {
     public readonly runtimeDriftDetected: boolean,
     public readonly runtimeDriftDetails: string | null,
     public readonly memoryLimitReductionApproved: boolean,
+    public readonly stagingMemoryLimitMb: number | null,
+    public readonly stagingHealthTimeoutSeconds: number | null,
     public readonly createdAt: Date,
   ) {}
 
@@ -74,6 +76,8 @@ export class Project {
       false,
       null,
       false,
+      null,
+      null,
       new Date(),
     );
   }
@@ -107,6 +111,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -140,6 +146,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -178,6 +186,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -211,6 +221,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -244,6 +256,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -277,6 +291,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -310,6 +326,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -343,6 +361,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -376,6 +396,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -410,6 +432,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -444,6 +468,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -478,6 +504,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -515,6 +543,8 @@ export class Project {
       this.runtimeDriftDetected,
       this.runtimeDriftDetails,
       approved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }
@@ -562,6 +592,54 @@ export class Project {
       params.runtimeDriftDetected,
       params.runtimeDriftDetails,
       this.memoryLimitReductionApproved,
+      this.stagingMemoryLimitMb,
+      this.stagingHealthTimeoutSeconds,
+      this.createdAt,
+    );
+  }
+
+  /**
+   * Configuração de STAGING deste projeto (limite de memória e timeout de
+   * health do container de TESTE).
+   *
+   * Isto NÃO toca em produção: o limite de produção, o limite do banco e a
+   * memória de outros projetos seguem exatamente como estavam. O valor só
+   * entra no container de teste.
+   */
+  withStagingConfig(params: {
+    stagingMemoryLimitMb: number | null;
+    stagingHealthTimeoutSeconds: number | null;
+  }): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.repoUrl,
+      this.detectedStack,
+      this.status,
+      this.assignedPort,
+      this.containerName,
+      this.terminalEnabled,
+      this.databaseEnabled,
+      this.customDomain,
+      this.domainSslStatus,
+      this.autoDeployEnabled,
+      this.deployBranch,
+      this.diskLimitMb,
+      this.skipStagingTest,
+      this.memoryLimitMb,
+      this.lastDeployStatus,
+      this.currentImage,
+      this.previousImage,
+      this.healthcheckConfig,
+      this.productionMemoryLimitMb,
+      this.runtimeSnapshot,
+      this.grandfathered,
+      this.grandfatheredAt,
+      this.runtimeDriftDetected,
+      this.runtimeDriftDetails,
+      this.memoryLimitReductionApproved,
+      params.stagingMemoryLimitMb,
+      params.stagingHealthTimeoutSeconds,
       this.createdAt,
     );
   }

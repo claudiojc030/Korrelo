@@ -24,4 +24,15 @@ export class UpdateProjectSettingsDto {
     retries?: number;
     startPeriodSeconds?: number;
   };
+  /**
+   * Limite de memória do container de TESTE (staging) deste projeto, em MB.
+   * null = volta pro rateio automático. Vale SÓ para o container de teste:
+   * produção, banco e outros projetos não são afetados.
+   */
+  stagingMemoryLimitMb?: number | null;
+  /**
+   * Timeout (segundos) da espera de health do container de TESTE.
+   * null = volta pro default. Vale SÓ para o staging.
+   */
+  stagingHealthTimeoutSeconds?: number | null;
 }

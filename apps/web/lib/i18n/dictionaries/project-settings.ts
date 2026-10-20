@@ -28,6 +28,16 @@ export interface ProjectSettingsDict {
   memoryLimitLabel: string;
   memoryLimitHint: string;
   memoryLimitPlaceholder: string;
+  stagingMemoryTitle: string;
+  stagingMemoryDescription: string;
+  stagingMemoryLabel: string;
+  stagingMemoryHint: string;
+  stagingMemoryPlaceholder: string;
+  stagingTimeoutTitle: string;
+  stagingTimeoutDescription: string;
+  stagingTimeoutLabel: string;
+  stagingTimeoutHint: string;
+  stagingTimeoutPlaceholder: string;
   healthcheckTitle: string;
   healthcheckDescription: string;
   healthcheckEnabledLabel: string;
@@ -70,6 +80,20 @@ export const projectSettingsEn: ProjectSettingsDict = {
   memoryLimitLabel: "Fixed limit",
   memoryLimitHint: "Leave empty to go back to the automatic split. Applies on the next deploy.",
   memoryLimitPlaceholder: "512",
+  stagingMemoryTitle: "Test container memory",
+  stagingMemoryDescription:
+    "The test container (staging) gets a share of the VPS's RAM by default. Set a value here when your app needs more room to boot than the automatic split gives it - a slow first start on a single-vCPU VPS usually means the test container ran out of memory. This only affects the test container: production, the database and the other projects keep their own limits.",
+  stagingMemoryLabel: "Test container limit",
+  stagingMemoryHint:
+    "Leave empty to go back to the automatic split. Can't be higher than the production limit, and never below 128 MB. Applies on the next deploy.",
+  stagingMemoryPlaceholder: "600",
+  stagingTimeoutTitle: "Test container health timeout",
+  stagingTimeoutDescription:
+    "How long Korrelo waits for the test container to answer before giving up on the deploy (the production version is not touched). Raise it for apps that take a while to boot on a small VPS - the default is 30 seconds.",
+  stagingTimeoutLabel: "Wait time",
+  stagingTimeoutHint:
+    "Leave empty to use the default (30s). Between 10 and 300 seconds. Applies on the next deploy.",
+  stagingTimeoutPlaceholder: "120",
   healthcheckTitle: "Container healthcheck",
   healthcheckDescription:
     "Optional. When enabled, Docker checks this path on the container and restarts it only after several consecutive failures (with a generous start period, so a slow app isn't killed while booting).",
@@ -113,6 +137,20 @@ export const projectSettingsPt: ProjectSettingsDict = {
   memoryLimitLabel: "Limite fixo",
   memoryLimitHint: "Deixe vazio pra voltar ao rateio automático. Vale a partir do próximo deploy.",
   memoryLimitPlaceholder: "512",
+  stagingMemoryTitle: "Memória do container de teste",
+  stagingMemoryDescription:
+    "Por padrão, o container de teste (staging) recebe uma fatia da RAM da VPS. Defina um valor aqui quando seu app precisa de mais espaço pra subir do que o rateio automático dá - um boot lento numa VPS de 1 vCPU quase sempre significa que o container de teste ficou sem memória. Isso afeta só o container de teste: a produção, o banco e os outros projetos mantêm seus limites.",
+  stagingMemoryLabel: "Limite do container de teste",
+  stagingMemoryHint:
+    "Deixe vazio pra voltar ao rateio automático. Não pode passar do limite de produção, nem ficar abaixo de 128 MB. Vale a partir do próximo deploy.",
+  stagingMemoryPlaceholder: "600",
+  stagingTimeoutTitle: "Timeout de health do container de teste",
+  stagingTimeoutDescription:
+    "Quanto tempo o Korrelo espera o container de teste responder antes de desistir do deploy (a versão em produção não é tocada). Aumente para apps que demoram pra subir numa VPS pequena - o padrão é 30 segundos.",
+  stagingTimeoutLabel: "Tempo de espera",
+  stagingTimeoutHint:
+    "Deixe vazio pra usar o padrão (30s). Entre 10 e 300 segundos. Vale a partir do próximo deploy.",
+  stagingTimeoutPlaceholder: "120",
   healthcheckTitle: "Healthcheck do container",
   healthcheckDescription:
     "Opcional. Quando ligado, o Docker checa esse caminho dentro do container e só reinicia a aplicação depois de várias falhas seguidas (com um período de tolerância generoso, pra não matar um app que só demora pra subir).",
