@@ -95,6 +95,18 @@ class FakeDeployProject {
     }
   }
 
+  /**
+   * Reserva de memória do projeto (usada pelo preflight da fila).
+   * Sem este mock o serviço loga um warning em todo job.
+   */
+  async estimateMemoryReservation(): Promise<{
+    productionLimitMb: number;
+    stagingLimitMb: number;
+    databaseBudgetTotalMb: number;
+  }> {
+    return { productionLimitMb: 0, stagingLimitMb: 0, databaseBudgetTotalMb: 0 };
+  }
+
   /** Faz o deploy ficar pendente até o teste liberar. */
   block(): void {
     this.started = new Promise<void>((resolve) => {

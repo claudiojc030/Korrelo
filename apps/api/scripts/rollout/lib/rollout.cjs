@@ -29,6 +29,7 @@ const { captureArtifacts, restoreArtifacts } = require("./artifact-backup.cjs");
 const {
   readThresholds,
   readHostResources,
+  realResourceProvider,
   evaluateResources,
   wrapBuildCommand,
   buildEnv,
@@ -391,12 +392,20 @@ function createReadOnlyRunner({ run, executed = [] }) {
  *
  * O runner é envolvido por um guard que aborta qualquer comando de escrita.
  */
-async function runReadOnlyPreflight({ config, run, now = new Date(), executed = [], readResources = null }) {
+async function runReadOnlyPreflight({
+  config,
+  run,
+  now = new Date(),
+  executed = [],
+  readResources = null,
+  resourceProvider = null,
+}) {
   const problems = [];
   const checks = [];
 
   const { run: readOnlyRun, executed: executedCommands } = createReadOnlyRunner({ run, executed });
-  const readHost = readResources ?? ((opts) => readHostResources(opts));
+  const readHost =
+    readResources ?? ((opts) => readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider }));
 
   const check = (name, ok, detail) => {
     checks.push({ name, ok, detail });
@@ -676,8 +685,13 @@ async function planRollout({ config, run, now = new Date() }) {
 /**
  * Executa o rollout. Com dryRun=true, nada é executado.
  *
- * `readResources` permite injetar a leitura de recursos (usado nos testes);
- * por padrão lê /proc/meminfo, load average e disco (tudo read-only).
+ * `resourceProvider` (opcional) permite injetar as métricas de recurso
+ * (getMemInfo / getLoadAverage / getDiskFree). Em produção usa o provider
+ * real; nos testes, um provider fake - assim o resultado dos testes nunca
+ * depende do load/RAM/disco da máquina que roda o Jest.
+ *
+ * `readResources` (opcional) é a injeção de baixo nível (função que devolve
+ * o objeto de recursos inteiro) e tem precedência sobre o provider.
  */
 async function executeRollout({
   config,
@@ -687,6 +701,7 @@ async function executeRollout({
   dryRun = false,
   now = new Date(),
   readResources = null,
+  resourceProvider = null,
 }) {
   const startedAt = new Date();
   const stages = [];
@@ -717,7 +732,7 @@ async function executeRollout({
 
   /** Lê e avalia os recursos do host (read-only). */
   const evaluateHostResources = async (runner) => {
-    const reader = readResources ?? ((opts) => readHostResources(opts));
+    const reader = readResources ?? ((opts) => readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider }));
     const resources = await reader({ run: runner });
     const evaluation = evaluateResources({ resources, thresholds });
     state.resourceCheck = {
@@ -788,7 +803,14 @@ async function executeRollout({
       state.candidateCommit = plan.target.candidateCommit;
       state.targetCandidateCommit = plan.target.candidateCommit;
 
-      const preflight = await runReadOnlyPreflight({ config, run: readOnlyRun, now, executed, readResources });
+      const preflight = await runReadOnlyPreflight({
+        config,
+        run: readOnlyRun,
+        now,
+        executed,
+        readResources,
+        resourceProvider,
+      });
       state.status = "dry-run";
       log(`[rollout] dry-run: ${preflight.checks.length} verificação(ões) somente leitura concluída(s)`);
       for (const problem of preflight.problems) {
@@ -1183,6 +1205,7 @@ async function executeRollout({
           artifactSnapshot,
           thresholds,
           readResources,
+          resourceProvider,
         })
       : {
           ok: false,
@@ -1248,13 +1271,15 @@ async function rollbackCore({
   artifactSnapshot = null,
   thresholds = null,
   readResources = null,
+  resourceProvider = null,
 }) {
   if (!previousCommit) {
     return { ok: false, reason: "commit anterior desconhecido" };
   }
   const { targetRepoRoot } = resolveRoots(config);
   const limits = thresholds ?? readThresholds();
-  const readHost = readResources ?? ((opts) => readHostResources(opts));
+  const readHost =
+    readResources ?? ((opts) => readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider }));
   const steps = [];
 
   /** Recuperação adiada: sem build, sem restart de PM2. */

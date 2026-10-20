@@ -122,18 +122,51 @@ function parseDfOutput(raw) {
 }
 
 /**
+ * PROVIDER REAL de métricas do host.
+ *
+ * A interface é pequena de propósito (getMemInfo / getLoadAverage /
+ * getDiskFree) para que os TESTES injectem um provider fake e o resultado
+ * dos testes nunca dependa da máquina onde o Jest está rodando (load
+ * average real do CI, por exemplo, já quebrou uma suíte inteira).
+ */
+const realResourceProvider = {
+  /** /proc/meminfo (Linux). */
+  getMemInfo() {
+    if (process.platform !== "linux") return null;
+    try {
+      return parseMemInfo(fs.readFileSync("/proc/meminfo", "utf-8"));
+    } catch {
+      return null;
+    }
+  },
+  /** load average do host. */
+  getLoadAverage() {
+    try {
+      const load = os.loadavg();
+      return Array.isArray(load) ? load : null;
+    } catch {
+      return null;
+    }
+  },
+  /** `df -k /` (read-only). */
+  async getDiskFree(run) {
+    if (typeof run !== "function") return null;
+    const df = await run("df", ["-k", "/"], { timeoutMs: 10_000 });
+    if (df.code !== 0) return null;
+    return parseDfOutput(df.stdout);
+  },
+};
+
+/**
  * Mede os recursos do host (READ-ONLY).
  *
  * - MemAvailable/swap: /proc/meminfo (Linux)
  * - load average: os.loadavg()
  * - disco: `df -k /`
+ *
+ * `provider` permite injetar as métricas (usado nos testes).
  */
-async function readHostResources({
-  run,
-  readFile = fs.readFileSync,
-  loadavg = os.loadavg,
-  platform = os.platform(),
-} = {}) {
+async function readHostResources({ run, provider = realResourceProvider } = {}) {
   const resources = {
     memAvailableMb: null,
     memTotalMb: null,
@@ -147,39 +180,25 @@ async function readHostResources({
     measurable: false,
   };
 
-  if (platform === "linux") {
-    try {
-      const mem = parseMemInfo(readFile("/proc/meminfo", "utf-8"));
-      if (mem) {
-        resources.memTotalMb = mem.memTotalMb;
-        resources.memAvailableMb = mem.memAvailableMb;
-        resources.swapTotalMb = mem.swapTotalMb;
-        resources.swapUsedMb = mem.swapUsedMb;
-      }
-    } catch {
-      /* sem /proc/meminfo */
-    }
-    try {
-      const load = loadavg();
-      if (Array.isArray(load)) {
-        resources.load1 = load[0];
-        resources.load5 = load[1];
-        resources.load15 = load[2];
-      }
-    } catch {
-      /* loadavg indisponível */
-    }
+  const mem = await provider.getMemInfo();
+  if (mem) {
+    resources.memTotalMb = mem.memTotalMb ?? null;
+    resources.memAvailableMb = mem.memAvailableMb ?? null;
+    resources.swapTotalMb = mem.swapTotalMb ?? null;
+    resources.swapUsedMb = mem.swapUsedMb ?? null;
   }
 
-  if (typeof run === "function") {
-    const df = await run("df", ["-k", "/"], { timeoutMs: 10_000 });
-    if (df.code === 0) {
-      const disk = parseDfOutput(df.stdout);
-      if (disk) {
-        resources.diskAvailableGb = disk.diskAvailableGb;
-        resources.diskTotalGb = disk.diskTotalGb;
-      }
-    }
+  const load = await provider.getLoadAverage();
+  if (Array.isArray(load)) {
+    resources.load1 = load[0] ?? null;
+    resources.load5 = load[1] ?? null;
+    resources.load15 = load[2] ?? null;
+  }
+
+  const disk = await provider.getDiskFree(run);
+  if (disk) {
+    resources.diskAvailableGb = disk.diskAvailableGb ?? null;
+    resources.diskTotalGb = disk.diskTotalGb ?? null;
   }
 
   resources.measurable =
@@ -293,6 +312,7 @@ function buildEnv({ buildHeapMb, env = process.env } = {}) {
 
 module.exports = {
   DEFAULT_THRESHOLDS,
+  realResourceProvider,
   readThresholds,
   parseMemInfo,
   parseDfOutput,

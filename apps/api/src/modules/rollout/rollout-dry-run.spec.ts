@@ -2,6 +2,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { safeResourceProvider } from "./testing/resource-fixtures";
+
 /**
  * Dry-run REAL do rollout (Wave 2.5 - hotfix).
  *
@@ -66,6 +68,15 @@ function inspectPayload(container: (typeof CONTAINERS)[number]) {
 describe("dry-run real do rollout (somente leitura)", () => {
   let tmpDir: string;
   let calls: { command: string; args: string[] }[];
+
+  /** Métricas de recurso fixas: o dry-run não pode depender do host real. */
+  function runRollout(options: Record<string, unknown>) {
+    return rolloutLib.executeRollout({ resourceProvider: safeResourceProvider(), ...options });
+  }
+
+  function runPlan(options: Record<string, unknown>) {
+    return rolloutLib.planRollout(options);
+  }
 
   function makeConfig() {
     return {
@@ -156,7 +167,7 @@ describe("dry-run real do rollout (somente leitura)", () => {
   });
 
   async function runDryRun(options: { dockerFails?: boolean; healthFails?: boolean } = {}) {
-    const result = await rolloutLib.executeRollout({
+    const result = await runRollout({
       config: makeConfig(),
       run: makeRunner(options),
       log: () => undefined,
@@ -170,7 +181,7 @@ describe("dry-run real do rollout (somente leitura)", () => {
   }
 
   it("1) --plan NÃO executa Docker (só o plano teórico)", async () => {
-    await rolloutLib.planRollout({ config: makeConfig(), run: makeRunner() });
+    await runPlan({ config: makeConfig(), run: makeRunner() });
 
     expect(calls.some((call) => call.command === "docker")).toBe(false);
   });

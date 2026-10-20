@@ -31,6 +31,8 @@ const rolloutLib = require(path.join(LIBS, "rollout.cjs"));
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const guard = require(path.join(LIBS, "resource-guard.cjs"));
 
+import { safeResourceProvider } from "./testing/resource-fixtures";
+
 type RunResult = { code: number; stdout: string; stderr: string; timedOut?: boolean };
 type Call = { command: string; args: string[]; cwd?: string; env?: Record<string, string> };
 
@@ -503,8 +505,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
     expect(migrations.some((name: string) => name.includes("migration_lock"))).toBe(false);
   });
 
-  it("16) rollout normal com recursos suficientes continua funcionando", async () => {
-    const run = makeRunner();
+  it("16) rollout normal com recursos suficientes continua funcionando", async () => {    const run = makeRunner();
     const result = await rolloutLib.executeRollout({
       config: makeConfig(),
       run,
@@ -568,9 +569,54 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
     }
   });
 
+  // ---------------------------------------------------- regressão do CI
+  describe("regressão do CI: métricas do host real não podem decidir o teste", () => {
+    it("o rollout usa o provider INJETADO, não o load real da máquina", async () => {
+      // O host real está sob pressão extrema (load 10) - exatamente o que
+      // quebrou a suite no GitHub Actions (load 1.52 > limite 1.5).
+      const loadavg = jest.spyOn(os, "loadavg").mockReturnValue([10, 10, 10]);
+      try {
+        // 1) SEM provider injetado: o host real manda -> o rollout aborta.
+        const blocked = await rolloutLib.executeRollout({
+          config: makeConfig(),
+          run: makeRunner(),
+        });
+        expect(blocked.ok).toBe(false);
+        expect(blocked.error).toContain("load average");
+        expect(blocked.error).toContain("Rollout adiado");
+
+        // 2) COM o provider injetado (load 0.1): o rollout passa, mesmo com o
+        //    host real carregado (load 10) - a medição do teste é a que vale.
+        const injected = await rolloutLib.executeRollout({
+          config: makeConfig(),
+          run: makeRunner(),
+          resourceProvider: safeResourceProvider({ load1: 0.1 }),
+        });
+        expect(injected.ok).toBe(true);
+        expect(injected.state.resourceCheck?.safeToBuild).toBe(true);
+      } finally {
+        loadavg.mockRestore();
+      }
+    });
+
+    it("o provider injetado com load alto aborta (o valor do teste manda)", async () => {
+      const loadavg = jest.spyOn(os, "loadavg").mockReturnValue([0.1, 0.1, 0.1]);
+      try {
+        const blocked = await rolloutLib.executeRollout({
+          config: makeConfig(),
+          run: makeRunner(),
+          resourceProvider: safeResourceProvider({ load1: 2.0 }),
+        });
+        expect(blocked.ok).toBe(false);
+        expect(blocked.error).toContain("load average");
+      } finally {
+        loadavg.mockRestore();
+      }
+    });
+  });
+
   // --------------------------------------------------------- unidade da guarda
-  describe("resource-guard (unidade)", () => {
-    it("parse de /proc/meminfo", () => {
+  describe("resource-guard (unidade)", () => {    it("parse de /proc/meminfo", () => {
       const mem = guard.parseMemInfo(
         [
           "MemTotal:       3915000 kB",

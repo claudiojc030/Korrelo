@@ -35,6 +35,12 @@ const rolloutLib = require(path.join(LIBS, "rollout.cjs"));
 
 import * as fs from "node:fs";
 import * as os from "node:os";
+import { safeResourceProvider } from "./testing/resource-fixtures";
+
+// O objeto real do módulo (o import acima é um namespace congelado: para
+// mockar o load average é preciso o exports do CommonJS).
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const nodeOs = require("node:os");
 
 type RunResult = { code: number; stdout: string; stderr: string; timedOut?: boolean };
 
@@ -356,6 +362,14 @@ describe("rollout - lock de self-update", () => {
 });
 
 describe("rollout - executor", () => {
+  /**
+   * Todo rollout de teste roda com métricas de recurso FIXAS: o resultado
+   * nunca pode depender do load/RAM/disco da máquina que roda o Jest (já
+   * quebrou uma suite inteira no CI).
+   */
+  function runRollout(options: Record<string, unknown>) {
+    return rolloutLib.executeRollout({ resourceProvider: safeResourceProvider(), ...options });
+  }
   let tmpDir: string;
   let repoRoot: string;
 
@@ -507,9 +521,27 @@ describe("rollout - executor", () => {
     return { run, calls };
   }
 
-  it("1) rollout bloqueia com working tree sujo (e não descarta nada)", async () => {
-    const { run, calls } = rolloutRunner({ dirty: true });
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run });
+  it("REGRESSÃO CI: a suíte não depende do load real da máquina", async () => {
+    // No GitHub Actions o load real do runner (1.52) passou do limite (1.5)
+    // e o resource-preflight abortou vários testes em cascata (backup,
+    // migration, PM2, snapshot e rollback nunca aconteceram).
+    const loadavg = jest.spyOn(nodeOs, "loadavg").mockReturnValue([10, 10, 10]);
+    try {
+      const { run } = rolloutRunner();
+      const result = await runRollout({ config: makeConfig(), run });
+
+      // Com o host real sob pressão, o rollout de teste SEGUE (métricas fake).
+      expect(result.ok).toBe(true);
+      // E o teste chegou de fato às etapas que quer validar.
+      expect(result.state.backupPath).toBeTruthy();
+      expect(result.state.projectIntegrityCheck).toBe("intacto");
+    } finally {
+      loadavg.mockRestore();
+    }
+  });
+
+  it("1) rollout bloqueia com working tree sujo (e não descarta nada)", async () => {    const { run, calls } = rolloutRunner({ dirty: true });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("Working tree contains local changes");
@@ -525,7 +557,7 @@ describe("rollout - executor", () => {
 
   it("2) rollout bloqueia com deploy de projeto em andamento", async () => {
     const { run } = rolloutRunner({ activeDeploys: 1 });
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("deploy(s) de projeto em andamento");
@@ -533,7 +565,7 @@ describe("rollout - executor", () => {
 
   it("3) o backup acontece ANTES da migration", async () => {
     const { run, calls } = rolloutRunner();
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(true);
     const backupIndex = calls.findIndex((call) => call.command === "sqlite3" && call.args[1]?.startsWith(".backup"));
@@ -544,7 +576,7 @@ describe("rollout - executor", () => {
 
   it("4) a migration NÃO roda se o backup falhar", async () => {
     const { run, calls } = rolloutRunner({ backupFails: true });
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     expect(calls.some((call) => call.command === "npx" && call.args[0] === "prisma")).toBe(false);
@@ -554,7 +586,7 @@ describe("rollout - executor", () => {
 
   it("8) dry-run não altera nada (nenhum comando de escrita)", async () => {
     const { run, calls } = rolloutRunner();
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run, dryRun: true });
+    const result = await runRollout({ config: makeConfig(), run, dryRun: true });
 
     expect(result.ok).toBe(true);
     expect(result.dryRun).toBe(true);
@@ -572,7 +604,7 @@ describe("rollout - executor", () => {
 
   it("22) migration falhando: o PM2 NÃO é reiniciado", async () => {
     const { run, calls } = rolloutRunner({ migrationFails: true });
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     const pm2Calls = calls.filter((call) => call.command === "pm2" && call.args[0] === "restart");
@@ -585,7 +617,7 @@ describe("rollout - executor", () => {
 
   it("23) build falhando: a migration não roda", async () => {
     const { run, calls } = rolloutRunner({ buildFails: true });
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     expect(calls.some((call) => call.command === "npx" && call.args[1] === "prisma")).toBe(false);
@@ -593,7 +625,7 @@ describe("rollout - executor", () => {
 
   it("24) health da API falhando: o Core volta ao commit anterior", async () => {
     const { run, calls } = rolloutRunner({ healthFails: true });
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     expect(result.state.rollback?.ok).toBe(true);
@@ -605,7 +637,7 @@ describe("rollout - executor", () => {
 
   it("25/26) o rollback reinicia SOMENTE o Core e nunca toca em projeto", async () => {
     const { run, calls } = rolloutRunner({ healthFails: true });
-    await rolloutLib.executeRollout({ config: makeConfig(), run });
+    await runRollout({ config: makeConfig(), run });
 
     const pm2Calls = calls.filter((call) => call.command === "pm2" && call.args[0] === "restart");
     expect(pm2Calls.length).toBeGreaterThan(0);
@@ -622,7 +654,7 @@ describe("rollout - executor", () => {
 
   it("29/30) .env e dev.db recebem permissão 600", async () => {
     const { run, calls } = rolloutRunner();
-    await rolloutLib.executeRollout({ config: makeConfig(), run });
+    await runRollout({ config: makeConfig(), run });
 
     const chmods = calls.filter((call) => call.command === "chmod");
     const envChmod = chmods.find((call) => call.args[1]?.endsWith(".env"));
@@ -634,7 +666,7 @@ describe("rollout - executor", () => {
   it("31) o log do rollout não vaza segredo", async () => {
     const logs: string[] = [];
     const { run } = rolloutRunner();
-    await rolloutLib.executeRollout({ config: makeConfig(), run, log: (line: string) => logs.push(line) });
+    await runRollout({ config: makeConfig(), run, log: (line: string) => logs.push(line) });
 
     const joined = logs.join("\n");
     expect(joined).not.toContain("nao-logar-este-valor");
@@ -643,7 +675,7 @@ describe("rollout - executor", () => {
 
   it("32) o projeto permanece online: snapshot antes/depois idêntico", async () => {
     const { run } = rolloutRunner();
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(true);
     expect(result.comparison?.ok).toBe(true);
@@ -652,7 +684,7 @@ describe("rollout - executor", () => {
 
   it("web-assets: os assets do Next standalone são preparados ANTES do pm2 restart", async () => {
     const { run, calls } = rolloutRunner();
-    await rolloutLib.executeRollout({ config: makeConfig(), run });
+    await runRollout({ config: makeConfig(), run });
 
     const assetsIndex = calls.findIndex((call) => call.args[0]?.includes("copy-standalone-assets.js"));
     const pm2Index = calls.findIndex((call) => call.command === "pm2" && call.args[0] === "restart");
@@ -662,7 +694,7 @@ describe("rollout - executor", () => {
 
   it("web-assets: falha na cópia aborta o rollout ANTES do pm2 restart", async () => {
     const { run } = rolloutRunner({ assetsFail: true });
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("assets do Next");
@@ -679,7 +711,7 @@ describe("rollout - executor", () => {
     ["Evolution", { image: "korrelo-evolution:commit-novo" }],
   ])("divergência em %s = falha crítica (sem tocar no projeto)", async (_name, override) => {
     const { run, calls } = rolloutRunner({ inspectOverride: override as never });
-    const result = await rolloutLib.executeRollout({ config: makeConfig(), run });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("DIVERGÊNCIA CRÍTICA");

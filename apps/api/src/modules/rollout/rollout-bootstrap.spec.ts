@@ -43,6 +43,8 @@ const cliArgs = require(path.join(LIBS, "cli-args.cjs"));
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { run: realRun } = require(path.join(LIBS, "command-runner.cjs"));
 
+import { safeResourceProvider } from "./testing/resource-fixtures";
+
 const CLI_PATH = path.resolve(__dirname, "..", "..", "..", "scripts", "rollout", "rollout.cjs");
 const WRAPPER_PATH = path.resolve(__dirname, "..", "..", "..", "..", "..", "scripts", "rollout-korrelo.sh");
 
@@ -78,6 +80,14 @@ function writeFile(filePath: string, content: string): void {
 
 describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real)", () => {
   let tmpDir: string;
+
+  /**
+   * Todo rollout de teste roda com métricas de recurso FIXAS: o resultado
+   * nunca pode depender do load/RAM/disco da máquina (nem do runner do CI).
+   */
+  function runRollout(options: Record<string, unknown>) {
+    return rolloutLib.executeRollout({ resourceProvider: safeResourceProvider(), ...options });
+  }
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "korrelo-bootstrap-"));
@@ -335,7 +345,7 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       const calls: Call[] = [];
       const run = makeRunner(calls);
 
-      const result = await rolloutLib.executeRollout({ config, run });
+      const result = await runRollout({ config, run });
 
       expect(result.ok).toBe(true);
 
@@ -415,7 +425,7 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       const calls: Call[] = [];
       const run = makeRunner(calls, { healthFails: true });
 
-      const result = await rolloutLib.executeRollout({ config, run });
+      const result = await runRollout({ config, run });
 
       expect(result.ok).toBe(false);
       expect(result.state.rollback?.ok).toBe(true);
@@ -444,7 +454,7 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       const calls: Call[] = [];
       const run = makeRunner(calls);
 
-      const result = await rolloutLib.executeRollout({ config, run });
+      const result = await runRollout({ config, run });
 
       expect(result.ok).toBe(false);
       expect(result.error).toContain("detached HEAD");
@@ -467,7 +477,7 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       const calls: Call[] = [];
       const run = makeRunner(calls);
 
-      const result = await rolloutLib.executeRollout({ config, run });
+      const result = await runRollout({ config, run });
 
       expect(result.ok).toBe(false);
       expect(result.error).toContain("fast-forward obrigatório");
@@ -489,7 +499,7 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       const calls: Call[] = [];
       const run = makeRunner(calls);
 
-      const result = await rolloutLib.executeRollout({ config, run, dryRun: true });
+      const result = await runRollout({ config, run, dryRun: true });
 
       expect(result.dryRun).toBe(true);
       expect(result.preflight.target.root).toBe(repos.target);
