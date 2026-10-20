@@ -31,28 +31,10 @@ const rolloutLib = require(path.join(LIBS, "rollout.cjs"));
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const toolchain = require(path.join(LIBS, "toolchain.cjs"));
 
-import { createFakeToolchain } from "./testing/resource-fixtures";
+import { createFakeToolchain, safeResourceProvider } from "./testing/resource-fixtures";
 
 type RunResult = { code: number; stdout: string; stderr: string; timedOut?: boolean };
 type Call = { command: string; args: string[]; cwd?: string; env?: Record<string, string> };
-
-const SAFE_RESOURCES = {
-  memAvailableMb: 2305,
-  memTotalMb: 3915,
-  swapUsedMb: 120,
-  swapTotalMb: 2047,
-  load1: 0.32,
-  load5: 0.3,
-  load15: 0.2,
-  diskAvailableGb: 26.9,
-  diskTotalGb: 40,
-  measurable: true,
-};
-
-/** Leitor de recursos com métricas fixas (o teste não depende do host). */
-function readResources() {
-  return async () => ({ ...SAFE_RESOURCES });
-}
 
 describe("rollout - install com devDependencies, toolchain e diagnóstico", () => {
   let tmpDir: string;
@@ -100,6 +82,11 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
   /**
    * Runner que SIMULA o npm real: com `omit=dev` (o que o NODE_ENV=production
    * faz) as devDependencies não são instaladas.
+   *
+   * `dirtyBeforeUpdate` / `dirtyAfterUpdate` simulam alteração TRACKED
+   * inesperada no checkout alvo:
+   * - antes do git-update -> o rollout aborta no git-check (nada a reverter);
+   * - depois do git-update -> só a recuperação encontra a sujeira.
    */
   function makeRunner(
     options: {
@@ -108,9 +95,12 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
       buildFails?: boolean;
       buildStderr?: string;
       buildExit?: number;
+      dirtyBeforeUpdate?: boolean;
+      dirtyAfterUpdate?: boolean;
     } = {},
   ) {
     const repoRoot = path.join(tmpDir, "repo");
+    let gitUpdated = false;
     return async (
       command: string,
       args: string[] = [],
@@ -174,7 +164,21 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
         if (gitArgs[0] === "branch" && gitArgs[1] === "--show-current") {
           return { code: 0, stdout: "main\n", stderr: "" };
         }
-        if (gitArgs[0] === "status") return { code: 0, stdout: "", stderr: "" };
+        if (gitArgs[0] === "pull") {
+          gitUpdated = true;
+          return { code: 0, stdout: "", stderr: "" };
+        }
+        if (gitArgs[0] === "status") {
+          // Sujeira ANTES do update: o git-check aborta o rollout.
+          if (options.dirtyBeforeUpdate && !gitUpdated) {
+            return { code: 0, stdout: " M arquivo-do-operador.txt\n", stderr: "" };
+          }
+          // Sujeira DEPOIS do update: só a recuperação encontra.
+          if (options.dirtyAfterUpdate && gitUpdated && gitArgs.includes("--untracked-files=no")) {
+            return { code: 0, stdout: " M arquivo-do-operador.txt\n", stderr: "" };
+          }
+          return { code: 0, stdout: "", stderr: "" };
+        }
         if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--abbrev-ref") return { code: 0, stdout: "main\n", stderr: "" };
         if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--verify") return { code: 0, stdout: "c2c2c2c\n", stderr: "" };
         if (gitArgs[0] === "rev-parse") return { code: 0, stdout: "c1c1c1c\n", stderr: "" };
@@ -248,8 +252,17 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
   const TEST_WAIT = { intervalSec: 1, timeoutSec: 5 };
   const instantSleep = async () => undefined;
 
+  /**
+   * Rollout de teste: SEMPRE com métricas de recurso FIXAS.
+   *
+   * Sem isso o teste lia o load REAL da máquina (e do runner do CI): com
+   * load1 > 1.5 o resource-preflight abortava ANTES do git-update e o
+   * cenário testado nunca era alcançado (foi exatamente o que quebrou o
+   * CI no commit 0aa5574).
+   */
   function runRollout(options: Record<string, unknown>) {
     return rolloutLib.executeRollout({
+      resourceProvider: safeResourceProvider(),
       sleep: instantSleep,
       waitConfig: TEST_WAIT,
       ...options,
@@ -258,7 +271,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("1) o install usa npm ci, nunca npm install", async () => {
     const run = makeRunner();
-    await runRollout({ config: makeConfig(), run, readResources });
+    await runRollout({ config: makeConfig(), run });
 
     const installs = npmCalls().filter((call) => ["ci", "install"].includes(unwrap(call).args[0]));
     expect(installs.length).toBeGreaterThan(0);
@@ -269,7 +282,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("2) o install usa --include=dev", async () => {
     const run = makeRunner();
-    await runRollout({ config: makeConfig(), run, readResources });
+    await runRollout({ config: makeConfig(), run });
 
     expect(unwrap(installCall() as Call).args).toContain("--include=dev");
   });
@@ -277,7 +290,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
   it("3) NODE_ENV=production não remove o --include=dev", async () => {
     process.env.NODE_ENV = "production";
     const run = makeRunner({ omitDev: true });
-    const result = await runRollout({ config: makeConfig(), run, readResources });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(unwrap(installCall() as Call).args).toContain("--include=dev");
     // E o rollout chega ao fim (a toolchain está disponível).
@@ -286,14 +299,14 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("4) o dry-run mostra npm ci --include=dev", async () => {
     const run = makeRunner();
-    const result = await runRollout({ config: makeConfig(), run, dryRun: true, readResources });
+    const result = await runRollout({ config: makeConfig(), run, dryRun: true });
 
     expect(result.preflight.plan?.builds?.[0] ?? result.plan?.builds?.[0]).toContain("npm ci --include=dev");
   });
 
   it("5) a toolchain é validada depois do install", async () => {
     const run = makeRunner();
-    const result = await runRollout({ config: makeConfig(), run, readResources });
+    const result = await runRollout({ config: makeConfig(), run });
 
     const stages = result.stages as { id: string; status: string; detail: string | null }[];
     const stage = stages.find((entry) => entry.id === "toolchain-check");
@@ -307,7 +320,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("6) toolchain ausente aborta ANTES do build-shared", async () => {
     const run = makeRunner({ toolchainMissing: true });
-    const result = await runRollout({ config: makeConfig(), run, readResources });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("Toolchain de build incompleta");
@@ -319,7 +332,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("7) toolchain presente permite o build-shared", async () => {
     const run = makeRunner();
-    const result = await runRollout({ config: makeConfig(), run, readResources });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(true);
     expect(npmCalls().some((call) => unwrap(call).args.includes("--workspace=packages/shared-types"))).toBe(true);
@@ -327,7 +340,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("8) a falha de build inclui o exit code", async () => {
     const run = makeRunner({ buildFails: true, buildExit: 127, buildStderr: "sh: 1: tsc: not found" });
-    const result = await runRollout({ config: makeConfig(), run, readResources });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     expect(result.error).toContain("build de packages/shared-types falhou");
@@ -336,7 +349,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("9) a falha de build inclui o stderr/stdout limitado", async () => {
     const run = makeRunner({ buildFails: true, buildExit: 127, buildStderr: "sh: 1: tsc: not found" });
-    const result = await runRollout({ config: makeConfig(), run, readResources });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.error).toContain("tsc: not found");
   });
@@ -356,7 +369,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("11) o resource wait continua antes do install", async () => {
     const run = makeRunner();
-    await runRollout({ config: makeConfig(), run, readResources });
+    await runRollout({ config: makeConfig(), run });
 
     // O install é o primeiro npm do rollout (o guard roda antes dele).
     const firstNpm = npmCalls()[0];
@@ -365,7 +378,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("12) o resource wait continua antes de shared/API/web", async () => {
     const run = makeRunner();
-    await runRollout({ config: makeConfig(), run, readResources });
+    await runRollout({ config: makeConfig(), run });
 
     const builds = npmCalls().filter((call) => unwrap(call).args.includes("build"));
     expect(builds).toHaveLength(3);
@@ -376,7 +389,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("13) o rollback Git continua main @ previousCommit", async () => {
     const run = makeRunner({ buildFails: true, buildExit: 127, buildStderr: "sh: 1: tsc: not found" });
-    const result = await runRollout({ config: makeConfig(), run, readResources });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.ok).toBe(false);
     const checkout = calls.find(
@@ -389,32 +402,59 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("14) o recovery não deixa detached HEAD", async () => {
     const run = makeRunner({ buildFails: true, buildExit: 127 });
-    const result = await runRollout({ config: makeConfig(), run, readResources });
+    const result = await runRollout({ config: makeConfig(), run });
 
     expect(result.state.rollback?.git?.branch).toBe("main");
     expect(result.state.rollback?.git?.commit).toBe("c1c1c1c");
   });
 
-  it("15) working tree inesperado continua protegido", async () => {
-    const run = makeRunner({ buildFails: true, buildExit: 127 });
-    // O status do target volta sujo durante o recovery.
-    const original = run;
-    const runWithDirty = async (command: string, args: string[] = [], opts: Record<string, unknown> = {}) => {
-      if (command === "git" && args.includes("status") && args.includes("--untracked-files=no")) {
-        calls.push({ command, args, cwd: opts.cwd as string | undefined });
-        return { code: 0, stdout: " M arquivo-do-operador.txt\n", stderr: "" };
-      }
-      return original(command, args, opts as never);
-    };
-    const result = await runRollout({ config: makeConfig(), run: runWithDirty });
+  it("15) working tree inesperado DEPOIS do git-update bloqueia o reset", async () => {
+    // A sujeira aparece SÓ depois do git-update (é o que a recuperação
+    // precisa encontrar).
+    const run = makeRunner({ buildFails: true, buildExit: 127, dirtyAfterUpdate: true });
+    const result = await runRollout({ config: makeConfig(), run });
 
+    expect(result.ok).toBe(false);
+    // O git-update aconteceu (o recovery teve o que reverter).
+    expect(result.state.rollback?.skipped).toBeFalsy();
+    // Nenhum reset --hard foi executado (os dados do operador ficam).
     expect(calls.some((call) => call.command === "git" && call.args.includes("reset"))).toBe(false);
     expect(result.state.rollback?.reason).toContain("working tree contém alterações inesperadas");
+    expect(result.state.rollback?.reason).toContain("arquivo-do-operador.txt");
+    // Só caminhos (nunca conteúdo).
+    expect(result.state.rollback?.reason).not.toContain("conteudo secreto");
+    expect(result.state.recoveryRequired).toBe(true);
+    expect(result.state.recoveryStatus).toBe("RECOVERY_REQUIRED");
+  });
+
+  it("15b) working tree inesperado ANTES do git-update: aborta cedo e não há o que reverter", async () => {
+    const run = makeRunner({ dirtyBeforeUpdate: true });
+    const result = await runRollout({ config: makeConfig(), run });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Working tree contains local changes");
+    // Nenhum reset, nenhum pull: o checkout alvo não foi tocado.
+    expect(calls.some((call) => call.command === "git" && call.args.includes("reset"))).toBe(false);
+    expect(calls.some((call) => call.command === "git" && call.args.includes("pull"))).toBe(false);
+    // E o rollback é corretamente pulado ("nada a reverter").
+    expect(result.state.rollback?.skipped).toBe(true);
+    expect(result.state.rollback?.reason).toContain("nada a reverter");
+  });
+
+  it("15c) as métricas do rollout são as INJETADAS (nunca as do host real)", async () => {
+    const run = makeRunner();
+    const result = await runRollout({ config: makeConfig(), run });
+
+    // O valor vem do provider fake (0.1) - se viesse do host, o teste
+    // poderia abortar antes do git-update dependendo do load da máquina
+    // (foi o que quebrou o CI no commit 0aa5574).
+    expect(result.state.resourceCheck?.resources?.load1).toBe(0.1);
+    expect(result.state.resourceCheck?.safeToBuild).toBe(true);
   });
 
   it("16) as migrations não rodam antes dos builds", async () => {
     const run = makeRunner();
-    await runRollout({ config: makeConfig(), run, readResources });
+    await runRollout({ config: makeConfig(), run });
 
     const migrationIndex = calls.findIndex((call) => call.command === "npx" && call.args[0] === "prisma");
     let lastBuildIndex = -1;
@@ -426,7 +466,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("17) o PM2 não reinicia antes das migrations/builds", async () => {
     const run = makeRunner();
-    await runRollout({ config: makeConfig(), run, readResources });
+    await runRollout({ config: makeConfig(), run });
 
     const pm2Index = calls.findIndex((call) => call.command === "pm2" && call.args[0] === "restart");
     const migrationIndex = calls.findIndex((call) => call.command === "npx" && call.args[0] === "prisma");
@@ -435,7 +475,7 @@ describe("rollout - install com devDependencies, toolchain e diagnóstico", () =
 
   it("18) nenhum container de projeto é alterado", async () => {
     const run = makeRunner();
-    await runRollout({ config: makeConfig(), run, readResources });
+    await runRollout({ config: makeConfig(), run });
 
     for (const call of calls.filter((entry) => entry.command === "docker")) {
       expect(["ps", "inspect", "stats", "version", "info"]).toContain(call.args[0]);
