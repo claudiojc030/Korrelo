@@ -309,6 +309,13 @@ snapshot READ-ONLY dos containers dos projetos antes e depois (divergência =
 falha crítica, sem tocar no projeto), prepara os assets do Next standalone
 e reinicia só o PM2 do Core.
 
+> **Nota técnica (validação do self-update):** o atualizador de produção roda
+> **desacoplado** do processo da API (double fork, re-parentado para o
+> init), de modo que um restart da API **não** encerra um update já em
+> andamento. O estado do update fica persistido em
+> `~/.korrelo/self-update/` e pode ser consultado depois
+> (`GET /monitoring/self-update/current`).
+
 **Jeito manual** (via SSH, ex. pra rodar antes de o botão existir na sua instalação):
 
 ```bash
