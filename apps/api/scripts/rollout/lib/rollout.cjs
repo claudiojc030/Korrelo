@@ -103,8 +103,21 @@ function resolvePath(value, home = os.homedir()) {
   return value;
 }
 
+/**
+ * Config padrão do rollout.
+ *
+ * `executorRoot`   = repositório onde está o CÓDIGO do rollout (o executor).
+ * `targetRepoRoot` = checkout ALVO, que será atualizado (o que roda em
+ *                     produção). Por padrão é o mesmo do executor.
+ *
+ * Os dois podem ser diferentes: o executor novo pode rodar de um worktree
+ * externo (`/tmp/korrelo-rollout-preview`) e atualizar o checkout real
+ * (`/home/korrelo/korrelo`).
+ */
 function defaultConfig(repoRoot) {
   return {
+    executorRoot: repoRoot,
+    targetRepoRoot: repoRoot,
     repoRoot,
     coreDbPath: path.join(repoRoot, "apps", "api", "prisma", "dev.db"),
     coreBackupDir: path.join(os.homedir(), "korrelo-backups"),
@@ -119,6 +132,23 @@ function defaultConfig(repoRoot) {
   };
 }
 
+/**
+ * Resolve os dois raízes do rollout.
+ *
+ * - targetRepoRoot: o checkout que será atualizado (git, banco, build,
+ *   migration, chmod, rollback).
+ * - executorRoot: onde mora o código do rollout (config, libs, commit do
+ *   executor).
+ *
+ * `config.repoRoot` continua aceito como alias do alvo (compatibilidade com
+ * as ondas anteriores, onde não havia a distinção).
+ */
+function resolveRoots(config) {
+  const targetRepoRoot = path.resolve(config.targetRepoRoot ?? config.repoRoot);
+  const executorRoot = path.resolve(config.executorRoot ?? config.repoRoot);
+  return { targetRepoRoot, executorRoot };
+}
+
 /** Migrations presentes no repositório (nomes das pastas). */
 function listMigrations({ repoRoot, migrationsDir = "apps/api/prisma/migrations" } = {}) {
   const dir = path.join(repoRoot, migrationsDir);
@@ -131,6 +161,29 @@ function listMigrations({ repoRoot, migrationsDir = "apps/api/prisma/migrations"
   } catch {
     return [];
   }
+}
+
+/**
+ * Migrations presentes no COMMIT candidato do alvo (read-only).
+ *
+ * É o que será aplicado DEPOIS do update: o commit `origin/main` do checkout
+ * alvo, lido direto da árvore do Git (`git ls-tree`), sem precisar fazer
+ * checkout nem fetch.
+ */
+async function listMigrationsFromCommit({ repoRoot, commit, run, migrationsDir = "apps/api/prisma/migrations" }) {
+  if (!commit) return [];
+  const result = await run("git", ["-C", repoRoot, "ls-tree", "--name-only", commit, "--", `${migrationsDir}/`], {
+    timeoutMs: 15_000,
+  });
+  if (result.code !== 0) return [];
+  const prefix = `${migrationsDir}/`;
+  return result.stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith(prefix))
+    .map((line) => line.slice(prefix.length))
+    .filter((name) => name && !name.includes("/"))
+    .sort();
 }
 
 /**
@@ -157,7 +210,19 @@ async function countActiveDeploys({ dbPath, run }) {
  * dry-run com erro, em vez de escrever algo por acidente.
  */
 const READ_ONLY_COMMANDS = {
-  git: ["status", "rev-parse", "remote", "log", "show", "branch", "diff", "config", "ls-remote"],
+  git: [
+    "status",
+    "rev-parse",
+    "remote",
+    "log",
+    "show",
+    "branch",
+    "diff",
+    "config",
+    "ls-remote",
+    "ls-tree",
+    "merge-base",
+  ],
   docker: ["ps", "inspect", "stats", "version", "info"],
   pm2: ["jlist", "status", "describe", "pid"],
   df: null,
@@ -166,6 +231,33 @@ const READ_ONLY_COMMANDS = {
   curl: null,
   sqlite3: null,
 };
+
+/**
+ * Descobre o subcomando do Git pulando as opções GLOBAIS.
+ *
+ * `git -C <path> pull --ff-only` -> "pull"
+ * `git rev-parse --abbrev-ref HEAD` -> "rev-parse"
+ */
+function gitSubcommand(args) {
+  let index = 0;
+  while (index < args.length) {
+    const arg = String(args[index]);
+    if (arg === "-C" || arg === "--git-dir" || arg === "--work-tree" || arg === "--namespace") {
+      index += 2;
+      continue;
+    }
+    if (arg === "-c" || arg === "--exec-path") {
+      index += 2;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      index += 1;
+      continue;
+    }
+    break;
+  }
+  return args[index] === undefined ? null : String(args[index]);
+}
 
 function isReadOnlyCommand(command, args) {
   const allowed = READ_ONLY_COMMANDS[command];
@@ -186,7 +278,58 @@ function isReadOnlyCommand(command, args) {
     }
     return true;
   }
-  return allowed.includes(String(args[0]));
+  return allowed.includes(gitSubcommand(args));
+}
+
+/**
+ * Inspeção READ-ONLY do checkout ALVO.
+ *
+ * Usada pelo CLI antes de qualquer escrita: confirma que o caminho existe,
+ * que é um repositório Git válido (funciona em worktree, onde `.git` é
+ * ARQUIVO e não diretório) e qual branch/commit ele está.
+ */
+async function inspectTargetRepo({ targetRepoRoot, run, timeoutMs = 15_000 }) {
+  const info = {
+    path: targetRepoRoot,
+    exists: false,
+    isGit: false,
+    branch: null,
+    commit: null,
+    candidate: null,
+    detached: false,
+    error: null,
+  };
+
+  if (!fs.existsSync(targetRepoRoot)) {
+    info.error = `o caminho não existe: ${targetRepoRoot}`;
+    return info;
+  }
+  info.exists = true;
+
+  const inside = await run("git", ["-C", targetRepoRoot, "rev-parse", "--is-inside-work-tree"], {
+    timeoutMs,
+  });
+  if (inside.code !== 0 || inside.stdout.trim() !== "true") {
+    info.error = `não é um repositório Git válido: ${targetRepoRoot}`;
+    return info;
+  }
+  info.isGit = true;
+
+  const branch = await run("git", ["-C", targetRepoRoot, "rev-parse", "--abbrev-ref", "HEAD"], {
+    timeoutMs,
+  });
+  info.branch = branch.code === 0 ? branch.stdout.trim() || null : null;
+  info.detached = info.branch === "HEAD" || info.branch === null;
+
+  const commit = await run("git", ["-C", targetRepoRoot, "rev-parse", "HEAD"], { timeoutMs });
+  info.commit = commit.code === 0 ? commit.stdout.trim() || null : null;
+
+  const candidate = await run("git", ["-C", targetRepoRoot, "rev-parse", "--verify", "origin/main"], {
+    timeoutMs,
+  });
+  info.candidate = candidate.code === 0 ? candidate.stdout.trim() || null : null;
+
+  return info;
 }
 
 /**
@@ -233,17 +376,25 @@ async function runReadOnlyPreflight({ config, run, now = new Date(), executed = 
     return ok;
   };
 
-  // ---------------------------------------------------------------- 1) Git
-  const git = await inspectGitState({ cwd: config.repoRoot, run: readOnlyRun });
-  const remoteResult = await readOnlyRun("git", ["remote", "get-url", "origin"], {
-    cwd: config.repoRoot,
+  const { targetRepoRoot, executorRoot } = resolveRoots(config);
+
+  // ---------------------------------------------------------------- 1) Git do ALVO
+  const git = await inspectGitState({ cwd: targetRepoRoot, run: readOnlyRun });
+  const remoteResult = await readOnlyRun("git", ["-C", targetRepoRoot, "remote", "get-url", "origin"], {
     timeoutMs: 10_000,
   });
   const candidateResult = await readOnlyRun(
     "git",
-    ["rev-parse", "--verify", "origin/main"],
-    { cwd: config.repoRoot, timeoutMs: 10_000 },
+    ["-C", targetRepoRoot, "rev-parse", "--verify", "origin/main"],
+    { timeoutMs: 10_000 },
   );
+  const candidateCommit = candidateResult.code === 0 ? candidateResult.stdout.trim() || null : null;
+
+  const executorCommitResult = await readOnlyRun("git", ["-C", executorRoot, "rev-parse", "HEAD"], {
+    timeoutMs: 10_000,
+  });
+  const executorCommit = executorCommitResult.code === 0 ? executorCommitResult.stdout.trim() || null : null;
+
   check(
     "git: working tree limpo",
     git.dirty === false,
@@ -252,12 +403,47 @@ async function runReadOnlyPreflight({ config, run, now = new Date(), executed = 
       : "limpo",
   );
 
+  const detached = git.branch === null || git.branch === "HEAD";
+  check(
+    "git: alvo está em uma branch (não detached)",
+    !detached,
+    detached ? `HEAD detached em ${git.commit ?? "?"}` : git.branch,
+  );
+
+  check(
+    "git: candidato (origin/main) disponível",
+    candidateCommit !== null,
+    candidateCommit ?? "origin/main não encontrado localmente (o rollout não faz fetch automático)",
+  );
+
+  let fastForward = null;
+  if (candidateCommit && git.commit) {
+    const ancestor = await readOnlyRun(
+      "git",
+      ["-C", targetRepoRoot, "merge-base", "--is-ancestor", git.commit, candidateCommit],
+      { timeoutMs: 10_000 },
+    );
+    fastForward = ancestor.code === 0;
+  }
+  check(
+    "git: candidato é fast-forward do alvo",
+    fastForward === true,
+    fastForward === true
+      ? `${String(git.commit).slice(0, 8)} -> ${String(candidateCommit).slice(0, 8)}`
+      : "o candidato não é descendente do HEAD do alvo (fast-forward obrigatório)",
+  );
+
   // ---------------------------------------------------------------- 2) Core
   const databaseExists = fs.existsSync(config.coreDbPath);
   const sqliteProbe = await readOnlyRun("sqlite3", [config.coreDbPath, "SELECT 1;"], { timeoutMs: 10_000 });
   const sqliteAccessible = sqliteProbe.code === 0;
   const activeDeploys = await countActiveDeploys({ dbPath: config.coreDbPath, run: readOnlyRun });
-  const migrations = listMigrations({ repoRoot: config.repoRoot });
+  const migrations = listMigrations({ repoRoot: targetRepoRoot });
+  const migrationsCandidate = await listMigrationsFromCommit({
+    repoRoot: targetRepoRoot,
+    commit: candidateCommit,
+    run: readOnlyRun,
+  });
   check(
     "core: banco do Core acessível",
     databaseExists && sqliteAccessible,
@@ -304,6 +490,18 @@ async function runReadOnlyPreflight({ config, run, now = new Date(), executed = 
   return {
     generatedAt: now.toISOString(),
     mode: "dry-run",
+    executor: {
+      root: executorRoot,
+      commit: executorCommit,
+    },
+    target: {
+      root: targetRepoRoot,
+      branch: git.branch,
+      commit: git.commit,
+      candidateCommit,
+      fastForward,
+      detached,
+    },
     git: {
       branch: git.branch,
       commit: git.commit,
@@ -312,7 +510,7 @@ async function runReadOnlyPreflight({ config, run, now = new Date(), executed = 
       untracked: git.untracked,
       ignored: git.ignored,
       remote: remoteResult.code === 0 ? remoteResult.stdout.trim() : null,
-      candidateCommit: candidateResult.code === 0 ? candidateResult.stdout.trim() : null,
+      candidateCommit,
     },
     core: {
       databasePath: config.coreDbPath,
@@ -320,6 +518,7 @@ async function runReadOnlyPreflight({ config, run, now = new Date(), executed = 
       sqliteAccessible,
       activeDeploys,
       migrations,
+      migrationsCandidate,
     },
     host: {
       disk: diskResult.code === 0 ? diskResult.stdout.trim() : null,
@@ -351,13 +550,32 @@ function safeParseJson(raw) {
  * Monta o plano (o que SERIA feito). Não executa nada.
  */
 async function planRollout({ config, run, now = new Date() }) {
-  const git = await inspectGitState({ cwd: config.repoRoot, run });
-  const migrations = listMigrations({ repoRoot: config.repoRoot });
+  const { targetRepoRoot, executorRoot } = resolveRoots(config);
+  const git = await inspectGitState({ cwd: targetRepoRoot, run });
+  const migrations = listMigrations({ repoRoot: targetRepoRoot });
   const backupName = `core-pre-update-${timestamp(now)}.db`;
   const activeDeploys = await countActiveDeploys({ dbPath: config.coreDbPath, run });
+  const candidateResult = await run("git", ["-C", targetRepoRoot, "rev-parse", "--verify", "origin/main"], {
+    timeoutMs: 10_000,
+  });
+  const candidateCommit = candidateResult.code === 0 ? candidateResult.stdout.trim() || null : null;
+  const executorCommitResult = await run("git", ["-C", executorRoot, "rev-parse", "HEAD"], {
+    timeoutMs: 10_000,
+  });
 
   return {
     generatedAt: now.toISOString(),
+    executor: {
+      root: executorRoot,
+      commit: executorCommitResult.code === 0 ? executorCommitResult.stdout.trim() || null : null,
+    },
+    target: {
+      root: targetRepoRoot,
+      branch: git.branch,
+      commit: git.commit,
+      candidateCommit,
+      detached: git.branch === null || git.branch === "HEAD",
+    },
     git: {
       branch: git.branch,
       commit: git.commit,
@@ -365,6 +583,7 @@ async function planRollout({ config, run, now = new Date() }) {
       trackedModified: git.trackedModified,
       untracked: git.untracked,
       ignored: git.ignored,
+      candidateCommit,
     },
     activeDeploys,
     backup: {
@@ -406,6 +625,7 @@ async function planRollout({ config, run, now = new Date() }) {
 async function executeRollout({ config, run, log = () => {}, step = () => {}, dryRun = false, now = new Date() }) {
   const startedAt = new Date();
   const stages = [];
+  const { targetRepoRoot, executorRoot } = resolveRoots(config);
   const state = {
     status: "running",
     stage: null,
@@ -416,6 +636,13 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     backupPath: null,
     projectIntegrityCheck: null,
     error: null,
+    // De onde veio o código que EXECUTOU o rollout e qual checkout foi
+    // atualizado (podem ser coisas diferentes no primeiro rollout).
+    executorRoot,
+    executorCommit: null,
+    targetRepoRoot,
+    targetPreviousCommit: null,
+    targetCandidateCommit: null,
   };
 
   const record = (id, status, detail = null) => {
@@ -441,6 +668,11 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
 
   let lockPath = null;
   let snapshotBefore = null;
+  // O rollback só faz sentido se o checkout alvo foi de fato atualizado.
+  // Abortos que acontecem ANTES do git update (working tree sujo, alvo
+  // detached, candidato sem fast-forward, deploy em andamento) NÃO podem
+  // escrever nada no Git do alvo.
+  let targetUpdated = false;
 
   try {
     // ---------------------------------------------------------------- dry-run
@@ -454,9 +686,12 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
       const executed = [];
       const { run: readOnlyRun } = createReadOnlyRunner({ run, executed });
       const plan = await planRollout({ config, run: readOnlyRun, now });
+      state.executorCommit = plan.executor.commit;
       state.previousCommit = plan.git.commit;
+      state.targetPreviousCommit = plan.git.commit;
       state.previousBranch = plan.git.branch;
-      state.candidateCommit = plan.git.commit;
+      state.candidateCommit = plan.target.candidateCommit;
+      state.targetCandidateCommit = plan.target.candidateCommit;
 
       const preflight = await runReadOnlyPreflight({ config, run: readOnlyRun, now, executed });
       state.status = "dry-run";
@@ -477,9 +712,12 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
 
     // ---------------------------------------------------------------- preflight
     const plan = await planRollout({ config, run, now });
+    state.executorCommit = plan.executor.commit;
     state.previousCommit = plan.git.commit;
+    state.targetPreviousCommit = plan.git.commit;
     state.previousBranch = plan.git.branch;
-    state.candidateCommit = plan.git.commit;
+    state.candidateCommit = plan.target.candidateCommit;
+    state.targetCandidateCommit = plan.target.candidateCommit;
 
     // Nenhum rollout do Core começa no meio de um deploy de projeto.
     if (plan.activeDeploys > 0) {
@@ -488,7 +726,12 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
           "Nenhum rollout do Core começa no meio de um deploy - tente novamente assim que o deploy terminar.",
       );
     }
-    record("preflight", "ok", `branch=${plan.git.branch} commit=${String(plan.git.commit).slice(0, 8)}`);
+    record(
+      "preflight",
+      "ok",
+      `alvo=${targetRepoRoot} branch=${plan.git.branch} commit=${String(plan.git.commit).slice(0, 8)} ` +
+        `candidato=${String(plan.target.candidateCommit ?? "?").slice(0, 8)}`,
+    );
 
     // ---------------------------------------------------------------- lock
     const lock = acquireLock({ lockPath: config.lockPath });
@@ -504,11 +747,43 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     record("worker-drain", "ok", config.drainFilePath);
 
     // ---------------------------------------------------------------- git check
-    const git = await inspectGitState({ cwd: config.repoRoot, run });
+    const git = await inspectGitState({ cwd: targetRepoRoot, run });
     if (git.dirty) {
       throw new Error(formatDirtyTreeMessage(git));
     }
-    record("git-check", "ok", "working tree limpo");
+
+    // O alvo precisa estar em uma BRANCH. Em detached HEAD o `git pull`
+    // falha com "You are not currently on a branch" (e foi exatamente o que
+    // aconteceu no incidente do primeiro rollout).
+    const targetBranch = git.branch;
+    if (!targetBranch || targetBranch === "HEAD") {
+      throw new Error(
+        `o checkout alvo está em detached HEAD (${String(git.commit).slice(0, 8)}): ` +
+          "o rollout do Core só roda em uma branch do checkout alvo.",
+      );
+    }
+
+    // Fast-forward OBRIGATÓRIO: o candidato (origin/main) precisa ser
+    // descendente do HEAD atual do alvo. Nunca há reset nem merge - se não
+    // for fast-forward, o checkout alvo não é tocado.
+    if (!state.candidateCommit) {
+      throw new Error(
+        "origin/main não encontrado no checkout alvo (o rollout não faz fetch automático): nada foi alterado.",
+      );
+    }
+    const ancestor = await run(
+      "git",
+      ["-C", targetRepoRoot, "merge-base", "--is-ancestor", String(git.commit), String(state.candidateCommit)],
+      { timeoutMs: 15_000 },
+    );
+    if (ancestor.code !== 0) {
+      throw new Error(
+        `fast-forward obrigatório: ${String(state.candidateCommit).slice(0, 8)} (origin/main) não é descendente de ` +
+          `${String(git.commit).slice(0, 8)} (HEAD do alvo). O checkout alvo não será alterado ` +
+          "(nem reset, nem merge).",
+      );
+    }
+    record("git-check", "ok", `working tree limpo, branch=${targetBranch}, fast-forward ok`);
 
     // ---------------------------------------------------------------- snapshot before
     snapshotBefore = await captureProjectSnapshot({ projects: config.projects, run, now });
@@ -532,16 +807,25 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     record("core-backup", "ok", `${backup.path} (${backup.bytes} bytes)`);
 
     // ---------------------------------------------------------------- git update
-    const pull = await run("git", ["pull", "--ff-only"], { cwd: config.repoRoot, timeoutMs: 120_000 });
+    // O pull acontece NO CHECKOUT ALVO, com a branch explícita - nunca no
+    // repositório do executor (que pode ser um worktree detached).
+    const pull = await run("git", ["-C", targetRepoRoot, "pull", "--ff-only", "origin", targetBranch], {
+      cwd: targetRepoRoot,
+      timeoutMs: 120_000,
+    });
     if (pull.code !== 0) {
       throw new Error(`git pull falhou: ${pull.stderr.trim() || pull.stdout.trim()}`);
     }
-    const candidate = await run("git", ["rev-parse", "HEAD"], { cwd: config.repoRoot });
+    const candidate = await run("git", ["-C", targetRepoRoot, "rev-parse", "HEAD"], {
+      cwd: targetRepoRoot,
+    });
     state.candidateCommit = candidate.stdout.trim();
+    state.targetCandidateCommit = state.candidateCommit;
+    targetUpdated = true;
     record("git-update", "ok", String(state.candidateCommit).slice(0, 8));
 
     // ---------------------------------------------------------------- install
-    const install = await run("npm", ["install"], { cwd: config.repoRoot, timeoutMs: 900_000 });
+    const install = await run("npm", ["install"], { cwd: targetRepoRoot, timeoutMs: 900_000 });
     if (install.code !== 0) {
       throw new Error("npm install falhou");
     }
@@ -554,7 +838,7 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
       ["build-web", "apps/web"],
     ]) {
       const build = await run("npm", ["run", "build", `--workspace=${workspace}`], {
-        cwd: config.repoRoot,
+        cwd: targetRepoRoot,
         timeoutMs: 1_800_000,
       });
       if (build.code !== 0) {
@@ -567,9 +851,9 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     // O Next em modo "standalone" NÃO serve .next/static nem public/ sozinho:
     // o postbuild já copia, mas o rollout copia de novo (idempotente) para
     // garantir - o web não pode ficar sem CSS/JS depois do update.
-    const assetsScript = path.join(config.repoRoot, "apps", "web", "scripts", "copy-standalone-assets.js");
+    const assetsScript = path.join(targetRepoRoot, "apps", "web", "scripts", "copy-standalone-assets.js");
     const assets = await run(process.execPath, [assetsScript], {
-      cwd: path.join(config.repoRoot, "apps", "web"),
+      cwd: path.join(targetRepoRoot, "apps", "web"),
       timeoutMs: 120_000,
     });
     if (assets.code !== 0) {
@@ -584,7 +868,7 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
 
     // ---------------------------------------------------------------- migration
     const migrate = await run("npx", ["prisma", "migrate", "deploy"], {
-      cwd: path.join(config.repoRoot, "apps", "api"),
+      cwd: path.join(targetRepoRoot, "apps", "api"),
       timeoutMs: 600_000,
     });
     if (migrate.code !== 0) {
@@ -598,7 +882,7 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
       [config.coreDbPath, "600"],
     ]) {
       if (!fs.existsSync(file)) continue;
-      const chmod = await run("chmod", [mode, file], { cwd: config.repoRoot });
+      const chmod = await run("chmod", [mode, file], { cwd: targetRepoRoot });
       if (chmod.code !== 0) {
         record("permissions", "warn", `não foi possível aplicar ${mode} em ${file}`);
         continue;
@@ -607,7 +891,7 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     record("permissions", "ok", ".env e dev.db com 600");
 
     // ---------------------------------------------------------------- pm2 (só o Core)
-    const pm2 = await run("pm2", ["restart", ...config.pm2Apps], { cwd: config.repoRoot, timeoutMs: 120_000 });
+    const pm2 = await run("pm2", ["restart", ...config.pm2Apps], { cwd: targetRepoRoot, timeoutMs: 120_000 });
     if (pm2.code !== 0) {
       throw new Error("pm2 restart do Korrelo falhou");
     }
@@ -667,8 +951,17 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     record(state.stage || "unknown", "failed", message);
     writeStatus();
 
-    // Rollback do CORE (nunca dos projetos).
-    const rollback = await rollbackCore({ config, run, log, previousCommit: state.previousCommit });
+    // Rollback do CORE (nunca dos projetos). Só roda se o checkout alvo foi
+    // atualizado: abortos anteriores ao git update não têm o que reverter
+    // (e não podem escrever nada no Git do alvo).
+    const rollback = targetUpdated
+      ? await rollbackCore({ config, run, log, previousCommit: state.previousCommit })
+      : {
+          ok: false,
+          skipped: true,
+          reason: "o checkout alvo não foi atualizado (abortado antes do git update): nada a reverter",
+          steps: [],
+        };
     state.rollback = rollback;
 
     // Libera o worker (o Core precisa voltar a funcionar).
@@ -690,14 +983,21 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
 /**
  * Rollback do CORE: volta ao commit anterior, rebuild e reinicia SOMENTE
  * korrelo-api e korrelo-web. NUNCA toca em container de projeto.
+ *
+ * O rollback acontece NO CHECKOUT ALVO (o mesmo que foi atualizado): volta
+ * para o previousCommit capturado ANTES do git update.
  */
 async function rollbackCore({ config, run, log = () => {}, previousCommit }) {
   if (!previousCommit) {
     return { ok: false, reason: "commit anterior desconhecido" };
   }
+  const { targetRepoRoot } = resolveRoots(config);
   const steps = [];
 
-  const checkout = await run("git", ["checkout", previousCommit], { cwd: config.repoRoot, timeoutMs: 60_000 });
+  const checkout = await run("git", ["-C", targetRepoRoot, "checkout", previousCommit], {
+    cwd: targetRepoRoot,
+    timeoutMs: 60_000,
+  });
   steps.push({ step: "git-checkout", code: checkout.code });
   if (checkout.code !== 0) {
     return { ok: false, reason: `git checkout falhou: ${checkout.stderr.trim()}`, steps };
@@ -705,7 +1005,7 @@ async function rollbackCore({ config, run, log = () => {}, previousCommit }) {
 
   for (const workspace of ["packages/shared-types", "apps/api", "apps/web"]) {
     const build = await run("npm", ["run", "build", `--workspace=${workspace}`], {
-      cwd: config.repoRoot,
+      cwd: targetRepoRoot,
       timeoutMs: 1_800_000,
     });
     steps.push({ step: `build-${workspace}`, code: build.code });
@@ -714,8 +1014,17 @@ async function rollbackCore({ config, run, log = () => {}, previousCommit }) {
     }
   }
 
+  // Os assets do Next standalone também voltam (o web não pode ficar sem
+  // CSS/JS depois do rollback).
+  const assetsScript = path.join(targetRepoRoot, "apps", "web", "scripts", "copy-standalone-assets.js");
+  const assets = await run(process.execPath, [assetsScript], {
+    cwd: path.join(targetRepoRoot, "apps", "web"),
+    timeoutMs: 120_000,
+  });
+  steps.push({ step: "web-assets", code: assets.code });
+
   // SOMENTE os processos do Core. Projetos não são tocados.
-  const pm2 = await run("pm2", ["restart", ...config.pm2Apps], { cwd: config.repoRoot, timeoutMs: 120_000 });
+  const pm2 = await run("pm2", ["restart", ...config.pm2Apps], { cwd: targetRepoRoot, timeoutMs: 120_000 });
   steps.push({ step: "pm2-restart-core", code: pm2.code });
   if (pm2.code !== 0) {
     return { ok: false, reason: "pm2 restart falhou no rollback", steps };
@@ -737,8 +1046,12 @@ module.exports = {
   FORBIDDEN_DOCKER_COMMANDS,
   READ_ONLY_COMMANDS,
   isReadOnlyCommand,
+  gitSubcommand,
   createReadOnlyRunner,
   runReadOnlyPreflight,
+  inspectTargetRepo,
+  listMigrationsFromCommit,
+  resolveRoots,
   planRollout,
   executeRollout,
   rollbackCore,

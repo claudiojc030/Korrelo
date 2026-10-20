@@ -354,6 +354,44 @@ sem nenhum comando Docker de escrita e sem arquivo de status. Cada comando
 passa por uma allowlist de leitura — um comando de escrita aborta o dry-run
 com erro em vez de acontecer.
 
+#### Atualizar um checkout ALVO diferente (bootstrap)
+
+O executor (o código do rollout, a config e as libs) e o **alvo** (o checkout
+do Korrelo que roda em produção) podem ser coisas diferentes. Isso permite
+rodar o rollout novo de um worktree externo e atualizar o checkout antigo:
+
+```bash
+# dry-run real contra o checkout de produção
+node /tmp/korrelo-rollout-preview/apps/api/scripts/rollout/rollout.cjs \
+  --repo-root /home/korrelo/korrelo
+
+# rollout de verdade (o alvo é atualizado, o executor não)
+node /tmp/korrelo-rollout-preview/apps/api/scripts/rollout/rollout.cjs \
+  --repo-root /home/korrelo/korrelo \
+  --apply
+
+# o wrapper repassa os argumentos
+bash scripts/rollout-korrelo.sh --repo-root /home/korrelo/korrelo --apply
+```
+
+O que o `--repo-root` garante:
+
+- o **alvo** é quem é atualizado: `git status/branch/pull`, banco do Core
+  (`<alvo>/apps/api/prisma/dev.db`), `.env`, `npm install`, builds, migration,
+  `chmod` e rollback acontecem todos no alvo;
+- o **executor** (onde o `rollout.cjs` está) fornece o código, as libs e o
+  `rollout.config.json` — a config nova nunca é lida do alvo antigo;
+- `previousCommit` é o HEAD do **alvo** e `candidateCommit` é o
+  `origin/main` do **alvo**; o update só acontece se for fast-forward
+  (nunca há `reset` nem `merge`);
+- o `git pull` sempre nomeia o alvo e a branch (`git -C <alvo> pull --ff-only
+  origin <branch>`) — checkout em detached HEAD é recusado antes de qualquer
+  escrita;
+- o rollback volta o **alvo** ao `previousCommit` (rebuild, assets e restart
+  só do Core);
+- argumento desconhecido **aborta** (nunca é ignorado em silêncio) e
+  `--repo-root` sem valor é recusado antes de qualquer lock, drain ou backup.
+
 O que ele garante:
 
 - **não roda no meio de um deploy de projeto** (recusa se houver job em

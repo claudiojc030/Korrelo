@@ -10,6 +10,10 @@
 #   bash scripts/rollout-korrelo.sh --plan     # só imprime o plano teórico
 #   bash scripts/rollout-korrelo.sh --apply    # executa o rollout de verdade
 #
+# Update de um checkout ALVO diferente do executor (primeiro rollout):
+#   bash scripts/rollout-korrelo.sh --repo-root /home/korrelo/korrelo
+#   bash scripts/rollout-korrelo.sh --repo-root /home/korrelo/korrelo --apply
+#
 # Modos:
 #   --plan  = imprime o plano. NÃO fala com Docker, nem com o banco.
 #   (padrão)= DRY-RUN REAL: executa TODAS as verificações somente leitura
@@ -18,6 +22,10 @@
 #              drain, sem backup, sem migration, sem build, sem restart de
 #              PM2 e sem nenhum comando Docker de escrita.
 #   --apply = o rollout de verdade (o mesmo executor do botão "Atualizar agora").
+#
+# O alvo (--repo-root) é o checkout do Korrelo que será atualizado. O código,
+# a config e as libs do rollout vêm sempre do EXECUTOR (o repositório onde
+# este script roda).
 #
 # Stages (executados pelo CLI, na ordem):
 #    1. preflight             - ambiente, git, disco, Docker acessível
@@ -62,11 +70,18 @@ fail() {
 # --- pré-requisitos -------------------------------------------------------
 command -v node >/dev/null 2>&1 || fail "node não encontrado (Node 20+ é obrigatório)"
 [ -f "$CLI" ] || fail "CLI de rollout não encontrado: $CLI"
-[ -d "$REPO_ROOT/.git" ] || fail "a raiz do repositório não foi encontrada em $REPO_ROOT"
+
+# O repositório do EXECUTOR tem que ser um repositório Git válido. A checagem
+# é feita pelo próprio Git (funciona em worktree, onde `.git` é ARQUIVO e não
+# diretório - `git worktree` nunca tem `.git` como pasta).
+git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  || fail "a raiz do executor não é um repositório Git válido: $REPO_ROOT"
 
 # A partir daqui, nada é executado sem o CLI (que tem o dry-run como padrão
-# e aborta em qualquer precondição falha).
-log "repositório: $REPO_ROOT"
-log "modo: $*"
+# e aborta em qualquer precondição falha). Os argumentos são repassados
+# intactos (--plan, --apply, --repo-root <path>); o CLI faz o parsing
+# explícito e ABORTA em qualquer argumento desconhecido.
+log "repositório (executor): $REPO_ROOT"
+log "modo: ${*:-dry-run}"
 
 exec node "$CLI" "$@"

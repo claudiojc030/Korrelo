@@ -405,15 +405,19 @@ describe("rollout - executor", () => {
       calls.push({ command, args });
 
       if (command === "git") {
-        if (args[0] === "status") {
+        // O rollout usa `git -C <repo>` para não depender do cwd.
+        const gitArgs = args[0] === "-C" ? args.slice(2) : args;
+        if (gitArgs[0] === "status") {
           return {
             code: 0,
             stdout: overrides.dirty ? " M package-lock.json\n" : "",
             stderr: "",
           };
         }
-        if (args[0] === "rev-parse" && args[1] === "--abbrev-ref") return { code: 0, stdout: "main\n", stderr: "" };
-        if (args[0] === "rev-parse") return { code: 0, stdout: "af1205a\n", stderr: "" };
+        if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--abbrev-ref") return { code: 0, stdout: "main\n", stderr: "" };
+        if (gitArgs[0] === "rev-parse" && gitArgs[1] === "--verify") return { code: 0, stdout: "af1205a\n", stderr: "" };
+        if (gitArgs[0] === "rev-parse") return { code: 0, stdout: "af1205a\n", stderr: "" };
+        if (gitArgs[0] === "remote") return { code: 0, stdout: "https://github.com/claudiojc030/Korrelo.git\n", stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
       }
 
@@ -498,8 +502,9 @@ describe("rollout - executor", () => {
     // Nada de reset/checkout/stash.
     for (const call of calls) {
       if (call.command !== "git") continue;
-      // "checkout" � permitido: s� o rollback do Core usa (voltar ao commit anterior).
-      expect(["reset", "stash", "restore", "clean"]).not.toContain(call.args[0]);
+      // "checkout" é permitido: só o rollback do Core usa (voltar ao commit anterior).
+      const gitArgs = call.args[0] === "-C" ? call.args.slice(2) : call.args;
+      expect(["reset", "stash", "restore", "clean"]).not.toContain(gitArgs[0]);
     }
   });
 
@@ -577,7 +582,9 @@ describe("rollout - executor", () => {
 
     expect(result.ok).toBe(false);
     expect(result.state.rollback?.ok).toBe(true);
-    const checkout = calls.find((call) => call.command === "git" && call.args[0] === "checkout");
+    const checkout = calls.find(
+      (call) => call.command === "git" && (call.args[0] === "checkout" || call.args[2] === "checkout"),
+    );
     expect(checkout).toBeDefined();
   });
 
