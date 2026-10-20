@@ -404,9 +404,22 @@ describe("rollout - executor", () => {
     const run = async (command: string, args: string[] = []): Promise<RunResult> => {
       calls.push({ command, args });
 
-      if (command === "git") {
+      // O rollout pode envolver o comando em nice/ionice (prioridade baixa).
+      // O fake responde ao comando REAL, como o sistema faria.
+      let realCommand = command;
+      let realArgs = args;
+      if (realCommand === "nice") {
+        realCommand = realArgs[2];
+        realArgs = realArgs.slice(3);
+      }
+      if (realCommand === "ionice") {
+        realCommand = realArgs[2];
+        realArgs = realArgs.slice(3);
+      }
+
+      if (realCommand === "git") {
         // O rollout usa `git -C <repo>` para não depender do cwd.
-        const gitArgs = args[0] === "-C" ? args.slice(2) : args;
+        const gitArgs = realArgs[0] === "-C" ? realArgs.slice(2) : realArgs;
         if (gitArgs[0] === "status") {
           return {
             code: 0,
@@ -421,26 +434,26 @@ describe("rollout - executor", () => {
         return { code: 0, stdout: "", stderr: "" };
       }
 
-      if (command === "sqlite3") {
-        if (args[1]?.startsWith("PRAGMA integrity_check")) {
+      if (realCommand === "sqlite3") {
+        if (realArgs[1]?.startsWith("PRAGMA integrity_check")) {
           return overrides.backupFails ? { code: 0, stdout: "malformed\n", stderr: "" } : { code: 0, stdout: "ok\n", stderr: "" };
         }
-        if (args[1]?.startsWith(".backup")) {
-          const dest = /'([^']+)'/.exec(args[1])?.[1];
+        if (realArgs[1]?.startsWith(".backup")) {
+          const dest = /'([^']+)'/.exec(realArgs[1])?.[1];
           if (dest) fs.writeFileSync(dest, "backup");
           return { code: 0, stdout: "", stderr: "" };
         }
-        if (args[1]?.includes("DeployJob")) {
+        if (realArgs[1]?.includes("DeployJob")) {
           return { code: 0, stdout: `${overrides.activeDeploys ?? 0}\n`, stderr: "" };
         }
         return { code: 0, stdout: "", stderr: "" };
       }
 
-      if (command === "docker") {
-        if (args[0] === "ps" && args.includes("-a")) {
+      if (realCommand === "docker") {
+        if (realArgs[0] === "ps" && realArgs.includes("-a")) {
           return { code: 0, stdout: "korrelo-mesatta-8452004c\n", stderr: "" };
         }
-        if (args[0] === "inspect") {
+        if (realArgs[0] === "inspect") {
           // Rodada 0 = snapshot "antes"; rodada 1+ = snapshot "depois". Com o
           // override, simula uma divergência (container recriado/reiniciado).
           const round = inspectRound++;
@@ -456,24 +469,24 @@ describe("rollout - executor", () => {
         return { code: 0, stdout: "", stderr: "" };
       }
 
-      if (String(args[0] ?? "").includes("copy-standalone-assets.js")) {
+      if (String(realArgs[0] ?? "").includes("copy-standalone-assets.js")) {
         return overrides.assetsFail
           ? { code: 1, stdout: "", stderr: "falha ao copiar assets" }
           : { code: 0, stdout: "", stderr: "" };
       }
 
-      if (command === "npm") {
-        if (args[0] === "run" && args[1] === "build") {
+      if (realCommand === "npm") {
+        if (realArgs[0] === "run" && realArgs[1] === "build") {
           return overrides.buildFails ? { code: 1, stdout: "", stderr: "build falhou" } : { code: 0, stdout: "", stderr: "" };
         }
         return { code: 0, stdout: "", stderr: "" };
       }
 
-      if (command === "npx") {
+      if (realCommand === "npx") {
         return overrides.migrationFails ? { code: 1, stdout: "", stderr: "migration falhou" } : { code: 0, stdout: "", stderr: "" };
       }
 
-      if (command === "pm2") return { code: 0, stdout: "", stderr: "" };
+      if (realCommand === "pm2") return { code: 0, stdout: "", stderr: "" };
 
       if (command === "curl") {
         if (overrides.healthFails && String(args[args.length - 1]).includes("3001") && !healthAlreadyFailed) {

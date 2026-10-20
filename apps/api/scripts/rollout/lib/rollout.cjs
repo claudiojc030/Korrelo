@@ -25,19 +25,31 @@ const {
   formatSnapshotSummary,
 } = require("./project-snapshot.cjs");
 const { acquireLock, releaseLock, defaultLockPath } = require("./self-update-lock.cjs");
+const {
+  readThresholds,
+  readHostResources,
+  evaluateResources,
+  wrapBuildCommand,
+  buildEnv,
+} = require("./resource-guard.cjs");
 
 const STAGES = [
   { id: "preflight", title: "Verificar ambiente (git, disco, Docker, Core)", writes: false },
   { id: "lock", title: "Pegar o lock de rollout", writes: true },
   { id: "worker-drain", title: "Colocar o worker de deploy em draining", writes: true },
   { id: "git-check", title: "Verificar working tree (abortar se sujo)", writes: false },
+  {
+    id: "resource-preflight",
+    title: "Medir recursos do host (RAM, swap, load, disco) antes de buildar",
+    writes: false,
+  },
   { id: "snapshot-before", title: "Snapshot dos containers de projeto (leitura)", writes: false },
   { id: "core-backup", title: "Backup consistente do banco do Core", writes: true },
   { id: "git-update", title: "git pull (só com working tree limpo)", writes: true },
-  { id: "install", title: "npm install", writes: true },
-  { id: "build-shared", title: "build shared-types", writes: true },
-  { id: "build-api", title: "build da API", writes: true },
-  { id: "build-web", title: "build do web", writes: true },
+  { id: "install", title: "npm install (revalidando recursos)", writes: true },
+  { id: "build-shared", title: "build shared-types (revalidando recursos)", writes: true },
+  { id: "build-api", title: "build da API (revalidando recursos)", writes: true },
+  { id: "build-web", title: "build do web (revalidando recursos)", writes: true },
   {
     id: "web-assets",
     title: "Copiar .next/static e public/ para o standalone do Next",
@@ -79,6 +91,7 @@ const STAGE_PERCENT = {
   lock: 4,
   "worker-drain": 5,
   "git-check": 8,
+  "resource-preflight": 10,
   "snapshot-before": 12,
   "core-backup": 15,
   "git-update": 20,
@@ -172,7 +185,7 @@ function listMigrations({ repoRoot, migrationsDir = "apps/api/prisma/migrations"
  */
 async function listMigrationsFromCommit({ repoRoot, commit, run, migrationsDir = "apps/api/prisma/migrations" }) {
   if (!commit) return [];
-  const result = await run("git", ["-C", repoRoot, "ls-tree", "--name-only", commit, "--", `${migrationsDir}/`], {
+  const result = await run("git", ["-C", repoRoot, "ls-tree", commit, "--", `${migrationsDir}/`], {
     timeoutMs: 15_000,
   });
   if (result.code !== 0) return [];
@@ -180,8 +193,12 @@ async function listMigrationsFromCommit({ repoRoot, commit, run, migrationsDir =
   return result.stdout
     .split("\n")
     .map((line) => line.trim())
-    .filter((line) => line.startsWith(prefix))
-    .map((line) => line.slice(prefix.length))
+    // Só ÁRVORES (diretórios de migration) entram na lista: arquivos como o
+    // `migration_lock.toml` NÃO são migrations.
+    .filter((line) => /^\d+\s+tree\s+/.test(line))
+    .map((line) => line.split("\t")[1] ?? "")
+    .filter((entry) => entry.startsWith(prefix))
+    .map((entry) => entry.slice(prefix.length))
     .filter((name) => name && !name.includes("/"))
     .sort();
 }
@@ -364,11 +381,12 @@ function createReadOnlyRunner({ run, executed = [] }) {
  *
  * O runner é envolvido por um guard que aborta qualquer comando de escrita.
  */
-async function runReadOnlyPreflight({ config, run, now = new Date(), executed = [] }) {
+async function runReadOnlyPreflight({ config, run, now = new Date(), executed = [], readResources = null }) {
   const problems = [];
   const checks = [];
 
   const { run: readOnlyRun, executed: executedCommands } = createReadOnlyRunner({ run, executed });
+  const readHost = readResources ?? ((opts) => readHostResources(opts));
 
   const check = (name, ok, detail) => {
     checks.push({ name, ok, detail });
@@ -377,6 +395,7 @@ async function runReadOnlyPreflight({ config, run, now = new Date(), executed = 
   };
 
   const { targetRepoRoot, executorRoot } = resolveRoots(config);
+  const thresholds = readThresholds();
 
   // ---------------------------------------------------------------- 1) Git do ALVO
   const git = await inspectGitState({ cwd: targetRepoRoot, run: readOnlyRun });
@@ -487,6 +506,20 @@ async function runReadOnlyPreflight({ config, run, now = new Date(), executed = 
     `${containerCount} container(s) de ${config.projects.length} projeto(s)`,
   );
 
+  // ---------------------------------------------------------------- 5) Recursos
+  // Medição READ-ONLY: MemAvailable, swap, load e disco. Serve para o
+  // operador ver se o build do Core é seguro AGORA.
+  const hostResources = await readHost({ run: readOnlyRun });
+  const resourceEvaluation = evaluateResources({
+    resources: hostResources,
+    thresholds: readThresholds(),
+  });
+  check(
+    "recursos: memória/swap/load/disco para buildar",
+    resourceEvaluation.safeToBuild,
+    resourceEvaluation.reason,
+  );
+
   return {
     generatedAt: now.toISOString(),
     mode: "dry-run",
@@ -534,6 +567,16 @@ async function runReadOnlyPreflight({ config, run, now = new Date(), executed = 
     projects: snapshot.projects,
     problems,
     checks,
+    rolloutResourceCheck: {
+      memAvailableMb: hostResources.memAvailableMb,
+      memRequiredMb: thresholds.memRequiredMb,
+      swapUsedMb: hostResources.swapUsedMb,
+      swapThresholdMb: thresholds.swapUsedMaxMb,
+      load1: hostResources.load1,
+      diskAvailableGb: hostResources.diskAvailableGb,
+      safeToBuild: resourceEvaluation.safeToBuild,
+      reason: resourceEvaluation.reason,
+    },
     executedCommands: executedCommands.map((entry) => `${entry.command} ${entry.args[0] ?? ""}`.trim()),
   };
 }
@@ -621,8 +664,19 @@ async function planRollout({ config, run, now = new Date() }) {
 
 /**
  * Executa o rollout. Com dryRun=true, nada é executado.
+ *
+ * `readResources` permite injetar a leitura de recursos (usado nos testes);
+ * por padrão lê /proc/meminfo, load average e disco (tudo read-only).
  */
-async function executeRollout({ config, run, log = () => {}, step = () => {}, dryRun = false, now = new Date() }) {
+async function executeRollout({
+  config,
+  run,
+  log = () => {},
+  step = () => {},
+  dryRun = false,
+  now = new Date(),
+  readResources = null,
+}) {
   const startedAt = new Date();
   const stages = [];
   const { targetRepoRoot, executorRoot } = resolveRoots(config);
@@ -643,6 +697,26 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     targetRepoRoot,
     targetPreviousCommit: null,
     targetCandidateCommit: null,
+    // Última checagem de recursos do host (por que o build pode/ não pode
+    // rodar agora).
+    resourceCheck: null,
+  };
+
+  const thresholds = readThresholds();
+
+  /** Lê e avalia os recursos do host (read-only). */
+  const evaluateHostResources = async (runner) => {
+    const reader = readResources ?? ((opts) => readHostResources(opts));
+    const resources = await reader({ run: runner });
+    const evaluation = evaluateResources({ resources, thresholds });
+    state.resourceCheck = {
+      at: new Date().toISOString(),
+      safeToBuild: evaluation.safeToBuild,
+      reason: evaluation.reason,
+      checks: evaluation.checks,
+      resources,
+    };
+    return { resources, evaluation };
   };
 
   const record = (id, status, detail = null) => {
@@ -673,6 +747,12 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
   // detached, candidato sem fast-forward, deploy em andamento) NÃO podem
   // escrever nada no Git do alvo.
   let targetUpdated = false;
+  // Prioridade baixa e heap dos processos Node do rollout. Declarados aqui
+  // para que o ROLLBACK também use (o rollback nunca é abortado por
+  // recurso: ele precisa concluir).
+  let niceAvailable = false;
+  let ioniceAvailable = false;
+  let buildEnvVars = buildEnv({ buildHeapMb: thresholds.buildHeapMb });
 
   try {
     // ---------------------------------------------------------------- dry-run
@@ -693,7 +773,7 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
       state.candidateCommit = plan.target.candidateCommit;
       state.targetCandidateCommit = plan.target.candidateCommit;
 
-      const preflight = await runReadOnlyPreflight({ config, run: readOnlyRun, now, executed });
+      const preflight = await runReadOnlyPreflight({ config, run: readOnlyRun, now, executed, readResources });
       state.status = "dry-run";
       log(`[rollout] dry-run: ${preflight.checks.length} verificação(ões) somente leitura concluída(s)`);
       for (const problem of preflight.problems) {
@@ -785,6 +865,20 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     }
     record("git-check", "ok", `working tree limpo, branch=${targetBranch}, fast-forward ok`);
 
+    // ---------------------------------------------------------------- recursos
+    // Antes de QUALQUER build/install: mede RAM, swap, load e disco. Se não
+    // houver recurso para compilar com segurança, o rollout é ADIADO - sem
+    // parar projeto, sem reduzir memória de projeto, sem reiniciar nada.
+    const preflightResources = await evaluateHostResources(run);
+    if (!preflightResources.evaluation.safeToBuild) {
+      record("resource-preflight", "failed", preflightResources.evaluation.reason);
+      throw new Error(
+        `Rollout adiado: recursos insuficientes para compilar o Core com segurança (${preflightResources.evaluation.reason}). ` +
+          "Os projetos em produção não foram tocados.",
+      );
+    }
+    record("resource-preflight", "ok", preflightResources.evaluation.reason);
+
     // ---------------------------------------------------------------- snapshot before
     snapshotBefore = await captureProjectSnapshot({ projects: config.projects, run, now });
     record("snapshot-before", "ok", `${Object.keys(snapshotBefore.projects).length} projeto(s) inspecionado(s)`);
@@ -825,19 +919,63 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     record("git-update", "ok", String(state.candidateCommit).slice(0, 8));
 
     // ---------------------------------------------------------------- install
-    const install = await run("npm", ["install"], { cwd: targetRepoRoot, timeoutMs: 900_000 });
+    // Prioridade baixa (nice/ionice) e heap limitado: valem SÓ para os
+    // processos do rollout. O PM2 e os containers não são tocados.
+    const niceAvailableProbe = (await run("nice", ["--version"], { timeoutMs: 5_000 })).code === 0;
+    const ioniceAvailableProbe =
+      thresholds.useIonice && (await run("ionice", ["-c", "3", "true"], { timeoutMs: 5_000 })).code === 0;
+    niceAvailable = niceAvailableProbe;
+    ioniceAvailable = ioniceAvailableProbe;
+    buildEnvVars = buildEnv({ buildHeapMb: thresholds.buildHeapMb });
+
+    /**
+     * Roda um passo de build/install: revalida os recursos do host (e aborta
+     * se a condição piorou), aplica nice/ionice e o teto de heap.
+     */
+    const runBuildStep = async ({ stageId, command, args, cwd, timeoutMs }) => {
+      const resources = await evaluateHostResources(run);
+      if (!resources.evaluation.safeToBuild) {
+        record(stageId, "failed", `recursos insuficientes: ${resources.evaluation.reason}`);
+        throw new Error(
+          `Rollout adiado: recursos insuficientes para compilar o Core com segurança (${resources.evaluation.reason}). ` +
+            "Os projetos em produção não foram tocados.",
+        );
+      }
+      const wrapped = wrapBuildCommand({
+        command,
+        args,
+        nice: niceAvailable,
+        ionice: ioniceAvailable,
+        niceLevel: thresholds.niceLevel,
+      });
+      return run(wrapped.command, wrapped.args, { cwd, env: buildEnvVars, timeoutMs });
+    };
+
+    const install = await runBuildStep({
+      stageId: "install",
+      command: "npm",
+      args: ["install"],
+      cwd: targetRepoRoot,
+      timeoutMs: 900_000,
+    });
     if (install.code !== 0) {
       throw new Error("npm install falhou");
     }
     record("install", "ok");
 
     // ---------------------------------------------------------------- builds
+    // ESTRICTAMENTE SEQUENCIAL: shared-types -> API -> web. Nunca em
+    // paralelo (o build do web é o mais pesado e não pode competir com os
+    // outros nem com os projetos).
     for (const [id, workspace] of [
       ["build-shared", "packages/shared-types"],
       ["build-api", "apps/api"],
       ["build-web", "apps/web"],
     ]) {
-      const build = await run("npm", ["run", "build", `--workspace=${workspace}`], {
+      const build = await runBuildStep({
+        stageId: id,
+        command: "npm",
+        args: ["run", "build", `--workspace=${workspace}`],
         cwd: targetRepoRoot,
         timeoutMs: 1_800_000,
       });
@@ -854,6 +992,7 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     const assetsScript = path.join(targetRepoRoot, "apps", "web", "scripts", "copy-standalone-assets.js");
     const assets = await run(process.execPath, [assetsScript], {
       cwd: path.join(targetRepoRoot, "apps", "web"),
+      env: buildEnvVars,
       timeoutMs: 120_000,
     });
     if (assets.code !== 0) {
@@ -955,7 +1094,16 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
     // atualizado: abortos anteriores ao git update não têm o que reverter
     // (e não podem escrever nada no Git do alvo).
     const rollback = targetUpdated
-      ? await rollbackCore({ config, run, log, previousCommit: state.previousCommit })
+      ? await rollbackCore({
+          config,
+          run,
+          log,
+          previousCommit: state.previousCommit,
+          nice: niceAvailable,
+          ionice: ioniceAvailable,
+          niceLevel: thresholds.niceLevel,
+          buildEnv: buildEnvVars,
+        })
       : {
           ok: false,
           skipped: true,
@@ -987,7 +1135,16 @@ async function executeRollout({ config, run, log = () => {}, step = () => {}, dr
  * O rollback acontece NO CHECKOUT ALVO (o mesmo que foi atualizado): volta
  * para o previousCommit capturado ANTES do git update.
  */
-async function rollbackCore({ config, run, log = () => {}, previousCommit }) {
+async function rollbackCore({
+  config,
+  run,
+  log = () => {},
+  previousCommit,
+  nice = false,
+  ionice = false,
+  niceLevel = 10,
+  buildEnv: buildEnvVars = undefined,
+}) {
   if (!previousCommit) {
     return { ok: false, reason: "commit anterior desconhecido" };
   }
@@ -1004,8 +1161,19 @@ async function rollbackCore({ config, run, log = () => {}, previousCommit }) {
   }
 
   for (const workspace of ["packages/shared-types", "apps/api", "apps/web"]) {
-    const build = await run("npm", ["run", "build", `--workspace=${workspace}`], {
+    // O rollback também compila com prioridade baixa e heap limitado (a
+    // VPS é a mesma), mas NUNCA é abortado por recurso: o Core precisa
+    // voltar a funcionar.
+    const wrapped = wrapBuildCommand({
+      command: "npm",
+      args: ["run", "build", `--workspace=${workspace}`],
+      nice,
+      ionice,
+      niceLevel,
+    });
+    const build = await run(wrapped.command, wrapped.args, {
       cwd: targetRepoRoot,
+      env: buildEnvVars,
       timeoutMs: 1_800_000,
     });
     steps.push({ step: `build-${workspace}`, code: build.code });

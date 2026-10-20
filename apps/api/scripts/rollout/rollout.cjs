@@ -160,6 +160,15 @@ function printPreflight(report) {
   }
 
   console.log("");
+  console.log("-- RECURSOS DO HOST (para buildar o Core com segurança) --");
+  const resource = report.rolloutResourceCheck ?? {};
+  console.log(`memória disponível:   ${resource.memAvailableMb ?? "?"} MB (exigido: ${resource.memRequiredMb ?? "?"} MB)`);
+  console.log(`swap em uso:          ${resource.swapUsedMb ?? "?"} MB (máximo: ${resource.swapThresholdMb ?? "?"} MB)`);
+  console.log(`load average (1min):  ${resource.load1 ?? "?"}`);
+  console.log(`disco livre:          ${resource.diskAvailableGb ?? "?"} GB`);
+  console.log(`pode buildar:         ${resource.safeToBuild ? "SIM" : "NÃO"} - ${resource.reason ?? "?"}`);
+
+  console.log("");
   console.log("-- PROJETOS (snapshot somente leitura) --");
   for (const [project, data] of Object.entries(report.projects)) {
     for (const [container, info] of Object.entries(data.containers ?? {})) {

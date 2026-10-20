@@ -354,6 +354,42 @@ sem nenhum comando Docker de escrita e sem arquivo de status. Cada comando
 passa por uma allowlist de leitura — um comando de escrita aborta o dry-run
 com erro em vez de acontecer.
 
+#### Guarda de recursos (proteger a produção durante o build)
+
+O `npm install` e os três builds (`shared-types` → `api` → `web`) rodam na
+mesma VPS que hospeda Mesatta, Mongo, Evolution API, Postgres e Redis. Para
+não sacrificar a produção, o rollout:
+
+1. mede os recursos **read-only** antes do `npm install`;
+2. revalida **antes de cada build** (install, shared, api, web) — se a
+   condição piorou, o próximo build não começa;
+3. compila com prioridade baixa (`nice -n 10` + `ionice -c 3`, quando
+   existem) e com teto de heap próprio (`--max-old-space-size`, só nos
+   processos do rollout — o `NODE_OPTIONS` do servidor não muda);
+4. mantém os builds **estritamente sequenciais**.
+
+Se faltar recurso, o rollout é adiado com
+`Rollout adiado: recursos insuficientes para compilar o Core com segurança`.
+Abortos antes do `git update` não disparam rollback (não houve mudança);
+abortos depois dele voltam o Core ao commit anterior (rollback normal, só do
+Core).
+
+Defaults (pensados para 1 vCPU / 4 GB com os projetos rodando na mesma
+máquina) e seus equivalentes por env:
+
+| limite | default | env |
+| --- | --- | --- |
+| MemAvailable mínima | 1200 MB | `KORRELO_ROLLOUT_MEM_REQUIRED_MB` |
+| swap em uso máxima | 512 MB | `KORRELO_ROLLOUT_SWAP_USED_MAX_MB` |
+| load average (1 min) máxima | 1.5 | `KORRELO_ROLLOUT_LOAD1_MAX` |
+| disco livre mínimo | 2 GB | `KORRELO_ROLLOUT_DISK_FREE_GB_MIN` |
+| teto de heap do build | 1024 MB | `KORRELO_ROLLOUT_BUILD_HEAP_MB` |
+| nice dos builds | 10 | `KORRELO_ROLLOUT_NICE_LEVEL` |
+| ionice dos builds | ligado | `KORRELO_ROLLOUT_IONICE=0` desliga |
+
+Swap livre **não** conta como RAM: MemAvailable físico é o critério
+principal. O dry-run mostra a checagem completa (`rolloutResourceCheck`).
+
 #### Atualizar um checkout ALVO diferente (bootstrap)
 
 O executor (o código do rollout, a config e as libs) e o **alvo** (o checkout
@@ -396,6 +432,10 @@ O que ele garante:
 
 - **não roda no meio de um deploy de projeto** (recusa se houver job em
   andamento);
+- **não sacrifica a produção para compilar o Core**: antes do `npm install` e
+  de cada build, o rollout mede MemAvailable, swap em uso, load average e
+  disco livre. Se os recursos não forem suficientes, o rollout é **adiado**
+  (nada é parado, reduzido ou reiniciado) e os projetos ficam intactos;
 - **não descarta alteração local**: com o working tree sujo (ex.:
   `package-lock.json` modificado), o update é abortado com a lista de
   arquivos — a decisão é do operador;

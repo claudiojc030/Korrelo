@@ -618,3 +618,5 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
     });
   });
 });
+
+export {};
