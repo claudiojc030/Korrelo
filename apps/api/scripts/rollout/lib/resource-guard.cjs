@@ -31,8 +31,9 @@ const os = require("node:os");
  *   projetos e o box entraria em swap.
  *
  * swapUsedMaxMb = 512
- *   A VPS tem ~2 GB de swap. Mais de 512 MB já em disco significa que o
- *   box já trocou memória sob pressão (os projetos podem estar sofrendo).
+ *   Sinal AUXILIAR (não bloqueia sozinho): o Linux mantém páginas antigas em
+ *   swap mesmo depois da pressão passar. O bloqueio vem da ATIVIDADE de swap
+ *   e do PSI de memória (ver swapActivityMaxPages/psiMemory*).
  *
  * load1Max = 1.5
  *   Com 1 vCPU, load1 >= 1.5 já significa fila de execução: iniciar outro
@@ -56,6 +57,14 @@ const DEFAULT_THRESHOLDS = {
   buildHeapMb: 1024,
   niceLevel: 10,
   useIonice: true,
+  /** Páginas de swap trocadas na janela que caracterizam pressão real. */
+  swapActivityMaxPages: 512,
+  /** PSI de memória: some avg10 acima disso = stall de memória. */
+  psiMemorySomeMax: 1,
+  /** PSI de memória: full avg10 acima disso = o sistema parou (grave). */
+  psiMemoryFullMax: 0.01,
+  /** Janela de amostragem da atividade de swap. */
+  swapActivitySampleMs: 1000,
 };
 
 function readNumber(env, key, fallback) {
@@ -65,7 +74,13 @@ function readNumber(env, key, fallback) {
   return Number.isFinite(value) ? value : fallback;
 }
 
-/** Thresholds configuráveis por env. */
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+/**
+ * Defaults da guarda de recursos (leitura do env).
+ */
 function readThresholds(env = process.env) {
   return {
     memRequiredMb: readNumber(env, "KORRELO_ROLLOUT_MEM_REQUIRED_MB", DEFAULT_THRESHOLDS.memRequiredMb),
@@ -75,7 +90,80 @@ function readThresholds(env = process.env) {
     buildHeapMb: readNumber(env, "KORRELO_ROLLOUT_BUILD_HEAP_MB", DEFAULT_THRESHOLDS.buildHeapMb),
     niceLevel: readNumber(env, "KORRELO_ROLLOUT_NICE_LEVEL", DEFAULT_THRESHOLDS.niceLevel),
     useIonice: String((env ? env.KORRELO_ROLLOUT_IONICE : "1") ?? "1") !== "0",
+    swapActivityMaxPages: readNumber(
+      env,
+      "KORRELO_ROLLOUT_SWAP_ACTIVITY_MAX_PAGES",
+      DEFAULT_THRESHOLDS.swapActivityMaxPages,
+    ),
+    psiMemorySomeMax: readNumber(
+      env,
+      "KORRELO_ROLLOUT_PSI_MEMORY_SOME_MAX",
+      DEFAULT_THRESHOLDS.psiMemorySomeMax,
+    ),
+    psiMemoryFullMax: readNumber(
+      env,
+      "KORRELO_ROLLOUT_PSI_MEMORY_FULL_MAX",
+      DEFAULT_THRESHOLDS.psiMemoryFullMax,
+    ),
+    swapActivitySampleMs: readNumber(
+      env,
+      "KORRELO_ROLLOUT_SWAP_ACTIVITY_SAMPLE_MS",
+      DEFAULT_THRESHOLDS.swapActivitySampleMs,
+    ),
   };
+}
+
+/**
+ * Parse de /proc/vmstat (contadores ACUMULADOS desde o boot).
+ *
+ * `pswpin`/`pswpout` são acumulados: sozinhos NÃO dizem se há atividade
+ * AGORA. Para isso, o provider tira DUAS leituras separadas por uma janela
+ * e calcula o delta (ver readSwapActivity).
+ */
+function parseVmstat(raw) {
+  if (!raw) return null;
+  const values = {};
+  for (const line of String(raw).split("\n")) {
+    const match = /^(\w+)\s+(\d+)\s*$/.exec(line.trim());
+    if (match) values[match[1]] = Number.parseInt(match[2], 10);
+  }
+  if (!Number.isFinite(values.pswpin) || !Number.isFinite(values.pswpout)) return null;
+  return { pswpin: values.pswpin, pswpout: values.pswpout };
+}
+
+/**
+ * Parse de /proc/pressure/memory (Linux 4.20+).
+ *
+ * Formato:
+ *   some avg10=0.00 avg60=0.00 avg300=0.00 total=0
+ *   full avg10=0.00 avg60=0.00 avg300=0.00 total=0
+ */
+function parsePsiMemory(raw) {
+  if (!raw) return null;
+  const result = { someAvg10: null, fullAvg10: null, someTotal: null, fullTotal: null };
+  let sawSome = false;
+  let sawFull = false;
+  for (const line of String(raw).split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("some ")) {
+      sawSome = true;
+      result.someAvg10 = parsePsiValue(trimmed, "avg10");
+      result.someTotal = parsePsiValue(trimmed, "total");
+    } else if (trimmed.startsWith("full ")) {
+      sawFull = true;
+      result.fullAvg10 = parsePsiValue(trimmed, "avg10");
+      result.fullTotal = parsePsiValue(trimmed, "total");
+    }
+  }
+  if (!sawSome && !sawFull) return null;
+  return result;
+}
+
+function parsePsiValue(line, key) {
+  const match = new RegExp(`${key}=([0-9.]+)`).exec(line);
+  if (!match) return null;
+  const value = Number.parseFloat(match[1]);
+  return Number.isFinite(value) ? value : null;
 }
 
 /** Parse de /proc/meminfo (kB -> MB). */
@@ -157,6 +245,43 @@ const realResourceProvider = {
     if (df.code !== 0) return null;
     return parseDfOutput(df.stdout);
   },
+  /**
+   * ATIVIDADE ATUAL de swap: duas leituras de /proc/vmstat separadas pela
+   * janela de amostragem, com o DELTA de páginas trocadas.
+   *
+   * O contador sozinho é acumulado desde o boot - não serve para dizer se
+   * há swap happening AGORA.
+   */
+  async getSwapActivity(options = {}) {
+    const sampleMs = options.sampleMs ?? DEFAULT_THRESHOLDS.swapActivitySampleMs;
+    const read = () => {
+      try {
+        return parseVmstat(fs.readFileSync("/proc/vmstat", "utf-8"));
+      } catch {
+        return null;
+      }
+    };
+    const first = read();
+    if (!first) return { available: false, swapInDelta: null, swapOutDelta: null };
+    await defaultSleep(sampleMs);
+    const second = read();
+    if (!second) return { available: false, swapInDelta: null, swapOutDelta: null };
+    return {
+      available: true,
+      swapInDelta: Math.max(0, second.pswpin - first.pswpin),
+      swapOutDelta: Math.max(0, second.pswpout - first.pswpout),
+    };
+  },
+  /** PSI de memória (/proc/pressure/memory) - Linux 4.20+. */
+  getMemoryPressure() {
+    try {
+      const parsed = parsePsiMemory(fs.readFileSync("/proc/pressure/memory", "utf-8"));
+      if (!parsed) return { available: false, someAvg10: null, fullAvg10: null };
+      return { available: true, ...parsed };
+    } catch {
+      return { available: false, someAvg10: null, fullAvg10: null };
+    }
+  },
 };
 
 /**
@@ -168,7 +293,8 @@ const realResourceProvider = {
  *
  * `provider` permite injetar as métricas (usado nos testes).
  */
-async function readHostResources({ run, provider = realResourceProvider } = {}) {
+async function readHostResources({ run, provider = realResourceProvider, thresholds = null } = {}) {
+  const limits = thresholds ?? readThresholds();
   const resources = {
     memAvailableMb: null,
     memTotalMb: null,
@@ -180,6 +306,8 @@ async function readHostResources({ run, provider = realResourceProvider } = {}) 
     diskAvailableGb: null,
     diskTotalGb: null,
     readError: null,
+    swapActivity: { available: false, swapInDelta: null, swapOutDelta: null },
+    memoryPressure: { available: false, someAvg10: null, fullAvg10: null },
     measurable: false,
   };
 
@@ -203,6 +331,16 @@ async function readHostResources({ run, provider = realResourceProvider } = {}) 
   if (disk) {
     resources.diskAvailableGb = disk.diskAvailableGb ?? null;
     resources.diskTotalGb = disk.diskTotalGb ?? null;
+  }
+
+  // Swap/PSI: só são medidos quando a swap usada está ACIMA do limite (o
+  // caso comum - swap baixa - não paga o custo da amostragem). E é
+  // exatamente aí que a decisão precisa de mais sinal: swap histórica não
+  // pode bloquear o build sozinha.
+  const swapAboveLimit = resources.swapUsedMb !== null && resources.swapUsedMb > limits.swapUsedMaxMb;
+  if (swapAboveLimit) {
+    resources.swapActivity = await provider.getSwapActivity({ sampleMs: limits.swapActivitySampleMs });
+    resources.memoryPressure = await provider.getMemoryPressure();
   }
 
   resources.measurable =
@@ -251,12 +389,39 @@ function evaluateResources({ resources, thresholds } = {}) {
   );
 
   const swapMeasurable = resources?.swapUsedMb !== null && resources?.swapUsedMb !== undefined;
+  // A swap usada, sozinha, NÃO bloqueia: o Linux mantém páginas antigas em
+  // swap mesmo depois da pressão de RAM passar. O bloqueio vem da ATIVIDADE
+  // de swap (delta de pswpin/pswpout) e do PSI de memória.
+  const swapUsedAbove = swapMeasurable && resources.swapUsedMb > t.swapUsedMaxMb;
+  const activity = resources?.swapActivity ?? null;
+  const psi = resources?.memoryPressure ?? null;
+  const activityKnown = activity?.available === true;
+  const psiKnown = psi?.available === true;
+  const swappedPages =
+    activityKnown ? (activity.swapInDelta ?? 0) + (activity.swapOutDelta ?? 0) : null;
+  const activityPressure = activityKnown && swappedPages > t.swapActivityMaxPages;
+  const psiPressure =
+    psiKnown &&
+    ((psi.someAvg10 ?? 0) > t.psiMemorySomeMax || (psi.fullAvg10 ?? 0) > t.psiMemoryFullMax);
+  // Sem nenhum sinal (host sem /proc/vmstat e sem PSI) o fallback e
+  // CONSERVADOR: bloqueia.
+  const unknownPressure = !activityKnown && !psiKnown;
+  const swapPressure = swapUsedAbove && (activityPressure || psiPressure || unknownPressure);
+
+  const swapDetail = !swapMeasurable
+    ? "indisponível"
+    : swapPressure
+      ? `swap em uso ${resources.swapUsedMb} MB (máximo ${t.swapUsedMaxMb} MB) COM pressão real ` +
+        `(swap-in/out=${swappedPages ?? "?"} páginas, PSI some=${psi?.someAvg10 ?? "?"} full=${psi?.fullAvg10 ?? "?"})`
+      : `${resources.swapUsedMb} MB (máximo: ${t.swapUsedMaxMb} MB)` +
+        (swapUsedAbove
+          ? ` - swap histórica (atividade=${swappedPages ?? "?"} páginas, PSI some=${psi?.someAvg10 ?? "?"} full=${psi?.fullAvg10 ?? "?"}); build permitido`
+          : "");
+
   add(
     "swap em uso",
-    !swapMeasurable || resources.swapUsedMb <= t.swapUsedMaxMb,
-    swapMeasurable
-      ? `${resources.swapUsedMb} MB (máximo: ${t.swapUsedMaxMb} MB)`
-      : "indisponível",
+    !swapPressure,
+    swapDetail,
     swapMeasurable,
     swapMeasurable ? resources.swapUsedMb : null,
     t.swapUsedMaxMb,
@@ -510,6 +675,8 @@ module.exports = {
   readWaitConfig,
   parseMemInfo,
   parseDfOutput,
+  parseVmstat,
+  parsePsiMemory,
   readHostResources,
   evaluateResources,
   isHardFailure,

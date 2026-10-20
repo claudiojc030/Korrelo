@@ -165,6 +165,14 @@ function printPreflight(report) {
   const resource = report.rolloutResourceCheck ?? {};
   console.log(`memória disponível:   ${resource.memAvailableMb ?? "?"} MB (exigido: ${resource.memRequiredMb ?? "?"} MB)`);
   console.log(`swap em uso:          ${resource.swapUsedMb ?? "?"} MB (máximo: ${resource.swapThresholdMb ?? "?"} MB)`);
+  const activity = resource.swapActivity;
+  const pressure = resource.memoryPressure;
+  console.log(
+    `atividade de swap:   ${activity?.available ? `${activity.swapInDelta ?? "?"} in / ${activity.swapOutDelta ?? "?"} out (páginas)` : "indisponível"}`,
+  );
+  console.log(
+    `PSI de memória:       ${pressure?.available ? `some=${pressure.someAvg10 ?? "?"} full=${pressure.fullAvg10 ?? "?"}` : "indisponível"}`,
+  );
   console.log(`load average (1min):  ${resource.load1 ?? "?"}`);
   console.log(`disco livre:          ${resource.diskAvailableGb ?? "?"} GB`);
   console.log(`pode buildar:         ${resource.safeToBuild ? "SIM" : "NÃO"} - ${resource.reason ?? "?"}`);

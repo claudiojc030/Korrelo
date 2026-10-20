@@ -405,7 +405,11 @@ máquina) e seus equivalentes por env:
 | limite | default | env |
 | --- | --- | --- |
 | MemAvailable mínima | 1200 MB | `KORRELO_ROLLOUT_MEM_REQUIRED_MB` |
-| swap em uso máxima | 512 MB | `KORRELO_ROLLOUT_SWAP_USED_MAX_MB` |
+| swap em uso máxima (sinal auxiliar) | 512 MB | `KORRELO_ROLLOUT_SWAP_USED_MAX_MB` |
+| atividade de swap (páginas na janela) | 512 | `KORRELO_ROLLOUT_SWAP_ACTIVITY_MAX_PAGES` |
+| PSI memória (some avg10) | 1.0 | `KORRELO_ROLLOUT_PSI_MEMORY_SOME_MAX` |
+| PSI memória (full avg10) | 0.01 | `KORRELO_ROLLOUT_PSI_MEMORY_FULL_MAX` |
+| janela de amostragem da atividade | 1000 ms | `KORRELO_ROLLOUT_SWAP_ACTIVITY_SAMPLE_MS` |
 | load average (1 min) máxima | 1.5 | `KORRELO_ROLLOUT_LOAD1_MAX` |
 | disco livre mínimo | 2 GB | `KORRELO_ROLLOUT_DISK_FREE_GB_MIN` |
 | teto de heap do build | 1024 MB | `KORRELO_ROLLOUT_BUILD_HEAP_MB` |
@@ -413,6 +417,23 @@ máquina) e seus equivalentes por env:
 | ionice dos builds | ligado | `KORRELO_ROLLOUT_IONICE=0` desliga |
 | intervalo do cooldown | 10 s | `KORRELO_ROLLOUT_RESOURCE_WAIT_INTERVAL_SEC` |
 | timeout do cooldown | 180 s | `KORRELO_ROLLOUT_RESOURCE_WAIT_TIMEOUT_SEC` |
+
+**Swap histórica não bloqueia o build.** O Linux mantém páginas antigas em
+swap mesmo depois da pressão de RAM passar: no incidente real havia 2648 MB
+livres, 601 MB de swap, `si/so = 0` e PSI `0.00` — e o build foi bloqueado
+por 180 s. Agora a swap usada é **sinal auxiliar** (registrada e exibida no
+diagnóstico) e o bloqueio vem de:
+
+- **MemAvailable** abaixo do mínimo → bloqueia;
+- **load** acima do limite → bloqueia;
+- **disco** abaixo do mínimo → bloqueia;
+- **atividade de swap** real (delta de `pswpin`/`pswpout` na janela de
+  amostragem) → bloqueia/aguarda;
+- **PSI de memória** (`some avg10` alto ou `full avg10 > 0`) → bloqueia/aguarda;
+- RAM baixa + swap alta → bloqueia.
+
+Se o host não expuser `/proc/vmstat` nem `/proc/pressure/memory`, o guard
+não quebra: **sem sinal nenhum, o fallback é conservador** (bloqueia).
 
 Swap livre **não** conta como RAM: MemAvailable físico é o critério
 principal. O dry-run mostra a checagem completa (`rolloutResourceCheck`) e a

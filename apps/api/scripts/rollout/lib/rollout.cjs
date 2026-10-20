@@ -422,7 +422,10 @@ async function runReadOnlyPreflight({
 
   const { run: readOnlyRun, executed: executedCommands } = createReadOnlyRunner({ run, executed });
   const readHost =
-    readResources ?? ((opts) => readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider }));
+    readResources ??
+    ((opts) =>
+      readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider, thresholds })
+    );
 
   const check = (name, ok, detail) => {
     checks.push({ name, ok, detail });
@@ -609,6 +612,8 @@ async function runReadOnlyPreflight({
       memRequiredMb: thresholds.memRequiredMb,
       swapUsedMb: hostResources.swapUsedMb,
       swapThresholdMb: thresholds.swapUsedMaxMb,
+      swapActivity: hostResources.swapActivity,
+      memoryPressure: hostResources.memoryPressure,
       load1: hostResources.load1,
       diskAvailableGb: hostResources.diskAvailableGb,
       safeToBuild: resourceEvaluation.safeToBuild,
@@ -770,7 +775,10 @@ async function executeRollout({
 
   /** Leitor de recursos (injetável: provider real em produção, fake nos testes). */
   const readHost =
-    readResources ?? ((opts) => readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider }));
+    readResources ??
+    ((opts) =>
+      readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider, thresholds })
+    );
 
   /**
    * Aguarda os recursos ficarem seguros (cooldown) e registra o estado.
@@ -1429,7 +1437,10 @@ async function rollbackCore({
   // A janela de health do rollback é a mesma do rollout (mesmos env).
   const healthSettings = healthConfig ?? readHealthConfig();
   const readHost =
-    readResources ?? ((opts) => readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider }));
+    readResources ??
+    ((opts) =>
+      readHostResources({ ...opts, provider: resourceProvider ?? realResourceProvider, thresholds })
+    );
   const steps = [];
 
   /**
