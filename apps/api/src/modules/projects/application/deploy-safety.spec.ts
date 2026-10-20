@@ -37,6 +37,37 @@ const { DeployProjectUseCase } = require("../application/deploy-project.use-case
 const { DeployJob: DeployJobEntity } = require("../domain/deploy-job.entity");
 const { Project: ProjectEntity } = require("../domain/project.entity");
 
+/** Payload de `docker inspect` (a verdade do container de produção). */
+const inspectPayload = {
+  Id: "3f1c9a2b7d4e5f60718293a4b5c6d7e8f9012345678abcdef0123456789abcdef",
+  Name: "/korrelo-mesatta-8452004c",
+  Config: { Image: "korrelo-mesatta-8452004c:commit-antigo" },
+  State: {
+    Status: "running",
+    Running: true,
+    StartedAt: "2026-10-20T10:00:00.000000000Z",
+    Health: { Status: "healthy" },
+  },
+  HostConfig: {
+    Memory: 1757 * 1024 * 1024,
+    MemorySwap: 3514 * 1024 * 1024,
+    RestartPolicy: { Name: "unless-stopped" },
+  },
+  NetworkSettings: {
+    Networks: { "korrelo-shared": {}, "project_default": {} },
+    Ports: { "3002/tcp": [] },
+  },
+  Mounts: [
+    {
+      Type: "volume",
+      Name: "uploads-data",
+      Source: "/var/lib/docker/volumes/uploads-data/_data",
+      Destination: "/app/uploads",
+    },
+  ],
+  RestartCount: 0,
+};
+
 /** Provider com métricas que mudam a cada leitura (simula pressão que passa). */
 function sequenceProvider(sequence: Array<Record<string, unknown>>): HostResourceProvider {
   let index = 0;
@@ -94,6 +125,27 @@ describe("deploy de projeto - proteção da produção", () => {
   let tmpDir: string;
   let previousWorkspaceDir: string | undefined;
 
+  /**
+   * Inspetor de container FALSO (leitura): devolve o estado real do
+   * container de produção sem falar com o Docker.
+   */
+  function fakeInspector(): {
+    calls: string[];
+    inspector: (name: string) => Promise<unknown>;
+  } {
+    const calls: string[] = [];
+    return {
+      calls,
+      inspector: async (name: string) => {
+        calls.push(name);
+        // Usa o MESMO parser do inspetor real (o mock não inventa estado).
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { parseContainerInspect } = require("../infrastructure/docker-container-inspector");
+        return parseContainerInspect({ ...inspectPayload }, name);
+      },
+    };
+  }
+
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "korrelo-deploy-safety-"));
     // O deploy escreve o .env no workspace do projeto: um diretório
@@ -124,7 +176,7 @@ describe("deploy de projeto - proteção da produção", () => {
       });
 
       expect(result.ok).toBe(false);
-      expect(result.reason).toContain("memória livre insuficiente");
+      expect(result.reason).toContain("memória");
     });
 
     it("C) load alto que normaliza: a espera termina e o build é liberado", async () => {
@@ -526,6 +578,7 @@ describe("deploy de projeto - proteção da produção", () => {
         .withDetectedStack(JSON.stringify({ language: "node", recommendedPort: 3002 }))
         .withMemoryLimit(1757)
         .withImages("korrelo-mesatta-8452004c:commit-antigo", "korrelo-mesatta-8452004c:commit-anterior");
+      const docker = fakeInspector();
       const useCase = new PreviewProjectDeployUseCase(
         {
           findById: async () => project,
@@ -533,6 +586,7 @@ describe("deploy de projeto - proteção da produção", () => {
         } as any,
         { findAllByProjectId: async () => [] } as any,
         new ResourcePreflightService(safeHostResourceProvider()),
+        docker.inspector as never,
       );
 
       const preview = await useCase.execute(project.id, { commit: "abcdef1234567890", branch: "main" });
@@ -550,6 +604,191 @@ describe("deploy de projeto - proteção da produção", () => {
       expect(preview.rollback.available).toBe(true);
       expect(preview.rollback.image).toBe("korrelo-mesatta-8452004c:commit-anterior");
       expect(preview.resources).toBeDefined();
+      // A verdade do Docker veio do inspetor (leitura).
+      expect(docker.calls).toHaveLength(1);
+    });
+  });
+
+  // ------------------------------------------- piso de MemAvailable (A, B, C)
+  describe("piso de MemAvailable do build", () => {
+    it("A) MemAvailable 800 MB -> UNSAFE (abaixo do piso de 1200 MB)", async () => {
+      const service = new ResourcePreflightService(
+        safeHostResourceProvider({ memAvailableMb: 800, load1: 0.1, diskFreeMb: 20 * 1024 }),
+      );
+
+      const result = await service.check({
+        requiredMemoryMb: 1024,
+        requiredDiskMb: 2000,
+        stagingReservationMb: 0,
+        productionReservedMb: 0,
+        dockerReachable: true,
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain("memória disponível");
+    });
+
+    it("B) MemAvailable 1199 MB -> UNSAFE (1 MB abaixo do piso)", async () => {
+      const service = new ResourcePreflightService(
+        safeHostResourceProvider({ memAvailableMb: 1199, load1: 0.1, diskFreeMb: 20 * 1024 }),
+      );
+
+      const result = await service.check({
+        requiredMemoryMb: 1024,
+        requiredDiskMb: 2000,
+        stagingReservationMb: 0,
+        productionReservedMb: 0,
+        dockerReachable: true,
+      });
+
+      expect(result.ok).toBe(false);
+    });
+
+    it("C) MemAvailable 1200+ MB, PSI 0, swap activity 0, load ok -> SAFE", async () => {
+      const service = new ResourcePreflightService(
+        safeHostResourceProvider({
+          memAvailableMb: 2300,
+          load1: 0.2,
+          diskFreeMb: 20 * 1024,
+          swapUsedMb: 601,
+          swapActivity: { available: true, swapInDelta: 0, swapOutDelta: 0 },
+          memoryPressure: { available: true, someAvg10: 0, fullAvg10: 0 },
+        }),
+      );
+
+      const result = await service.check({
+        requiredMemoryMb: 1024,
+        requiredDiskMb: 2000,
+        stagingReservationMb: 0,
+        productionReservedMb: 0,
+        dockerReachable: true,
+      });
+
+      expect(result.ok).toBe(true);
+    });
+
+    it("o piso é 1200 MB por default e NUNCA é reduzido automaticamente", () => {
+      expect(readBuildThresholds({} as NodeJS.ProcessEnv).memAvailableMb).toBe(1200);
+      // Com a memória exata no piso, o build é liberado (>= 1200).
+      const service = new ResourcePreflightService(
+        safeHostResourceProvider({ memAvailableMb: 1200, load1: 0.1, diskFreeMb: 20 * 1024 }),
+      );
+      return service
+        .check({
+          requiredMemoryMb: 0,
+          requiredDiskMb: 2000,
+          stagingReservationMb: 0,
+          productionReservedMb: 0,
+          dockerReachable: true,
+        })
+        .then((result) => expect(result.ok).toBe(true));
+    });
+  });
+
+  // ------------------------------------------- verdade do Docker no dry-run
+  describe("dry-run: verdade do Docker (read-only)", () => {
+    it("D/E) o dry-run mostra ID/StartedAt/restarts/mounts/networks REAIS e não altera Docker", async () => {
+      const docker = fakeInspector();
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { PreviewProjectDeployUseCase } = require("./preview-project-deploy.use-case");
+      const project = ProjectEntity.create("Mesatta", "https://github.com/example/mesatta")
+        .withDetectedStack(JSON.stringify({ language: "node", recommendedPort: 3002 }))
+        .withMemoryLimit(1757)
+        .withImages("korrelo-mesatta-8452004c:commit-antigo", "korrelo-mesatta-8452004c:commit-anterior");
+      const useCase = new PreviewProjectDeployUseCase(
+        { findById: async () => project, findAll: async () => [project] } as any,
+        { findAllByProjectId: async () => [] } as any,
+        new ResourcePreflightService(safeHostResourceProvider()),
+        docker.inspector as never,
+      );
+
+      const preview = await useCase.execute(project.id, { commit: "abcdef1234567890" });
+
+      // A verdade do Docker aparece no dry-run.
+      expect(preview.current.container?.id).toBe("3f1c9a2b7d4e5f60718293a4b5c6d7e8f9012345678abcdef0123456789abcdef");
+      expect(preview.current.container?.startedAt).toBe("2026-10-20T10:00:00.000000000Z");
+      expect(preview.current.container?.restartCount).toBe(0);
+      expect(preview.current.container?.networks).toEqual(["korrelo-shared", "project_default"]);
+      expect(preview.current.container?.mounts.map((m) => m.name)).toEqual(["uploads-data"]);
+      expect(preview.current.container?.memoryLimitBytes).toBe(1757 * 1024 * 1024);
+      expect(preview.current.container?.restartPolicy).toBe("unless-stopped");
+      expect(preview.current.container?.health).toBe("healthy");
+
+      // Só LEITURA: o inspetor é a única chamada de Docker do dry-run.
+      expect(docker.calls).toHaveLength(1);
+      expect(docker.calls[0]).toContain("korrelo-mesatta-");
+    });
+
+    it("o dry-run falha CLARAMENTE quando o Docker está indisponível", async () => {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { PreviewProjectDeployUseCase } = require("./preview-project-deploy.use-case");
+      const project = ProjectEntity.create("Mesatta", "https://github.com/example/mesatta")
+        .withDetectedStack(JSON.stringify({ language: "node", recommendedPort: 3002 }))
+        .withMemoryLimit(1757);
+      const useCase = new PreviewProjectDeployUseCase(
+        { findById: async () => project, findAll: async () => [project] } as any,
+        { findAllByProjectId: async () => [] } as any,
+        new ResourcePreflightService(safeHostResourceProvider()),
+        // Docker indisponível: o inspetor devolve null.
+        (async () => null) as never,
+      );
+
+      await expect(useCase.execute(project.id)).rejects.toThrow(/Docker indisponível/);
+    });
+  });
+
+  // ------------------------------------------------------ staging e banco
+  describe("staging: banco e dependências", () => {
+    it("F) o fluxo de deploy NUNCA dá stop/rm/recreate no banco", () => {
+      const source = fs.readFileSync(
+        path.resolve(__dirname, "..", "application", "deploy-project.use-case.ts"),
+        "utf-8",
+      );
+      expect(source).not.toContain("compose down");
+      expect(source).not.toContain("rm -v");
+      expect(source).not.toContain('"rm"');
+      expect(source).not.toContain('"stop"');
+    });
+
+    it("G) o staging sobe com --no-deps (não inicia/recria dependências)", () => {
+      const source = fs.readFileSync(
+        path.resolve(
+          __dirname,
+          "..",
+          "infrastructure",
+          "docker-compose-orchestrator.ts",
+        ),
+        "utf-8",
+      );
+      expect(source).toContain('"--no-deps"');
+      // E a promoção também (recreate só do app).
+      const promoteBlock = source.slice(source.indexOf("async promote("), source.indexOf("async rollback("));
+      expect(promoteBlock).toContain('"--no-deps"');
+    });
+
+    it("H) o dry-run_avisa explicitamente quando o staging compartilha o banco", async () => {
+      const docker = fakeInspector();
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { PreviewProjectDeployUseCase } = require("./preview-project-deploy.use-case");
+      const project = ProjectEntity.create("Mesatta", "https://github.com/example/mesatta")
+        .withDetectedStack(JSON.stringify({ language: "node", recommendedPort: 3002 }))
+        .withMemoryLimit(1757);
+      const useCase = new PreviewProjectDeployUseCase(
+        { findById: async () => project, findAll: async () => [project] } as any,
+        {
+          findAllByProjectId: async () => [
+            { type: "mongodb", serviceName: "mongo", persistent: true, memoryLimitMb: 879 },
+          ],
+        } as any,
+        new ResourcePreflightService(safeHostResourceProvider()),
+        docker.inspector as never,
+      );
+
+      const preview = await useCase.execute(project.id, { commit: "abcdef1234567890" });
+
+      expect(preview.staging.sharesProductionDatabase).toBe(true);
+      expect(preview.warnings.join(" ")).toContain("banco de produção");
+      expect(preview.warnings.join(" ")).toContain("uploads-data");
     });
   });
 

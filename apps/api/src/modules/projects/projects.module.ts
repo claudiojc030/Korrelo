@@ -14,7 +14,10 @@ import { CreateProjectUseCase } from "./application/create-project.use-case";
 import { DetectProjectStackUseCase } from "./application/detect-project-stack.use-case";
 import { ImportProjectUseCase } from "./application/import-project.use-case";
 import { DeployProjectUseCase } from "./application/deploy-project.use-case";
-import { PreviewProjectDeployUseCase } from "./application/preview-project-deploy.use-case";
+import {
+  CONTAINER_INSPECTOR,
+  PreviewProjectDeployUseCase,
+} from "./application/preview-project-deploy.use-case";
 import { DeleteProjectUseCase } from "./application/delete-project.use-case";
 import { ListEnvVarsUseCase } from "./application/list-env-vars.use-case";
 import { SetEnvVarsUseCase } from "./application/set-env-vars.use-case";
@@ -111,6 +114,7 @@ import { PrismaDeployJobRepository } from "./infrastructure/prisma-deploy-job.re
 import { DeployQueueService } from "./infrastructure/deploy-queue.service";
 import { WorkerLock } from "./infrastructure/worker-lock";
 import { ResourcePreflightService } from "./infrastructure/resource-preflight.service";
+import { inspectContainerTruth } from "./infrastructure/docker-container-inspector";
 import { DeployLogger } from "./infrastructure/deploy-logger";
 import { StagingCleanupService } from "./infrastructure/staging-cleanup.service";
 import { RuntimeReconciliationService } from "./infrastructure/runtime-reconciliation.service";
@@ -193,6 +197,10 @@ import { CompatibilityDryRunService } from "./infrastructure/compatibility-dry-r
     DeployLogger,
     WorkerLock,
     ResourcePreflightService,
+    {
+      provide: CONTAINER_INSPECTOR,
+      useFactory: () => inspectContainerTruth,
+    },
     DeployQueueService,
     RuntimeReconciliationService,
     CompatibilityDryRunService,

@@ -78,6 +78,11 @@ function writeFile(filePath: string, content: string): void {
   fs.writeFileSync(filePath, content);
 }
 
+// Esta suíte faz operações REAIS de Git (clone, commit, pull) em repositórios
+// temporários: o tempo default de 5s do Jest é curto demais quando a máquina
+// está carregada (rodando em paralelo com as outras suítes).
+jest.setTimeout(120_000);
+
 describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real)", () => {
   let tmpDir: string;
 

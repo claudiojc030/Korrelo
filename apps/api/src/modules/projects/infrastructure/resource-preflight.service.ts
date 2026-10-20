@@ -107,6 +107,8 @@ export class ResourcePreflightService {
     intervalSec?: number;
     requiredMemoryMb?: number;
     requiredDiskMb?: number;
+    /** Memória que o container de teste vai reservar (sobe junto do build). */
+    stagingReservationMb?: number;
     sleep?: (ms: number) => Promise<void>;
     now?: () => number;
     log?: (message: string) => void;
@@ -132,7 +134,14 @@ export class ResourcePreflightService {
         resources,
         thresholds: {
           ...thresholds,
-          memAvailableMb: options.requiredMemoryMb ?? thresholds.memAvailableMb,
+          // O PISO do host (1200 MB) e a necessidade do build são um PISO,
+          // nunca um teto: o build só começa com o MAIOR dos dois.
+          memAvailableMb: Math.max(
+            thresholds.memAvailableMb,
+            (options.requiredMemoryMb ?? 0) +
+              DEFAULT_BUILD_SAFETY_MARGIN_MB +
+              (options.stagingReservationMb ?? 0),
+          ),
           diskFreeMb: options.requiredDiskMb ?? thresholds.diskFreeMb,
         },
       });
@@ -235,18 +244,36 @@ export class ResourcePreflightService {
     }
 
     // ------------------------------------------------------------------
-    // Sinais do HOST (load, swap, PSI) - o mesmo conjunto validado no
-    // rollout do Core. Uma VPS saturada NÃO deve começar um build: é
-    // exatamente o que derrubou o Mesatta no incidente.
+    // Sinais do HOST (MemAvailable, load, swap, PSI) - o mesmo conjunto
+    // validado no rollout do Core. Uma VPS saturada NÃO deve começar um
+    // build: é exatamente o que derrubou o Mesatta no incidente.
+    //
+    // FÓRMULA FINAL da memória (o piso é um PISO, nunca um teto):
+    //
+    //   memRequired = max(
+    //       1200 MB                      <- piso de segurança do host
+    //                                      (mesmo valor do Core, validado
+    //                                       em produção)
+    //       requiredMemoryMb + 256 MB    <- o build precisa da memória do
+    //                    (margem)         container + margem de segurança
+    //              + stagingReservation  <- e da reserva do container de
+    //                                      teste que sobe junto do build
+    //   )
+    //
+    //   bloqueia se memAvailable < memRequired
     // ------------------------------------------------------------------
     const hostThresholds = readBuildThresholds();
     const hostResources = await readHostResources({
       provider: this.resourceProvider,
       measureSwapActivity: true,
     });
+    const memRequiredMb = Math.max(
+      hostThresholds.memAvailableMb,
+      requiredMemoryMb + DEFAULT_BUILD_SAFETY_MARGIN_MB + stagingReservationMb,
+    );
     const hostEvaluation = evaluateHostResources({
       resources: hostResources,
-      thresholds: { ...hostThresholds, memAvailableMb: 0, diskFreeMb: 0 },
+      thresholds: { ...hostThresholds, memAvailableMb: memRequiredMb },
     });
     if (!hostEvaluation.safe) {
       return {

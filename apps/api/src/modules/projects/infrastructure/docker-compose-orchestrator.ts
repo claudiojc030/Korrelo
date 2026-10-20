@@ -139,6 +139,12 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       // que permite promover sem rebuild e fazer rollback pra uma versão
       // anterior concreta.
       // Prioridade baixa: o build não disputa I/O/CPU com a produção.
+      //
+      // --no-deps: o staging NUNCA inicia (nem recria) as dependências do
+      // projeto (o banco de produção). Sem isso, um "compose up" do staging
+      // poderia subir/recriar o container do Mongo do Mesatta - o que
+      // derrubaria a produção. Com --no-deps, o app de teste usa o banco
+      // que JÁ está rodando (mesma rede).
       const build = await this.withLowPriority("docker", [
         "compose",
         "-f",
@@ -148,6 +154,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
         "up",
         "-d",
         "--build",
+        "--no-deps",
         "app_staging",
       ]);
       const { stdout, stderr } = await execFile(build.command, build.args, {

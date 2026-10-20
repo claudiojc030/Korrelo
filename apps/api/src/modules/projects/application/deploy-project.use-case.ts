@@ -299,6 +299,7 @@ export class DeployProjectUseCase {
         const hostWait = await this.resourcePreflight.waitForSafeHost({
           requiredMemoryMb: plan.productionLimitMb,
           requiredDiskMb: undefined,
+          stagingReservationMb: plan.stagingLimitMb,
           log: (message) => this.deployLogger.log("staging-start", context, message),
         });
         if (!hostWait.safe) {

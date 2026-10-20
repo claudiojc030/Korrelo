@@ -392,7 +392,11 @@ export function evaluateHostResources({
 /** Thresholds do build (env). */
 export function readBuildThresholds(env = process.env): HostResourceThresholds {
   return {
-    memAvailableMb: envNumberFrom(env, "KORRELO_BUILD_MEM_AVAILABLE_MB", 512),
+    // PISO de segurança do host: 1200 MB (o mesmo valor validado em
+    // produção no resource guard do rollout do Core). É um PISO - nunca é
+    // reduzido automaticamente. O build só começa com pelo menos isso
+    // disponível, além das demais regras de budget/staging.
+    memAvailableMb: envNumberFrom(env, "KORRELO_BUILD_MEM_AVAILABLE_MB", 1200),
     load1Max: envNumberFrom(env, "KORRELO_BUILD_LOAD1_MAX", 1.5),
     diskFreeMb: envNumberFrom(env, "KORRELO_BUILD_DISK_FREE_MB", 2000),
     swapActivityMaxPages: envNumberFrom(env, "KORRELO_BUILD_SWAP_ACTIVITY_MAX_PAGES", 512),

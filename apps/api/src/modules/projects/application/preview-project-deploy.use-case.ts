@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import * as os from "node:os";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { MANAGED_DATABASE_REPOSITORY, type ManagedDatabaseRepository } from "../domain/managed-database.repository";
@@ -6,6 +6,14 @@ import { computeProjectDeploymentPlan } from "../infrastructure/memory-budget";
 import { ResourcePreflightService } from "../infrastructure/resource-preflight.service";
 import { readHostResources } from "../../../infrastructure/host-resources";
 import { sanitizeContainerName } from "../infrastructure/container-name";
+import {
+  inspectContainerTruth,
+  type ContainerInspector,
+  type ContainerTruth,
+} from "../infrastructure/docker-container-inspector";
+
+/** Token do inspetor de container (injetável nos testes). */
+export const CONTAINER_INSPECTOR = Symbol("CONTAINER_INSPECTOR");
 
 /**
  * DRY-RUN DO DEPLOY DE PROJETO (read-only).
@@ -31,6 +39,9 @@ export class PreviewProjectDeployUseCase {
     @Inject(PROJECT_REPOSITORY) private readonly repository: ProjectRepository,
     @Inject(MANAGED_DATABASE_REPOSITORY) private readonly databases: ManagedDatabaseRepository,
     private readonly preflight: ResourcePreflightService,
+    @Optional()
+    @Inject(CONTAINER_INSPECTOR)
+    private readonly containerInspector?: ContainerInspector,
   ) {}
 
   async execute(projectId: string, options: { commit?: string | null; branch?: string | null } = {}) {
@@ -81,6 +92,34 @@ export class PreviewProjectDeployUseCase {
       ? `${containerName}:commit-${options.commit.slice(0, 12)}`
       : null;
 
+    // Verdade do Docker (leitura pura). Sem Docker não há snapshot real: o
+    // dry-run AVISA/falha explicitamente em vez de inventar estado a partir
+    // do banco do Core.
+    const currentContainer: ContainerTruth | null = await (
+      this.containerInspector ?? inspectContainerTruth
+    )(containerName);
+    if (!currentContainer) {
+      throw new ServiceUnavailableException(
+        "Docker indisponível: não foi possível ler o estado real do container de produção " +
+          `(${containerName}). O dry-run não inventa estado - suba o Docker e rode de novo.`,
+      );
+    }
+
+    const warnings: string[] = [];
+    if (managedDatabases.length > 0) {
+      warnings.push(
+        "O container de TESTE (staging) usa o MESMO env_file e a MESMA rede do app de produção: " +
+          "ele conecta no banco de produção. O Korrelo NÃO roda migration nenhuma nesse banco e " +
+          "sobe o staging com --no-deps (nunca inicia/recria o banco), mas o PRÓPRIO app pode " +
+          "rodar migrations/trabalho de fundo ao subir - isso não é controlável pelo Korrelo. " +
+          "Use envs de staging (prefixo STAGING_) para desativar workers/cron no container de teste.",
+      );
+    }
+    warnings.push(
+      "O container de TESTE compartilha o volume 'uploads-data' com a produção: " +
+        "o staging pode escrever no volume de uploads em produção.",
+    );
+
     return {
       dryRun: true,
       project: {
@@ -95,6 +134,8 @@ export class PreviewProjectDeployUseCase {
         containerName,
         productionMemoryLimitMb: project.productionMemoryLimitMb,
         runtimeSnapshot: project.runtimeSnapshot,
+        // Verdade do Docker (lida agora, somente leitura).
+        container: currentContainer,
       },
       candidate: {
         commit: options.commit ?? null,
@@ -131,8 +172,14 @@ export class PreviewProjectDeployUseCase {
         hostPort: (project.assignedPort ?? stack.recommendedPort ?? 3000) + 1,
         memoryLimitMb: plan.stagingLimitMb,
         isolated: true,
+        // O staging sobe com --no-deps: o Korrelo NUNCA inicia nem recria o
+        // banco/volume de produção.
+        noDeps: true,
+        sharesProductionDatabase: managedDatabases.length > 0,
+        sharesProductionVolume: true,
         note: "o container de teste roda em paralelo à produção; volumes e bancos de produção não são tocados",
       },
+      warnings,
       health: {
         configured: Boolean(project.healthcheckConfig),
         timeoutSeconds: 30,
