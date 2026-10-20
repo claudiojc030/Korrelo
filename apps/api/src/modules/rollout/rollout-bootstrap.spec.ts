@@ -216,6 +216,8 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       git(["init", "-b", "main"], origin);
       writeFile(path.join(origin, ".gitignore"), "node_modules/\napps/api/prisma/dev.db\napps/api/.env\n");
       writeFile(path.join(origin, "core.txt"), "v1");
+      // O rollout usa `npm ci`: sem lockfile, ele aborta.
+      writeFile(path.join(origin, "package-lock.json"), '{ "lockfileVersion": 3 }\n');
       writeFile(
         path.join(origin, "apps", "web", "scripts", "copy-standalone-assets.js"),
         "console.log('assets ok');\n",

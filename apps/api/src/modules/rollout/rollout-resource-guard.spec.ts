@@ -89,6 +89,8 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
     fs.mkdirSync(path.dirname(coreDbPath), { recursive: true });
     fs.writeFileSync(coreDbPath, "sqlite");
     fs.writeFileSync(path.join(repoRoot, "apps", "api", ".env"), "JWT_SECRET=x");
+    // O rollout usa `npm ci`: sem lockfile, ele aborta.
+    fs.writeFileSync(path.join(repoRoot, "package-lock.json"), '{ "lockfileVersion": 3 }\n');
     return {
       repoRoot,
       executorRoot: repoRoot,
@@ -421,7 +423,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
     });
 
     const order = npmCalls().map((call) => `${realCommandOf(call)} ${realArgsOf(call).join(" ")}`.trim());
-    expect(order[0]).toContain("npm install");
+    expect(order[0]).toContain("npm ci");
     expect(order[1]).toContain("packages/shared-types");
     expect(order[2]).toContain("apps/api");
     expect(order[3]).toContain("apps/web");
@@ -520,6 +522,7 @@ describe("rollout - guarda de recursos do host (protege a produção durante o b
     for (const dir of [target, executor]) {
       fs.mkdirSync(path.join(dir, "apps", "api", "prisma"), { recursive: true });
       fs.writeFileSync(path.join(dir, "apps", "api", "prisma", "dev.db"), "sqlite");
+      fs.writeFileSync(path.join(dir, "package-lock.json"), '{ "lockfileVersion": 3 }\n');
     }
     const config = makeConfig({
       repoRoot: target,

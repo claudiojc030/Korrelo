@@ -70,6 +70,7 @@ function loadConfig({ executorRoot, repoRoot }) {
     coreDbPath: path.join(targetRepoRoot, "apps", "api", "prisma", "dev.db"),
     coreEnvPath: path.join(targetRepoRoot, "apps", "api", ".env"),
     coreBackupDir: path.join(os.homedir(), "korrelo-backups"),
+    artifactBackupDir: path.join(os.homedir(), "korrelo-artifact-backups"),
   };
 }
 
@@ -307,6 +308,12 @@ async function main() {
     if (result.rollback) {
       if (result.rollback.skipped) {
         console.error(`Rollback do Core não foi necessário: ${result.rollback.reason}`);
+      } else if (result.rollback.deferred) {
+        console.error("");
+        console.error(`[${result.rollback.status}] ${result.rollback.reason}`);
+        console.error(
+          "Os containers de produção (Mesatta, Mongo, Evolution, Postgres, Redis) NÃO foram tocados.",
+        );
       } else {
         console.error(
           result.rollback.ok

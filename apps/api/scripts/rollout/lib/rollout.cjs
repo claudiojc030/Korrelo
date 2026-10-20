@@ -25,6 +25,7 @@ const {
   formatSnapshotSummary,
 } = require("./project-snapshot.cjs");
 const { acquireLock, releaseLock, defaultLockPath } = require("./self-update-lock.cjs");
+const { captureArtifacts, restoreArtifacts } = require("./artifact-backup.cjs");
 const {
   readThresholds,
   readHostResources,
@@ -46,7 +47,13 @@ const STAGES = [
   { id: "snapshot-before", title: "Snapshot dos containers de projeto (leitura)", writes: false },
   { id: "core-backup", title: "Backup consistente do banco do Core", writes: true },
   { id: "git-update", title: "git pull (só com working tree limpo)", writes: true },
-  { id: "install", title: "npm install (revalidando recursos)", writes: true },
+  { id: "artifacts-snapshot", title: "Snapshot dos artefatos do Core (sem compilação)", writes: true },
+  { id: "install", title: "npm ci (instalação determinística, revalidando recursos)", writes: true },
+  {
+    id: "worktree-check",
+    title: "Conferir se o install alterou arquivos versionados",
+    writes: false,
+  },
   { id: "build-shared", title: "build shared-types (revalidando recursos)", writes: true },
   { id: "build-api", title: "build da API (revalidando recursos)", writes: true },
   { id: "build-web", title: "build do web (revalidando recursos)", writes: true },
@@ -95,7 +102,9 @@ const STAGE_PERCENT = {
   "snapshot-before": 12,
   "core-backup": 15,
   "git-update": 20,
+  "artifacts-snapshot": 22,
   install: 30,
+  "worktree-check": 32,
   "build-shared": 40,
   "build-api": 55,
   "build-web": 70,
@@ -134,6 +143,7 @@ function defaultConfig(repoRoot) {
     repoRoot,
     coreDbPath: path.join(repoRoot, "apps", "api", "prisma", "dev.db"),
     coreBackupDir: path.join(os.homedir(), "korrelo-backups"),
+    artifactBackupDir: path.join(os.homedir(), "korrelo-artifact-backups"),
     coreEnvPath: path.join(repoRoot, "apps", "api", ".env"),
     projects: [],
     pm2Apps: ["korrelo-api", "korrelo-web"],
@@ -636,6 +646,7 @@ async function planRollout({ config, run, now = new Date() }) {
     },
     migrations,
     builds: [
+      "npm ci (instalação determinística a partir do package-lock.json)",
       "npm run build --workspace=packages/shared-types",
       "npm run build --workspace=apps/api",
       "npm run build --workspace=apps/web",
@@ -747,6 +758,10 @@ async function executeRollout({
   // detached, candidato sem fast-forward, deploy em andamento) NÃO podem
   // escrever nada no Git do alvo.
   let targetUpdated = false;
+  // O PM2 já foi reiniciado? (define a gravidade da recuperação adiada)
+  let pm2Restarted = false;
+  // Snapshot dos artefatos do Core (usado na recuperação sem compilação).
+  let artifactSnapshot = null;
   // Prioridade baixa e heap dos processos Node do rollout. Declarados aqui
   // para que o ROLLBACK também use (o rollback nunca é abortado por
   // recurso: ele precisa concluir).
@@ -918,6 +933,32 @@ async function executeRollout({
     targetUpdated = true;
     record("git-update", "ok", String(state.candidateCommit).slice(0, 8));
 
+    // ---------------------------------------------------------------- artefatos
+    // Snapshot (cópia) dos artefatos do Core ANTES do install/build: é o que
+    // permite restaurar a versão anterior SEM compilar, caso o rollout seja
+    // interrompido e o host esteja sob pressão.
+    const artifactSnapshotCaptured = captureArtifacts({
+      targetRepoRoot,
+      backupDir: resolvePath(config.artifactBackupDir),
+      stamp: timestamp(now),
+    });
+    artifactSnapshot = artifactSnapshotCaptured;
+    if (artifactSnapshot.captured.length > 0) {
+      record(
+        "artifacts-snapshot",
+        "ok",
+        artifactSnapshot.captured.map((a) => `${a.name} (${a.bytes} bytes)`).join(", "),
+      );
+    } else {
+      record(
+        "artifacts-snapshot",
+        "warn",
+        artifactSnapshot.skipped.length > 0
+          ? `nada capturado: ${artifactSnapshot.skipped.map((a) => `${a.name} (${a.reason})`).join(", ")}`
+          : "nada capturado",
+      );
+    }
+
     // ---------------------------------------------------------------- install
     // Prioridade baixa (nice/ionice) e heap limitado: valem SÓ para os
     // processos do rollout. O PM2 e os containers não são tocados.
@@ -951,17 +992,51 @@ async function executeRollout({
       return run(wrapped.command, wrapped.args, { cwd, env: buildEnvVars, timeoutMs });
     };
 
+    // npm ci: instalação DETERMINÍSTICA a partir do package-lock.json. Não
+    // reescreve o lockfile e não pode "resolver" dependências por conta
+    // própria (isso já causou divergência entre o lock versionado e o
+    // instalado). Sem lockfile, o rollout ABORTA - não há fallback para
+    // `npm install`.
+    const lockfilePath = path.join(targetRepoRoot, "package-lock.json");
+    if (!fs.existsSync(lockfilePath)) {
+      throw new Error(
+        "package-lock.json não encontrado no checkout alvo: o rollout usa 'npm ci' " +
+          "(instalação determinística) e NÃO cai para 'npm install'. Restabeleça o lockfile e rode de novo.",
+      );
+    }
+
     const install = await runBuildStep({
       stageId: "install",
       command: "npm",
-      args: ["install"],
+      args: ["ci"],
       cwd: targetRepoRoot,
       timeoutMs: 900_000,
     });
     if (install.code !== 0) {
-      throw new Error("npm install falhou");
+      throw new Error("npm ci falhou");
     }
-    record("install", "ok");
+    record("install", "ok", "npm ci (determinístico, a partir do package-lock.json)");
+
+    // ---------------------------------------------------------------- worktree
+    // `npm ci` não deve alterar arquivo versionado. Se alterou (lockfile
+    // reescrito, por exemplo), é sinal de problema: DETECTA e REPORTA.
+    // Nada é descartado, restaurado ou resetado em silêncio - a decisão é
+    // do operador.
+    const afterInstall = await inspectGitState({ cwd: targetRepoRoot, run });
+    if (afterInstall.trackedModified.length > 0) {
+      state.worktreeModifiedAfterInstall = afterInstall.trackedModified;
+      log(
+        `[rollout] ATENÇÃO: arquivos versionados modificados após o npm ci: ${afterInstall.trackedModified.join(", ")} ` +
+          "(detectado e reportado; nada foi descartado)",
+      );
+      record(
+        "worktree-check",
+        "warn",
+        `${afterInstall.trackedModified.length} arquivo(s) versionado(s) modificado(s) após o npm ci - nada foi descartado`,
+      );
+    } else {
+      record("worktree-check", "ok", "package-lock.json e demais arquivos versionados intactos");
+    }
 
     // ---------------------------------------------------------------- builds
     // ESTRICTAMENTE SEQUENCIAL: shared-types -> API -> web. Nunca em
@@ -1034,6 +1109,7 @@ async function executeRollout({
     if (pm2.code !== 0) {
       throw new Error("pm2 restart do Korrelo falhou");
     }
+    pm2Restarted = true;
     record("pm2-restart", "ok", config.pm2Apps.join(", "));
 
     // ---------------------------------------------------------------- health do Core
@@ -1103,6 +1179,10 @@ async function executeRollout({
           ionice: ioniceAvailable,
           niceLevel: thresholds.niceLevel,
           buildEnv: buildEnvVars,
+          pm2Restarted,
+          artifactSnapshot,
+          thresholds,
+          readResources,
         })
       : {
           ok: false,
@@ -1111,6 +1191,11 @@ async function executeRollout({
           steps: [],
         };
     state.rollback = rollback;
+    if (rollback.deferred) {
+      state.recoveryRequired = rollback.status === "RECOVERY_REQUIRED";
+      state.recoveryStatus = rollback.status;
+      state.recoveryCritical = rollback.critical === true;
+    }
 
     // Libera o worker (o Core precisa voltar a funcionar).
     try {
@@ -1129,11 +1214,26 @@ async function executeRollout({
 }
 
 /**
- * Rollback do CORE: volta ao commit anterior, rebuild e reinicia SOMENTE
- * korrelo-api e korrelo-web. NUNCA toca em container de projeto.
+ * Rollback do CORE: consciente dos RECURSOS e do stage em que a falha
+ * aconteceu. NUNCA toca em container de projeto.
  *
- * O rollback acontece NO CHECKOUT ALVO (o mesmo que foi atualizado): volta
- * para o previousCommit capturado ANTES do git update.
+ * Três situações:
+ *
+ * 1) Falha ANTES do git update -> nem isso é chamado (nada foi alterado).
+ *
+ * 2) Falha DEPOIS do git update e ANTES de qualquer restart de PM2:
+ *    o Core em execução continua na versão antiga. Se faltam recursos:
+ *    restaura o Git do alvo para o previousCommit e os artefatos do Core
+ *    (por CÓPIA, sem compilação), NÃO compila e NÃO reinicia o PM2.
+ *    Estado: RECOVERY_DEFERRED.
+ *
+ * 3) Falha DEPOIS do restart de PM2: o Core pode estar com a versão nova
+ *    (ou quebrada). Antes do rebuild, os recursos são reavaliados. Se não
+ *    há folga, o rebuild é ADIADO: registra RECOVERY_REQUIRED/CRITICAL,
+ *    não reinicia container de projeto e não sacrifica Mesatta para
+ *    recuperar o painel.
+ *
+ * Swap nunca justifica: a produção Docker tem prioridade sobre o Core.
  */
 async function rollbackCore({
   config,
@@ -1144,13 +1244,42 @@ async function rollbackCore({
   ionice = false,
   niceLevel = 10,
   buildEnv: buildEnvVars = undefined,
+  pm2Restarted = false,
+  artifactSnapshot = null,
+  thresholds = null,
+  readResources = null,
 }) {
   if (!previousCommit) {
     return { ok: false, reason: "commit anterior desconhecido" };
   }
   const { targetRepoRoot } = resolveRoots(config);
+  const limits = thresholds ?? readThresholds();
+  const readHost = readResources ?? ((opts) => readHostResources(opts));
   const steps = [];
 
+  /** Recuperação adiada: sem build, sem restart de PM2. */
+  const deferred = (reason, detail) => {
+    const restore = restoreArtifacts({ snapshot: artifactSnapshot, targetRepoRoot });
+    steps.push({ step: "restore-artifacts", code: restore.code, detail: restore.detail });
+    const status = pm2Restarted ? "RECOVERY_REQUIRED" : "RECOVERY_DEFERRED";
+    const message = pm2Restarted
+      ? `Core pode estar com versão inconsistente após o restart do PM2; recuperação ADIADA por pressão de recursos (${reason}). ` +
+        "Os projetos de produção NÃO foram tocados e não serão sacrificados para recuperar o painel do Korrelo. " +
+        "Rebuild + restart do Core serão necessários quando o host tiver folga."
+      : `Core em execução permaneceu na versão anterior; rebuild de recuperação adiado por pressão de recursos (${reason}). ` +
+        "Nenhum build foi iniciado e o PM2 não foi reiniciado. Os projetos de produção não foram tocados.";
+    return {
+      ok: false,
+      deferred: true,
+      critical: pm2Restarted,
+      status,
+      recoveryRequired: pm2Restarted,
+      reason: message,
+      steps,
+    };
+  };
+
+  // 1) O checkout do alvo volta para o commit anterior (barato e seguro).
   const checkout = await run("git", ["-C", targetRepoRoot, "checkout", previousCommit], {
     cwd: targetRepoRoot,
     timeoutMs: 60_000,
@@ -1160,7 +1289,25 @@ async function rollbackCore({
     return { ok: false, reason: `git checkout falhou: ${checkout.stderr.trim()}`, steps };
   }
 
+  // 2) Recursos: sem folga, NÃO se compila e NÃO se reinicia o PM2.
+  const resources = await readHost({ run });
+  const evaluation = evaluateResources({ resources, thresholds: limits });
+  if (!evaluation.safeToBuild) {
+    const result = deferred(evaluation.reason);
+    log(`[rollout] ${result.status}: ${result.reason}`);
+    return result;
+  }
+
+  // 3) Rebuild sequencial (com nice/heap). Os recursos são reavaliados
+  //    antes de cada build: se a condição piorar, o rebuild para.
   for (const workspace of ["packages/shared-types", "apps/api", "apps/web"]) {
+    const stepResources = await readHost({ run });
+    const stepEvaluation = evaluateResources({ resources: stepResources, thresholds: limits });
+    if (!stepEvaluation.safeToBuild) {
+      const result = deferred(stepEvaluation.reason);
+      log(`[rollout] ${result.status}: ${result.reason}`);
+      return result;
+    }
     // O rollback também compila com prioridade baixa e heap limitado (a
     // VPS é a mesma), mas NUNCA é abortado por recurso: o Core precisa
     // voltar a funcionar.
@@ -1187,6 +1334,7 @@ async function rollbackCore({
   const assetsScript = path.join(targetRepoRoot, "apps", "web", "scripts", "copy-standalone-assets.js");
   const assets = await run(process.execPath, [assetsScript], {
     cwd: path.join(targetRepoRoot, "apps", "web"),
+    env: buildEnvVars,
     timeoutMs: 120_000,
   });
   steps.push({ step: "web-assets", code: assets.code });

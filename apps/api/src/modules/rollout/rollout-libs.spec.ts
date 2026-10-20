@@ -365,6 +365,8 @@ describe("rollout - executor", () => {
     fs.mkdirSync(path.join(repoRoot, "apps", "api", "prisma"), { recursive: true });
     fs.writeFileSync(path.join(repoRoot, "apps", "api", "prisma", "dev.db"), "db");
     fs.writeFileSync(path.join(repoRoot, "apps", "api", ".env"), "JWT_SECRET=nao-logar-este-valor");
+    // O rollout usa `npm ci`: sem lockfile, ele aborta.
+    fs.writeFileSync(path.join(repoRoot, "package-lock.json"), '{ "lockfileVersion": 3 }\n');
   });
 
   afterEach(() => {

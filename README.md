@@ -314,7 +314,7 @@ e reinicia só o PM2 do Core.
 ```bash
 cd korrelo
 git pull
-npm install
+npm ci
 npm run build --workspace=packages/shared-types
 npm run build --workspace=apps/api
 npm run build --workspace=apps/web
@@ -349,19 +349,19 @@ imagem, StartedAt, RestartCount, memória, swap, restart policy, health,
 redes, portas e mounts.
 
 Ele **não escreve nada**: sem lock, sem drain, sem backup, sem `git pull`,
-sem `npm install`/`build`, sem migration, sem `chmod`, sem restart de PM2,
+sem `npm ci`/`build`, sem migration, sem `chmod`, sem restart de PM2,
 sem nenhum comando Docker de escrita e sem arquivo de status. Cada comando
 passa por uma allowlist de leitura — um comando de escrita aborta o dry-run
 com erro em vez de acontecer.
 
 #### Guarda de recursos (proteger a produção durante o build)
 
-O `npm install` e os três builds (`shared-types` → `api` → `web`) rodam na
+O `npm ci` e os três builds (`shared-types` → `api` → `web`) rodam na
 mesma VPS que hospeda Mesatta, Mongo, Evolution API, Postgres e Redis. Para
 não sacrificar a produção, o rollout:
 
-1. mede os recursos **read-only** antes do `npm install`;
-2. revalida **antes de cada build** (install, shared, api, web) — se a
+1. mede os recursos **read-only** antes do `npm ci`;
+2. revalida **antes de cada build** (ci, shared, api, web) — se a
    condição piorou, o próximo build não começa;
 3. compila com prioridade baixa (`nice -n 10` + `ionice -c 3`, quando
    existem) e com teto de heap próprio (`--max-old-space-size`, só nos
@@ -372,7 +372,7 @@ Se faltar recurso, o rollout é adiado com
 `Rollout adiado: recursos insuficientes para compilar o Core com segurança`.
 Abortos antes do `git update` não disparam rollback (não houve mudança);
 abortos depois dele voltam o Core ao commit anterior (rollback normal, só do
-Core).
+Core) — **mas o rollback também é resource-aware** (ver abaixo).
 
 Defaults (pensados para 1 vCPU / 4 GB com os projetos rodando na mesma
 máquina) e seus equivalentes por env:
@@ -389,6 +389,37 @@ máquina) e seus equivalentes por env:
 
 Swap livre **não** conta como RAM: MemAvailable físico é o critério
 principal. O dry-run mostra a checagem completa (`rolloutResourceCheck`).
+
+#### Rollout consciente dos recursos (nunca sacrificar a produção)
+
+O install é **`npm ci`** (determinístico, a partir do `package-lock.json`; não
+reescreve o lockfile). Sem `package-lock.json` no checkout alvo o rollout
+**aborta** — não existe fallback para `npm install`. Depois do `npm ci`, o
+rollout confere se algum arquivo versionado mudou (ex.: o lockfile
+reescrito): se mudou, **reporta** e segue — nada é descartado, resetado ou
+restaurado em silêncio.
+
+O rollback é **consciente dos recursos e do stage da falha**:
+
+| onde a falha aconteceu | o que o rollback faz |
+| --- | --- |
+| antes do `git update` | **nenhum rollback** (nada foi alterado no alvo) |
+| depois do `git update`, **antes** de qualquer restart de PM2 | o Core em execução continua na versão anterior. Sem recurso: restaura o Git do alvo para o `previousCommit` e os artefatos do Core (por **cópia**, sem compilação), **não compila** e **não reinicia o PM2** → `RECOVERY_DEFERRED` |
+| depois do restart de PM2 | o Core pode estar com a versão nova (ou quebrada). Sem recurso: o rebuild é **adiado** → `RECOVERY_REQUIRED` / `CRITICAL`, com rebuild + restart do Core pendentes para quando o host tiver folga |
+
+Em nenhum dos casos o rollback toca container, volume, rede ou porta de
+projeto: **Mesatta e Evolution têm prioridade sobre o painel do Korrelo** —
+é aceitável o Core ficar temporariamente indisponível se a alternativa for
+ameaçar a produção. O status do rollout registra `recoveryStatus` /
+`recoveryRequired`.
+
+Estratégia de artefatos: antes do `npm ci` o rollout copia (não move) os
+artefatos do Core que o processo em execução lê do disco — hoje apenas
+`apps/api/dist` (poucos MB). O bundle do web (`.next/standalone`) **não** é
+copiado: pode passar de 100 MB e a cópia pressionaria o mesmo disco sob
+pressão (além de correr com o servidor Next em execução, que lê esses
+arquivos a cada request). O que não pode ser garantido é sinalizado
+explicitamente (`RECOVERY_REQUIRED`), nunca escondido.
 
 #### Atualizar um checkout ALVO diferente (bootstrap)
 
@@ -413,7 +444,7 @@ bash scripts/rollout-korrelo.sh --repo-root /home/korrelo/korrelo --apply
 O que o `--repo-root` garante:
 
 - o **alvo** é quem é atualizado: `git status/branch/pull`, banco do Core
-  (`<alvo>/apps/api/prisma/dev.db`), `.env`, `npm install`, builds, migration,
+  (`<alvo>/apps/api/prisma/dev.db`), `.env`, `npm ci`, builds, migration,
   `chmod` e rollback acontecem todos no alvo;
 - o **executor** (onde o `rollout.cjs` está) fornece o código, as libs e o
   `rollout.config.json` — a config nova nunca é lida do alvo antigo;
@@ -424,7 +455,8 @@ O que o `--repo-root` garante:
   origin <branch>`) — checkout em detached HEAD é recusado antes de qualquer
   escrita;
 - o rollback volta o **alvo** ao `previousCommit` (rebuild, assets e restart
-  só do Core);
+  só do Core) — e, se faltarem recursos, **não** compila à força (ver
+  "Rollout consciente dos recursos");
 - argumento desconhecido **aborta** (nunca é ignorado em silêncio) e
   `--repo-root` sem valor é recusado antes de qualquer lock, drain ou backup.
 
@@ -432,7 +464,7 @@ O que ele garante:
 
 - **não roda no meio de um deploy de projeto** (recusa se houver job em
   andamento);
-- **não sacrifica a produção para compilar o Core**: antes do `npm install` e
+- **não sacrifica a produção para compilar o Core**: antes do `npm ci` e
   de cada build, o rollout mede MemAvailable, swap em uso, load average e
   disco livre. Se os recursos não forem suficientes, o rollout é **adiado**
   (nada é parado, reduzido ou reiniciado) e os projetos ficam intactos;
@@ -521,9 +553,9 @@ VPS.
    git clone https://github.com/SEU_USUARIO/Korrelo.git korrelo
    cd korrelo
    ```
-2. Instale as dependências:
+2. Instale as dependências (determinístico, a partir do `package-lock.json`):
    ```bash
-   npm install
+   npm ci
    ```
 3. Copie os arquivos de ambiente:
    ```bash
