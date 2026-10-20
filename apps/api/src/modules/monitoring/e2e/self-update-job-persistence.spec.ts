@@ -193,7 +193,6 @@ describe("self-update - o runner persiste progresso e resultado", () => {
   it("9) leitura concorrente: nunca lê um JSON pela metade", async () => {
     let corrupted = 0;
     let reads = 0;
-    let stop = false;
     const reader = setInterval(() => {
       reads += 1;
       try {
@@ -209,13 +208,21 @@ describe("self-update - o runner persiste progresso e resultado", () => {
       jobLib.applyMarker(jobFile, jobLib.parseMarker("__KORRELO_UPDATE_STEP__|50|build-api"));
     }, 1);
 
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    stop = true;
+    // O teste espera por uma QUANTIDADE de leituras, e não por uma janela
+    // de tempo fixa: numa máquina carregada (CI com várias suítes em
+    // paralelo) o timer de 2ms pode ser postergado e a janela de 400ms
+    // acabar antes das 10 leituras esperadas. Aqui o deadline é o teto e o
+    // número de leituras é o objetivo.
+    const MIN_READS = 10;
+    const DEADLINE_MS = 10_000;
+    const startedAt = Date.now();
+    while (reads < MIN_READS && Date.now() - startedAt < DEADLINE_MS) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
     clearInterval(reader);
     clearInterval(writer);
-    void stop;
 
-    expect(reads).toBeGreaterThan(10);
+    expect(reads).toBeGreaterThanOrEqual(MIN_READS);
     expect(corrupted).toBe(0);
   }, 20000);
 
