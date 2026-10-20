@@ -131,8 +131,12 @@ describe("GetSystemMetricsUseCase", () => {
     const { GetSystemMetricsUseCase, restore } = loadUseCase({
       SYSTEM_METRICS_CACHE_TTL_MS: "1",
       SYSTEM_METRICS_FAILURE_THRESHOLD: "2",
-      SYSTEM_METRICS_BACKOFF_BASE_MS: "20",
-      SYSTEM_METRICS_BACKOFF_MAX_MS: "20",
+      // Janela de backoff de 200ms (e não 20ms): o teste dorme 5ms antes da
+      // terceira chamada, e sob carga esse sleep passava da janela de 20ms -
+      // o circuito deixava passar uma chamada e o teste falhava de forma
+      // intermitente (flakiness que já derrubou o CI).
+      SYSTEM_METRICS_BACKOFF_BASE_MS: "200",
+      SYSTEM_METRICS_BACKOFF_MAX_MS: "200",
     });
     const collector = new FakeCollector();
     collector.behavior = "throws";
@@ -142,7 +146,7 @@ describe("GetSystemMetricsUseCase", () => {
     expect(collector.calls).toBe(1);
 
     // Espera o backoff expirar: a segunda tentativa acontece e falha de novo.
-    await sleep(40);
+    await sleep(260);
     await useCase.execute();
     expect(collector.calls).toBe(2);
     expect(useCase.getStatus().consecutiveFailures).toBe(2);

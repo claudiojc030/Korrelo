@@ -96,6 +96,11 @@ function main() {
   }
 
   // Desacopla: o processo real não morre quando este launcher sai.
+  //
+  // O `unref()` aqui é CORRETO e deve permanecer: o launcher existe só
+  // para fazer o double fork. Sem o unref, o launcher ficaria segurando o
+  // event loop (e o rollout, que já foi re-parentado para o init, ficaria
+  // como filho de um processo que não morre - quebrando o desacoplamento).
   child.unref();
 
   // Sai agora: o runner é re-parentado para o init (double fork).

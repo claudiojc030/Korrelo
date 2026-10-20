@@ -44,6 +44,17 @@ function run(command, args = [], options = {}) {
         /* já morreu */
       }
     }, timeoutMs);
+    // O `unref()` aqui é CORRETO e deve permanecer:
+    //
+    // - o child process (NÃO é detached e NÃO é unref'd) mantém o event
+    //   loop vivo por conta própria, então o timeout de supervisão sempre
+    //   dispara se o comando travar;
+    // - se o comando terminar antes, o timer unref'd NÃO segura o processo
+    //   do rollout por até `timeoutMs` (60s no default) - sem ele, todo
+    //   comando do rollout atrasaria o fim do processo em até 1 minuto.
+    //
+    // (Diferente do sleep do resource guard, que é o ÚNICO handle ativo
+    // durante o cooldown - lá o unref matava o rollout, exit code 0.)
     timer.unref?.();
 
     child.stdout?.setEncoding("utf-8");

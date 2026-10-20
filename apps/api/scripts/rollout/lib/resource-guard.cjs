@@ -366,11 +366,23 @@ function readWaitConfig(env = process.env) {
   };
 }
 
-/** Sleep padrão (sem busy loop). */
+/**
+ * Sleep padrão (sem busy loop).
+ *
+ * IMPORTANTE: o timer NÃO pode ser `unref()`.
+ *
+ * Durante o resource cooldown, o timer do sleep é o ÚNICO handle ativo do
+ * rollout. Com `unref()`, o Node não mantém o event loop vivo, o processo
+ * termina NORMALMENTE (exit code 0) e o cooldown nunca termina - o rollout
+ * morre no meio, deixando o Git avançado, o PM2 na versão antiga e o
+ * self-update.lock / worker-drain órfãos. Foi exatamente o que aconteceu
+ * em produção: load1=3.54 > 1.5, o rollout imprimiu "aguardando recursos"
+ * e voltou ao shell com exit code 0.
+ */
 function defaultSleep(ms) {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    timer.unref?.();
+    // Sem unref: enquanto o cooldown dura, o processo do rollout fica vivo.
+    setTimeout(resolve, ms);
   });
 }
 
