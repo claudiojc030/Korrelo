@@ -26,6 +26,7 @@ const {
 } = require("./project-snapshot.cjs");
 const { acquireLock, releaseLock, defaultLockPath } = require("./self-update-lock.cjs");
 const { captureArtifacts, restoreArtifacts } = require("./artifact-backup.cjs");
+const { checkBuildToolchain, formatCommandFailure } = require("./toolchain.cjs");
 const {
   readThresholds,
   readWaitConfig,
@@ -56,6 +57,11 @@ const STAGES = [
   {
     id: "worktree-check",
     title: "Conferir se o install alterou arquivos versionados",
+    writes: false,
+  },
+  {
+    id: "toolchain-check",
+    title: "Validar a toolchain de build (TypeScript/tsc)",
     writes: false,
   },
   { id: "build-shared", title: "build shared-types (revalidando recursos)", writes: true },
@@ -114,6 +120,7 @@ const STAGE_PERCENT = {
   "artifacts-snapshot": 22,
   install: 30,
   "worktree-check": 32,
+  "toolchain-check": 34,
   "build-shared": 40,
   "build-api": 55,
   "build-web": 70,
@@ -677,7 +684,7 @@ async function planRollout({ config, run, now = new Date() }) {
     },
     migrations,
     builds: [
-      "npm ci (instalação determinística a partir do package-lock.json)",
+      "npm ci --include=dev (instalação determinística COM as dependências de build)",
       "npm run build --workspace=packages/shared-types",
       "npm run build --workspace=apps/api",
       "npm run build --workspace=apps/web",
@@ -1077,15 +1084,18 @@ async function executeRollout({
       return run(wrapped.command, wrapped.args, { cwd, env: buildEnvVars, timeoutMs });
     };
 
-    // npm ci: instalação DETERMINÍSTICA a partir do package-lock.json. Não
-    // reescreve o lockfile e não pode "resolver" dependências por conta
-    // própria (isso já causou divergência entre o lock versionado e o
-    // instalado). Sem lockfile, o rollout ABORTA - não há fallback para
-    // `npm install`.
+    // npm ci --include=dev: instalação DETERMINÍSTICA a partir do
+    // package-lock.json, SEM reescrever o lockfile e COM as devDependencies
+    // (o TypeScript que compila o Core é devDependency).
+    //
+    // O --include=dev é obrigatório: com NODE_ENV=production no ambiente da
+    // VPS, o npm roda com omit=dev e o `tsc` simplesmente não existe
+    // (build de packages/shared-types falha com "tsc: not found"). A flag é
+    // local ao comando - não mexemos no NODE_ENV global nem no .npmrc.
     const lockfilePath = path.join(targetRepoRoot, "package-lock.json");
     if (!fs.existsSync(lockfilePath)) {
       throw new Error(
-        "package-lock.json não encontrado no checkout alvo: o rollout usa 'npm ci' " +
+        "package-lock.json não encontrado no checkout alvo: o rollout usa 'npm ci --include=dev' " +
           "(instalação determinística) e NÃO cai para 'npm install'. Restabeleça o lockfile e rode de novo.",
       );
     }
@@ -1093,14 +1103,29 @@ async function executeRollout({
     const install = await runBuildStep({
       stageId: "install",
       command: "npm",
-      args: ["ci"],
+      args: ["ci", "--include=dev"],
       cwd: targetRepoRoot,
       timeoutMs: 900_000,
     });
     if (install.code !== 0) {
-      throw new Error("npm ci falhou");
+      throw new Error(formatCommandFailure({ label: "npm ci --include=dev", stage: "install", result: install }));
     }
-    record("install", "ok", "npm ci (determinístico, a partir do package-lock.json)");
+    record("install", "ok", "npm ci --include=dev (dependências de build incluídas)");
+
+    // ---------------------------------------------------------------- toolchain
+    // Antes de QUALQUER build: confirma que a toolchain de build existe.
+    // Sem isso, a falha só apareceria no meio do build ("tsc: not found"),
+    // sem deixar claro que a instalação veio sem devDependencies.
+    const toolchain = checkBuildToolchain({ repoRoot: targetRepoRoot });
+    if (!toolchain.ok) {
+      record("toolchain-check", "failed", `ausente: ${toolchain.missing.join(", ")}`);
+      throw new Error(
+        `Toolchain de build incompleta após npm ci --include=dev: ${toolchain.missing.join(", ")} não está disponível. ` +
+          "O build do Core precisa das devDependencies (TypeScript/tsc). " +
+          "Verifique se o lockfile inclui as devDependencies e se o NODE_ENV do ambiente está com omit=dev.",
+      );
+    }
+    record("toolchain-check", "ok", toolchain.found.join(", "));
 
     // ---------------------------------------------------------------- worktree
     // `npm ci` não deve alterar arquivo versionado. Se alterou (lockfile
@@ -1140,7 +1165,7 @@ async function executeRollout({
         timeoutMs: 1_800_000,
       });
       if (build.code !== 0) {
-        throw new Error(`build de ${workspace} falhou`);
+        throw new Error(formatCommandFailure({ label: `build de ${workspace}`, stage: id, result: build }));
       }
       record(id, "ok", workspace);
     }
@@ -1158,9 +1183,11 @@ async function executeRollout({
     if (assets.code !== 0) {
       record("web-assets", "failed", "falha ao copiar os assets do Next para o standalone");
       throw new Error(
-        `falha ao copiar os assets do Next (.next/static e public/) para o standalone: ${
-          assets.stderr.trim() || "erro desconhecido"
-        }`,
+        formatCommandFailure({
+          label: "falha ao copiar os assets do Next (.next/static e public/) para o standalone",
+          stage: "web-assets",
+          result: assets,
+        }),
       );
     }
     record("web-assets", "ok", ".next/static e public/ copiados para o standalone");
@@ -1171,7 +1198,9 @@ async function executeRollout({
       timeoutMs: 600_000,
     });
     if (migrate.code !== 0) {
-      throw new Error(`prisma migrate deploy falhou: ${migrate.stderr.trim() || migrate.stdout.trim()}`);
+      throw new Error(
+        formatCommandFailure({ label: "prisma migrate deploy", stage: "migration", result: migrate }),
+      );
     }
     record("migration", "ok", `${plan.migrations.length} migration(s) no repositório`);
 
@@ -1484,7 +1513,16 @@ async function rollbackCore({
     });
     steps.push({ step: `build-${workspace}`, code: build.code });
     if (build.code !== 0) {
-      return { ok: false, reason: `build de ${workspace} falhou no rollback`, steps };
+      return {
+        ok: false,
+        reason: formatCommandFailure({
+          label: `build de ${workspace} (rollback)`,
+          stage: `rollback-build-${workspace}`,
+          result: build,
+        }),
+        git: gitRestore,
+        steps,
+      };
     }
   }
 
@@ -1512,7 +1550,7 @@ async function rollbackCore({
   }
 
   log("[rollout] rollback do Core concluído (projetos não foram tocados)");
-  return { ok: true, reason: null, steps };
+  return { ok: true, reason: null, git: gitRestore, steps };
 }
 
 module.exports = {

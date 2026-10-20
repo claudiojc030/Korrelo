@@ -314,7 +314,7 @@ e reinicia só o PM2 do Core.
 ```bash
 cd korrelo
 git pull
-npm ci
+npm ci --include=dev
 npm run build --workspace=packages/shared-types
 npm run build --workspace=apps/api
 npm run build --workspace=apps/web
@@ -429,12 +429,33 @@ load1=1.31
 
 #### Rollout consciente dos recursos (nunca sacrificar a produção)
 
-O install é **`npm ci`** (determinístico, a partir do `package-lock.json`; não
-reescreve o lockfile). Sem `package-lock.json` no checkout alvo o rollout
-**aborta** — não existe fallback para `npm install`. Depois do `npm ci`, o
-rollout confere se algum arquivo versionado mudou (ex.: o lockfile
-reescrito): se mudou, **reporta** e segue — nada é descartado, resetado ou
-restaurado em silêncio.
+O install é **`npm ci --include=dev`** (determinístico, a partir do
+`package-lock.json`; não reescreve o lockfile). O `--include=dev` é
+obrigatório: com `NODE_ENV=production` no ambiente da VPS, o npm roda com
+`omit=dev` e as devDependencies (o TypeScript que compila o Core) **não são
+instaladas** — o build de `packages/shared-types` falha com `tsc: not found`.
+A flag é local ao comando: o rollout **não** mexe no `NODE_ENV` global, nem
+em `~/.npmrc`, nem em `/etc/npmrc`, nem roda `npm config set`.
+
+Depois do install, a toolchain é **validada** (novo stage `toolchain-check`):
+se o TypeScript/`tsc` não estiver disponível, o rollout aborta **antes** de
+qualquer build com
+`Toolchain de build incompleta após npm ci --include=dev: TypeScript não está
+disponível`.
+
+Sem `package-lock.json` no checkout alvo o rollout **aborta** — não existe
+fallback para `npm install`. Depois do `npm ci`, o rollout confere se algum
+arquivo versionado mudou (ex.: o lockfile reescrito): se mudou, **reporta** e
+segue — nada é descartado, resetado ou restaurado em silêncio.
+
+As falhas de build agora carregam o **exit code** e um trecho **sanitizado e
+limitado** do stderr/stdout (sem vazar segredo e sem despejar buffer
+gigante):
+
+```
+build de packages/shared-types falhou [build-shared] (exit=127):
+sh: 1: tsc: not found
+```
 
 O rollback é **consciente dos recursos e do stage da falha**:
 
@@ -604,9 +625,10 @@ VPS.
    git clone https://github.com/SEU_USUARIO/Korrelo.git korrelo
    cd korrelo
    ```
-2. Instale as dependências (determinístico, a partir do `package-lock.json`):
+2. Instale as dependências (determinístico, a partir do `package-lock.json`,
+   **com as devDependencies** — o build do Core precisa do TypeScript):
    ```bash
-   npm ci
+   npm ci --include=dev
    ```
 3. Copie os arquivos de ambiente:
    ```bash

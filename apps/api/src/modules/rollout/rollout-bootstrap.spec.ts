@@ -43,7 +43,7 @@ const cliArgs = require(path.join(LIBS, "cli-args.cjs"));
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { run: realRun } = require(path.join(LIBS, "command-runner.cjs"));
 
-import { safeResourceProvider } from "./testing/resource-fixtures";
+import { safeResourceProvider, createFakeToolchain } from "./testing/resource-fixtures";
 
 const CLI_PATH = path.resolve(__dirname, "..", "..", "..", "scripts", "rollout", "rollout.cjs");
 const WRAPPER_PATH = path.resolve(__dirname, "..", "..", "..", "..", "..", "scripts", "rollout-korrelo.sh");
@@ -234,6 +234,13 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       writeFile(path.join(origin, "core.txt"), "v1");
       // O rollout usa `npm ci`: sem lockfile, ele aborta.
       writeFile(path.join(origin, "package-lock.json"), '{ "lockfileVersion": 3 }\n');
+      // Toolchain de build (typescript/tsc) - versionada no repositório de
+      // teste para o rollout passar na validação pós-install.
+      writeFile(path.join(origin, "node_modules", ".bin", "tsc"), "#!/bin/sh\nexit 0\n");
+      writeFile(
+        path.join(origin, "node_modules", "typescript", "package.json"),
+        JSON.stringify({ name: "typescript", version: "5.5.4" }),
+      );
       writeFile(
         path.join(origin, "apps", "web", "scripts", "copy-standalone-assets.js"),
         "console.log('assets ok');\n",
@@ -264,6 +271,9 @@ describe("rollout - bootstrap do primeiro rollout (executor externo -> alvo real
       fs.mkdirSync(path.dirname(coreDbPath), { recursive: true });
       fs.writeFileSync(coreDbPath, "sqlite");
       fs.writeFileSync(coreEnvPath, "JWT_SECRET=nao-logar-este-valor");
+      // Toolchain de build (node_modules é ignorado pelo git, então é criada
+      // no checkout de teste, como o `npm ci --include=dev` faria).
+      createFakeToolchain(repos.target);
       return {
         executorRoot: repos.executor,
         targetRepoRoot: repos.target,

@@ -35,7 +35,7 @@ const rolloutLib = require(path.join(LIBS, "rollout.cjs"));
 
 import * as fs from "node:fs";
 import * as os from "node:os";
-import { safeResourceProvider } from "./testing/resource-fixtures";
+import { safeResourceProvider, createFakeToolchain } from "./testing/resource-fixtures";
 
 // O objeto real do módulo (o import acima é um namespace congelado: para
 // mockar o load average é preciso o exports do CommonJS).
@@ -381,6 +381,8 @@ describe("rollout - executor", () => {
     fs.writeFileSync(path.join(repoRoot, "apps", "api", ".env"), "JWT_SECRET=nao-logar-este-valor");
     // O rollout usa `npm ci`: sem lockfile, ele aborta.
     fs.writeFileSync(path.join(repoRoot, "package-lock.json"), '{ "lockfileVersion": 3 }\n');
+    // Toolchain de build (typescript/tsc) - o rollout valida depois do install.
+    createFakeToolchain(repoRoot);
   });
 
   afterEach(() => {

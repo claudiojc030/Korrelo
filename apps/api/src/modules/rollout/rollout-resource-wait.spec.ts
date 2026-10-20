@@ -35,6 +35,8 @@ const rolloutLib = require(path.join(LIBS, "rollout.cjs"));
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const guard = require(path.join(LIBS, "resource-guard.cjs"));
 
+import { createFakeToolchain } from "./testing/resource-fixtures";
+
 type RunResult = { code: number; stdout: string; stderr: string; timedOut?: boolean };
 type Call = { command: string; args: string[]; cwd?: string; env?: Record<string, string> };
 
@@ -73,6 +75,8 @@ describe("rollout - cooldown de recursos e rollback preservando a branch", () =>
     fs.writeFileSync(coreDbPath, "sqlite");
     fs.writeFileSync(path.join(repoRoot, "apps", "api", ".env"), "JWT_SECRET=x");
     fs.writeFileSync(path.join(repoRoot, "package-lock.json"), '{ "lockfileVersion": 3 }\n');
+    // Toolchain de build (typescript/tsc).
+    createFakeToolchain(repoRoot);
     return {
       repoRoot,
       executorRoot: repoRoot,
@@ -547,6 +551,7 @@ describe("rollout - cooldown de recursos e rollback preservando a branch", () =>
       fs.mkdirSync(path.join(dir, "apps", "api", "prisma"), { recursive: true });
       fs.writeFileSync(path.join(dir, "apps", "api", "prisma", "dev.db"), "sqlite");
       fs.writeFileSync(path.join(dir, "package-lock.json"), '{ "lockfileVersion": 3 }\n');
+      createFakeToolchain(dir);
     }
     const config = makeConfig({
       repoRoot: target,

@@ -17,6 +17,9 @@
  * (rollout-resource-guard.spec.ts e rollout-rollback-safe.spec.ts).
  */
 
+import * as fs from "node:fs";
+import * as path from "node:path";
+
 /** Métricas seguras: nunca barram o resource guard. */
 export const SAFE_RESOURCES = {
   memAvailableMb: 4096,
@@ -64,4 +67,22 @@ export function safeResourceProvider(overrides: Partial<ResourceMetrics> = {}) {
  */
 export function overloadedHostProvider() {
   return safeResourceProvider({ load1: 10, load5: 9, load15: 8 });
+}
+
+/**
+ * Cria uma toolchain de build FALSA no repositório (typescript + .bin/tsc).
+ *
+ * O rollout valida a toolchain depois do install (e aborta se faltar), então
+ * os repositórios de teste precisam de um `node_modules` plausível.
+ */
+export function createFakeToolchain(repoRoot: string): void {
+  const binDir = path.join(repoRoot, "node_modules", ".bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.writeFileSync(path.join(binDir, "tsc"), "#!/bin/sh\nexit 0\n");
+  const pkgDir = path.join(repoRoot, "node_modules", "typescript");
+  fs.mkdirSync(pkgDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(pkgDir, "package.json"),
+    JSON.stringify({ name: "typescript", version: "5.5.4" }),
+  );
 }

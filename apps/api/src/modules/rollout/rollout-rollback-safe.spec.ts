@@ -32,6 +32,8 @@ const LIBS = path.resolve(__dirname, "..", "..", "..", "scripts", "rollout", "li
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const rolloutLib = require(path.join(LIBS, "rollout.cjs"));
 
+import { createFakeToolchain } from "./testing/resource-fixtures";
+
 type RunResult = { code: number; stdout: string; stderr: string; timedOut?: boolean };
 type Call = { command: string; args: string[]; cwd?: string; env?: Record<string, string> };
 
@@ -70,6 +72,8 @@ describe("rollout - rollback resource-safe e npm ci", () => {
     fs.writeFileSync(coreDbPath, "sqlite");
     fs.writeFileSync(path.join(repoRoot, "apps", "api", ".env"), "JWT_SECRET=x");
     fs.writeFileSync(path.join(repoRoot, "package-lock.json"), '{ "lockfileVersion": 3 }\n');
+    // Toolchain de build (typescript/tsc).
+    createFakeToolchain(repoRoot);
     // Artefato do Core em execução (o que o snapshot deve capturar).
     fs.mkdirSync(path.join(repoRoot, "apps", "api", "dist"), { recursive: true });
     fs.writeFileSync(path.join(repoRoot, "apps", "api", "dist", "main.js"), "// versao antiga\n");
@@ -433,6 +437,7 @@ describe("rollout - rollback resource-safe e npm ci", () => {
       fs.mkdirSync(path.join(dir, "apps", "api", "prisma"), { recursive: true });
       fs.writeFileSync(path.join(dir, "apps", "api", "prisma", "dev.db"), "sqlite");
       fs.writeFileSync(path.join(dir, "package-lock.json"), '{ "lockfileVersion": 3 }\n');
+      createFakeToolchain(dir);
     }
     const config = makeConfig({
       repoRoot: target,
