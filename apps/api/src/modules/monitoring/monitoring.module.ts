@@ -15,10 +15,13 @@ import { GitUpdateChecker } from "./infrastructure/git-update-checker";
 import { ScriptSelfUpdater } from "./infrastructure/script-self-updater";
 import { FileSelfUpdateJobRepository } from "./infrastructure/file-self-update-job.repository";
 import { SelfUpdateRecoveryService } from "./infrastructure/self-update-recovery.service";
+import { StorageAuditService } from "./infrastructure/storage-audit.service";
+import { CleanupStorageUseCase } from "./application/cleanup-storage.use-case";
+import { DeployQueueService } from "../projects/infrastructure/deploy-queue.service";
 import { SYSTEM_METRICS_COLLECTOR } from "./domain/system-metrics-collector";
 import { METRIC_SAMPLE_REPOSITORY } from "./domain/metric-sample.repository";
 import { UPDATE_CHECKER } from "./domain/update-checker";
-import { SELF_UPDATER } from "./domain/self-updater";
+import { SELF_UPDATER, type SelfUpdater } from "./domain/self-updater";
 import { SELF_UPDATE_JOB_REPOSITORY } from "./domain/self-update-job.entity";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service";
 
@@ -38,6 +41,20 @@ import { PrismaService } from "../../infrastructure/prisma/prisma.service";
     GetSelfUpdateStatusUseCase,
     MetricsCollectorSchedulerService,
     SelfUpdateRecoveryService,
+    StorageAuditService,
+    CleanupStorageUseCase,
+    {
+      // A limpeza de armazenamento é RECUSADA enquanto houver self-update
+      // ou deploy em andamento (mexer no disco no meio de um build/update
+      // é risco).
+      provide: CleanupStorageUseCase,
+      useFactory: (
+        audit: StorageAuditService,
+        updater: SelfUpdater,
+        deployQueue: DeployQueueService,
+      ) => new CleanupStorageUseCase(audit, undefined, updater, deployQueue),
+      inject: [StorageAuditService, SELF_UPDATER, DeployQueueService],
+    },
     { provide: SYSTEM_METRICS_COLLECTOR, useClass: OsSystemMetricsCollector },
     { provide: METRIC_SAMPLE_REPOSITORY, useClass: PrismaMetricSampleRepository },
     { provide: UPDATE_CHECKER, useClass: GitUpdateChecker },

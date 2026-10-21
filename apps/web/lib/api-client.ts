@@ -18,17 +18,46 @@ const AUTH_PATHS_WITHOUT_RETRY = ["/auth/login", "/auth/register", "/auth/refres
  */
 const DEFAULT_CLIENT_TIMEOUT_MS = 20_000;
 
-let inFlightRefresh: Promise<boolean> | null = null;
+/**
+ * Resultado da tentativa de renovar a sessão.
+ *
+ * - "refreshed": deu certo, a requisição original pode ser repetida;
+ * - "expired": a sessão MORREU de verdade (401/403 no refresh: token
+ *   expirado, revogado ou inexistente) - aí sim é logout;
+ * - "unavailable": a API não respondeu ou respondeu 5xx - a sessão pode
+ *   estar perfeitamente válida e o operador NÃO pode ser deslogado por
+ *   isso (é o que acontecia: um 503 durante um restart do PM2 expulsava o
+ *   usuário da própria sessão).
+ */
+export type RefreshOutcome = "refreshed" | "expired" | "unavailable";
 
-function refreshAccessToken(): Promise<boolean> {
+let inFlightRefresh: Promise<RefreshOutcome> | null = null;
+
+/**
+ * SINGLE-FLIGHT: várias requisições que receberam 401 ao mesmo tempo
+ * compartilham UM único refresh (e todas repetem a requisição depois).
+ */
+function refreshAccessToken(): Promise<RefreshOutcome> {
   if (!inFlightRefresh) {
     inFlightRefresh = fetch(`${API_URL}/auth/refresh`, {
       method: "POST",
       credentials: "include",
       signal: AbortSignal.timeout(10_000),
     })
-      .then((res) => res.ok)
-      .catch(() => false)
+      .then((res) => {
+        if (res.ok) return "refreshed" as const;
+        // 401/403 = sessão expirada/revogada de verdade.
+        if (res.status === 401 || res.status === 403) return "expired" as const;
+        // 5xx = API indisponível agora (carga, restart do PM2 no
+        // self-update): a sessão pode estar válida - NÃO desloga.
+        return "unavailable" as const;
+      })
+      .catch((error) => {
+        // Erro de rede/timeout: a API está fora do ar. Mesma lógica de
+        // "unavailable" - deslogar por indisponibilidade é o bug antigo.
+        if (isNetworkError(error)) return "unavailable" as const;
+        return "unavailable" as const;
+      })
       .finally(() => {
         inFlightRefresh = null;
       });
@@ -56,6 +85,39 @@ export function isAuthFailure(response: Response): boolean {
 /** 502/503/504: o gateway/backend não respondeu agora - é transitório. */
 export function isTransientServerError(response: Response): boolean {
   return [502, 503, 504].includes(response.status);
+}
+
+/**
+ * A sessão não pôde ser renewada porque a API estava indisponível (5xx ou
+ * erro de rede) - e NÃO porque a sessão morreu.
+ *
+ * A UI mostra "Reconectando ao Korrelo..." em vez de expulsar o usuário.
+ */
+export function isSessionUnavailable(response: Response): boolean {
+  return response.headers.get("x-korrelo-session") === "unavailable";
+}
+
+/**
+ * Resposta sintética para "a API está indisponível".
+ *
+ * O status 503 (e não o 401 original) é o que impede o logout: todo o
+ * código que trata 401 como "sessão morta" continua funcionando igual, e
+ * quem olha isTransientServerError() já sabe o que fazer.
+ */
+function sessionUnavailableResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      error: "API_UNAVAILABLE",
+      message: "O Korrelo não está respondendo agora. A sessão foi mantida.",
+    }),
+    {
+      status: 503,
+      headers: {
+        "content-type": "application/json",
+        "x-korrelo-session": "unavailable",
+      },
+    },
+  );
 }
 
 /** Erro de rede (API reiniciando, conexão recusada, timeout de socket). */
@@ -96,16 +158,25 @@ export async function apiFetch(path: string, init: ApiFetchOptions = {}): Promis
       return response;
     }
 
-    const refreshed = await refreshAccessToken();
-    if (!refreshed) {
-      return response;
+    const outcome = await refreshAccessToken();
+
+    if (outcome === "refreshed") {
+      // Sessão renovada: repete a requisição original.
+      return fetch(`${API_URL}${path}`, {
+        ...requestInit,
+        credentials: "include",
+        signal: controller.signal,
+      });
     }
 
-    return fetch(`${API_URL}${path}`, {
-      ...requestInit,
-      credentials: "include",
-      signal: controller.signal,
-    });
+    if (outcome === "unavailable") {
+      // A API está fora do ar (5xx/rede): a sessão pode estar válida.
+      // Devolve 503 (e não 401) pra NINGUÉM deslogar o operador.
+      return sessionUnavailableResponse();
+    }
+
+    // "expired": a sessão morreu de verdade (401/403 no refresh).
+    return response;
   } finally {
     clearTimeout(timer);
   }

@@ -94,6 +94,25 @@ export interface DashboardDict {
   updateReloadDashboard: string;
   updateFailedStageLabel: string;
   updateDurationLabel: string;
+  /** Painel de armazenamento do servidor (read-only + limpeza allowlist). */
+  storageTitle: string;
+  storageLoading: string;
+  storageLoadError: string;
+  storageRefresh: string;
+  storageTotal: string;
+  storageUsed: string;
+  storageFree: string;
+  storageSafeToClean: string;
+  storageClassSafe: string;
+  storageClassReview: string;
+  storageClassKeep: string;
+  storageClassNever: string;
+  storageProtectionNotice: string;
+  storageActionsTitle: string;
+  storageCleanButton: string;
+  storageCleanDone: string;
+  storageCleanError: string;
+  storageItemsTitle: string;
   /** Nomes amigáveis das etapas do rollout. */
   updateStages: Record<string, string>;
 }
@@ -192,6 +211,25 @@ export const dashboardEn: DashboardDict = {
   updateReloadDashboard: "Reload dashboard",
   updateFailedStageLabel: "Failed at",
   updateDurationLabel: "Duration",
+  storageTitle: "Server storage",
+  storageLoading: "Analyzing storage...",
+  storageLoadError: "Couldn't analyze the server storage.",
+  storageRefresh: "Refresh",
+  storageTotal: "Total",
+  storageUsed: "Used",
+  storageFree: "Free",
+  storageSafeToClean: "Safe to clean",
+  storageClassSafe: "Safe to clean",
+  storageClassReview: "Needs review",
+  storageClassKeep: "Keep",
+  storageClassNever: "Never touch",
+  storageProtectionNotice:
+    "Protected items were found (production containers, databases, current/rollback images, newest backup). They are never removed automatically.",
+  storageActionsTitle: "Safe cleanup actions",
+  storageCleanButton: "Clean safe items",
+  storageCleanDone: "Cleanup finished: {{bytes}} freed.",
+  storageCleanError: "Couldn't run the cleanup.",
+  storageItemsTitle: "Found items",
   updateStages: {
     preflight: "Checking the update",
     lock: "Blocking concurrent updates",
@@ -316,6 +354,25 @@ export const dashboardPt: DashboardDict = {
   updateReloadDashboard: "Recarregar painel",
   updateFailedStageLabel: "Falhou em",
   updateDurationLabel: "Duração",
+  storageTitle: "Armazenamento do servidor",
+  storageLoading: "Analisando o armazenamento...",
+  storageLoadError: "Não foi possível analisar o armazenamento do servidor.",
+  storageRefresh: "Atualizar",
+  storageTotal: "Total",
+  storageUsed: "Usado",
+  storageFree: "Livre",
+  storageSafeToClean: "Seguro para limpar",
+  storageClassSafe: "Seguro para limpar",
+  storageClassReview: "Precisa de revisão",
+  storageClassKeep: "Manter",
+  storageClassNever: "Nunca tocar",
+  storageProtectionNotice:
+    "Itens protegidos foram encontrados (containers de produção, bancos, imagens CURRENT/rollback, backup mais recente). Eles nunca são removidos automaticamente.",
+  storageActionsTitle: "Ações de limpeza segura",
+  storageCleanButton: "Limpar itens seguros",
+  storageCleanDone: "Limpeza concluída: {{bytes}} liberados.",
+  storageCleanError: "Não foi possível executar a limpeza.",
+  storageItemsTitle: "Itens encontrados",
   updateStages: {
     preflight: "Verificando atualização",
     lock: "Bloqueando atualizações concorrentes",

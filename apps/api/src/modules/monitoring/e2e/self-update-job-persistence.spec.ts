@@ -183,7 +183,19 @@ describe("self-update - o runner persiste progresso e resultado", () => {
 
     await new Promise((resolve) => child.on("exit", resolve));
 
-    const finished = read();
+    // O "exit" do processo pode chegar um instante antes de o marcador
+    // DONE estar visível no arquivo (o runner grava de forma atômica, mas
+    // sob carga da máquina a leitura logo após o exit pode ver o estado
+    // anterior). Em vez de confiar no instante do exit, espera o job
+    // REFLETIR o estado final - com deadline, para o teste não passar
+    // quando o marcador realmente não chega.
+    const deadline = Date.now() + 5_000;
+    let finished = read();
+    while (finished.status !== "completed" && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      finished = read();
+    }
+
     expect(finished.status).toBe("completed");
     expect(finished.progress).toBe(100);
     expect(finished.result).toBe("success");

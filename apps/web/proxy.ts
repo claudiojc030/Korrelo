@@ -42,7 +42,6 @@ export async function proxy(request: NextRequest) {
     // fora do ar por 1-2s. Sem isso, um refresh que caísse bem nesse instante
     // via erro de REDE (não uma resposta 401 de verdade) deslogava o usuário
     // à toa, mesmo com a sessão perfeitamente válida.
-    let apiResponded = false;
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const refreshRes = await fetch(`${API_URL}/auth/refresh`, {
@@ -51,7 +50,6 @@ export async function proxy(request: NextRequest) {
           // Tempo limite: sem ele, uma API travada segura a navegação.
           signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
         });
-        apiResponded = true;
         if (refreshRes.ok) {
           const setCookies = refreshRes.headers.getSetCookie();
           // Sem isso, o Set-Cookie só valeria pra PRÓXIMA requisição do
@@ -69,8 +67,19 @@ export async function proxy(request: NextRequest) {
           }
           return response;
         }
-        // Resposta de verdade (401 etc.): sessão inválida mesmo, não adianta tentar de novo.
-        break;
+        // A API RESPONDEU. Só uma resposta DEFINITIVA (401/403: token
+        // expirado, revogado ou sessão inexistente) significa que a sessão
+        // morreu. Um 5xx (502/503/504) significa que a API está sob carga
+        // ou reiniciando (self-update/deploy) - a sessão pode estar
+        // perfeitamente válida e o operador NÃO pode ser deslogado por isso.
+        // Era exatamente esse o bug: qualquer resposta não-2xx virava
+        // logout, e o operador "desaparecia" do nada.
+        if (refreshRes.status === 401 || refreshRes.status === 403) {
+          return NextResponse.redirect(new URL("/login", request.url));
+        }
+        // 5xx: a API está indisponível. Segue a navegação - a página mostra
+        // o estado "indisponível" e o próximo refresh tenta de novo.
+        return NextResponse.next();
       } catch {
         // Erro de rede/conexão recusada/TIMEOUT: só nesse caso vale tentar de
         // novo. Timeout é tratado como "API indisponível", não como
@@ -80,12 +89,6 @@ export async function proxy(request: NextRequest) {
           await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
         }
       }
-    }
-
-    if (apiResponded) {
-      // A API respondeu (401): a sessão é inválida mesmo. Mantém o
-      // comportamento de antes - redireciona pro login.
-      return NextResponse.redirect(new URL("/login", request.url));
     }
 
     // A API não respondeu a tempo (ou recusou a conexão). A sessão pode estar
