@@ -26,7 +26,7 @@ const path = require("node:path");
 
 const { runProcess } = require("./process-runner.cjs");
 const fileLib = require("./backup-file.cjs");
-const { acquireLock } = require("./lock.cjs");
+const { acquireLock, lockKeyForContainer } = require("./lock.cjs");
 const { checkDiskSpace, referenceBackupBytes, formatBytes } = require("./disk-preflight.cjs");
 const { redact } = require("./sanitize.cjs");
 const { createProgressWriter, ensureProgressDir } = require("./progress.cjs");
@@ -191,6 +191,13 @@ function buildCorePostgresDumpCommand(options) {
  * @param {string} [options.lockDir]
  * @param {string} [options.backupRoot]
  * @param {boolean} [options.writeManifest]
+ * @param {boolean} [options.lockAlreadyHeld]  o chamador JÁ segura o lock
+ *                                             desse banco (usado pelo restore,
+ *                                             que segura o lock do alvo
+ *                                             durante o backup pré-restore e o
+ *                                             restore destrutivo). Nesse caso
+ *                                             o dump NÃO pega nem solta o lock
+ *                                             (evita auto-deadlock).
  * @param {Function} [options.runProcess] injetável pra teste
  * @param {(message: string) => void} [options.onLog]
  * @returns {Promise<DumpResult>}
@@ -211,6 +218,7 @@ async function dumpDatabase(options) {
     lockDir = undefined,
     backupRoot = null,
     writeManifest = true,
+    lockAlreadyHeld = false,
     runProcess = runProcess,
     onLog = () => {},
     inactivityTimeoutMs = undefined,
@@ -234,18 +242,22 @@ async function dumpDatabase(options) {
   ensureProgressDir(progressFile);
 
   // Lock por banco: o mesmo container não gera dois dumps ao mesmo tempo
-  // (cron x botão "Fazer backup agora").
-  const lock = acquireLock({ key: `db-${containerName}`, dir: lockDir, jobId });
-  if (!lock.acquired) {
-    return {
-      ok: false,
-      error: lock.reason || "já existe um backup em andamento para este banco.",
-      outFile: null,
-      bytes: 0,
-      sha256: null,
-      manifest: null,
-      skipped: false,
-    };
+  // (cron x botão "Fazer backup agora"). Quando o chamador já segura o
+  // lock (restore), o dump reaproveita esse lock e não o solta.
+  let lock = { acquired: true, release: () => {} };
+  if (!lockAlreadyHeld) {
+    lock = acquireLock({ key: lockKeyForContainer(containerName), dir: lockDir, jobId });
+    if (!lock.acquired) {
+      return {
+        ok: false,
+        error: lock.reason || "já existe um backup em andamento para este banco.",
+        outFile: null,
+        bytes: 0,
+        sha256: null,
+        manifest: null,
+        skipped: false,
+      };
+    }
   }
 
   const tempPath = fileLib.buildTempPath(outFile, jobId);
@@ -289,7 +301,7 @@ async function dumpDatabase(options) {
         maxTimeoutMs,
       });
       if (saveResult.error || saveResult.code !== 0) {
-        const message = `falha ao salvar o RDB do Redis: ${describeFailure(saveResult, secrets)}`;
+        const message = redact(`falha ao salvar o RDB do Redis: ${describeFailure(saveResult, secrets)}`, secrets);
         progress.close({ phase: "failed", errorMessage: message });
         return { ok: false, error: message, outFile: null, bytes: 0, sha256: null, manifest: null, skipped: false };
       }
@@ -305,7 +317,7 @@ async function dumpDatabase(options) {
       });
       const copyFailure = describeFailure(copyResult, secrets);
       if (copyResult.error || copyResult.code !== 0) {
-        const message = `falha ao copiar o RDB do Redis: ${copyFailure}`;
+        const message = redact(`falha ao copiar o RDB do Redis: ${copyFailure}`, secrets);
         fileLib.removeQuietly(tempPath);
         progress.close({ phase: "failed", errorMessage: message });
         return { ok: false, error: message, outFile: null, bytes: 0, sha256: null, manifest: null, skipped: false };
@@ -344,7 +356,7 @@ async function dumpDatabase(options) {
       const failure = describeFailure(result, secrets);
       if (result.error || result.writeError || result.timedOut || result.code !== 0) {
         fileLib.removeQuietly(tempPath);
-        const message = `falha ao gerar o dump: ${failure}`;
+        const message = redact(`falha ao gerar o dump: ${failure}`, secrets);
         progress.close({ phase: "failed", errorMessage: message, bytesWritten: result.bytesWritten });
         return { ok: false, error: message, outFile: null, bytes: 0, sha256: null, manifest: null, skipped: false };
       }
@@ -420,7 +432,8 @@ async function dumpDatabase(options) {
     return { ok: false, error: message, outFile: null, bytes: 0, sha256: null, manifest: null, skipped: false };
   } finally {
     clearInterval(heartbeat);
-    lock.release();
+    // Quem segurou o lock (restore) é quem solta.
+    if (!lockAlreadyHeld) lock.release();
   }
 }
 
@@ -483,7 +496,7 @@ async function dumpUploads(options) {
       onLog("uploads: container sem /app/uploads - nada a copiar.");
       return { ok: true, error: null, outFile: outDir, bytes: 0, sha256: null, manifest: null, skipped: true };
     }
-    const message = `falha ao copiar os uploads: ${describeFailure(result, [])}`;
+    const message = redact(`falha ao copiar os uploads: ${describeFailure(result, [])}`, []);
     return { ok: false, error: message, outFile: null, bytes: 0, sha256: null, manifest: null, skipped: false };
   }
 
@@ -509,7 +522,7 @@ async function dumpUploads(options) {
       }
     }
     fileLib.removeQuietly(tempDir);
-    const message = `falha ao publicar os uploads copiados: ${error && error.message ? error.message : error}`;
+    const message = redact(`falha ao publicar os uploads copiados: ${error && error.message ? error.message : error}`, []);
     return { ok: false, error: message, outFile: null, bytes: 0, sha256: null, manifest: null, skipped: false };
   }
   fileLib.removeQuietly(trashDir);
@@ -587,7 +600,7 @@ async function dumpCoreDatabase(options) {
           onLog("Core (SQLite): sqlite3 indisponível, foi feita cópia direta do arquivo.");
         } catch (error) {
           fileLib.removeQuietly(tempPath);
-          const message = `falha no backup do Core (SQLite): ${error && error.message ? error.message : error}`;
+          const message = redact(`falha no backup do Core (SQLite): ${error && error.message ? error.message : error}`, secrets);
           return { ok: false, error: message, outFile: null, bytes: 0, sha256: null, manifest: null, skipped: false };
         }
       } else {
@@ -623,7 +636,7 @@ async function dumpCoreDatabase(options) {
       const failure = describeFailure(result, secrets);
       if (result.error || result.writeError || result.timedOut || result.code !== 0) {
         fileLib.removeQuietly(tempPath);
-        const message = `falha no backup do Core (Postgres): ${failure}`;
+        const message = redact(`falha no backup do Core (Postgres): ${failure}`, secrets);
         return { ok: false, error: message, outFile: null, bytes: 0, sha256: null, manifest: null, skipped: false };
       }
     } else {
@@ -716,15 +729,21 @@ function removeStaleManifestTemps(manifestPath) {
   }
 }
 
-/** Descreve a falha de um processo de forma útil (e sem senha). */
+/** Descreve a falha de um processo de forma útil (e SEM senha). */
 function describeFailure(result, secrets = []) {
-  if (!result) return "resultado desconhecido.";
+  if (!result) return "erro desconhecido.";
   if (result.writeError) {
     const code = result.writeError.code ? ` (${result.writeError.code})` : "";
-    return `falha ao escrever no arquivo de destino${code}: ${result.writeError.message}`;
+    return redact(
+      `falha ao escrever no arquivo de destino${code}: ${result.writeError.message}`,
+      secrets,
+    );
   }
   if (result.error) {
-    return `falha ao executar o comando: ${result.error.message || result.error}`;
+    return redact(
+      `falha ao executar o comando: ${result.error.message || result.error}`,
+      secrets,
+    );
   }
   if (result.inactivityTimedOut) {
     return "o dump parou de escrever dados (timeout por inatividade).";
@@ -736,7 +755,9 @@ function describeFailure(result, secrets = []) {
     return "o dump foi interrompido por timeout.";
   }
   if (result.code !== 0) {
-    const stderr = String(result.stderr || "").trim();
+    // O stderr vai pro log e pro painel: TEM que passar pela sanitização
+    // (senha/URI com credencial nunca podem aparecer lá).
+    const stderr = redact(String(result.stderr || "").trim(), secrets);
     const tail = stderr ? `: ${stderr.slice(-800)}` : "";
     return `o comando terminou com código ${result.code}${tail}`;
   }

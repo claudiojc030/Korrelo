@@ -46,6 +46,10 @@ export class ScriptDatabaseRestorer implements DatabaseRestorer {
     fs.mkdirSync(this.stateDir, { recursive: true });
     const logPath = this.logPath(projectId);
     fs.writeFileSync(logPath, "");
+    // Progresso do job anterior não pode vazar pro job novo (senão o
+    // painel lê "último progresso" velho e julga o job novo como morto
+    // antes dele começar).
+    fs.rmSync(this.progressPath(projectId), { force: true });
 
     const scriptPath = path.join(this.repoDir, "scripts", "restore-database.sh");
     const out = fs.openSync(logPath, "a");

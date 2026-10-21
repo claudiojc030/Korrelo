@@ -60,6 +60,11 @@ export class ScriptDatabaseExporter implements DatabaseExporter {
     fs.mkdirSync(this.stateDir, { recursive: true });
     const logPath = this.logPath(projectId);
     fs.writeFileSync(logPath, "");
+    // O arquivo de progresso do job ANTERIOR é removido: se ele sobreviver,
+    // um job novo que ainda nem começou a escrever progresso herda o
+    // "último progresso" velho e o painel pode declarar o job novo como
+    // falho (falso negativo) logo no primeiro polling.
+    fs.rmSync(this.progressPath(projectId), { force: true });
 
     let outFile: string;
     if (options.destDir && options.fileName) {

@@ -151,8 +151,66 @@ describe("status de exportação/restauração de banco", () => {
     });
   });
 
-  describe("restauração", () => {
-    it("considera o job VIVO com progresso recente", async () => {
+  describe("início de job", () => {
+    it("remove o arquivo de progresso do job ANTERIOR (exportação)", async () => {
+      const projectId = "proj-stale-export";
+      const dir = stateDir("database-export");
+      fs.mkdirSync(dir, { recursive: true });
+      const progressPath = path.join(dir, `${projectId}.progress.json`);
+      fs.writeFileSync(
+        progressPath,
+        JSON.stringify({
+          pid: 999999999,
+          phase: "dumping",
+          bytesWritten: 10,
+          startedAt: 1,
+          lastProgressAt: 1,
+        }),
+      );
+
+      await exporter.start(projectId, {
+        containerName: "",
+        dbType: "mongodb",
+        username: null,
+        password: null,
+        databaseName: null,
+      });
+
+      // O job novo não pode herdar o "último progresso" do job anterior
+      // (senão o painel declara o job novo como morto no 1º polling).
+      expect(fs.existsSync(progressPath)).toBe(false);
+    });
+
+    it("remove o arquivo de progresso do job ANTERIOR (restauração)", async () => {
+      const projectId = "proj-stale-restore";
+      const dir = stateDir("database-restore");
+      fs.mkdirSync(dir, { recursive: true });
+      const progressPath = path.join(dir, `${projectId}.progress.json`);
+      fs.writeFileSync(
+        progressPath,
+        JSON.stringify({
+          pid: 999999999,
+          phase: "restoring",
+          bytesWritten: 10,
+          startedAt: 1,
+          lastProgressAt: 1,
+        }),
+      );
+
+      await restorer.start(projectId, {
+        containerName: "",
+        dbType: "mongodb",
+        username: null,
+        password: null,
+        databaseName: null,
+        backupFilePath: path.join(home, "qualquer.archive"),
+      });
+
+      expect(fs.existsSync(progressPath)).toBe(false);
+    });
+  });
+
+  describe("restauração", () => {    it("considera o job VIVO com progresso recente", async () => {
       const projectId = "proj-6";
       const logPath = writeLog("database-restore", projectId, "__KORRELO_DBRESTORE_STEP__|30|Restaurando\n");
       const old = new Date(Date.now() - 40 * 60 * 1000);

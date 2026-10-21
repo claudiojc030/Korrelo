@@ -5,18 +5,13 @@ import { CheckCircle2, Download, History, Loader2, RotateCcw, TriangleAlert, X, 
 import { apiFetch, API_URL } from "../../../../../lib/api-client";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
 import { translateApiError } from "../../../../../lib/api-error";
+import {
+  canStartRestore,
+  requiresLegacyConfirmation,
+  type BackupViewEntry,
+} from "../../../../../lib/backup-view";
 
-interface BackupEntry {
-  id: string;
-  createdAt: string;
-  dbType: "postgres" | "mongodb" | "redis";
-  fileName: string;
-  sizeBytes: number;
-  /** true quando o backup tem manifesto com checksum conferido. */
-  validated?: boolean;
-  /** true quando é um backup antigo, feito antes dos backups terem checksum. */
-  legacy?: boolean;
-}
+type BackupEntry = BackupViewEntry;
 
 interface RestoreStatus {
   running: boolean;
@@ -186,6 +181,9 @@ function RestoreModal({
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState("");
+  // Backup legado (sem checksum): exige confirmação EXTRA antes de
+  // restaurar - o operador precisa saber que o arquivo não foi validado.
+  const [legacyConfirmed, setLegacyConfirmed] = useState(false);
   const logBoxRef = useRef<HTMLPreElement>(null);
   const phaseRef = useRef<RestorePhase>("confirm");
 
@@ -272,6 +270,20 @@ function RestoreModal({
               </div>
             </div>
             {error && <p className="mt-3 text-[13px] text-destructive">{error}</p>}
+            {requiresLegacyConfirmation(backup) && (
+              <div className="mt-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+                <p className="text-[12.5px] text-destructive">{t.projectDatabase.restoreLegacyWarning}</p>
+                <label className="mt-2 flex cursor-pointer items-start gap-2 text-[12px] text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={legacyConfirmed}
+                    onChange={(event) => setLegacyConfirmed(event.target.checked)}
+                  />
+                  <span>{t.projectDatabase.restoreLegacyConfirmLabel}</span>
+                </label>
+              </div>
+            )}
             <div className="mt-5 flex justify-end gap-2">
               <button
                 onClick={onClose}
@@ -282,7 +294,7 @@ function RestoreModal({
               </button>
               <button
                 onClick={handleConfirm}
-                disabled={starting}
+                disabled={starting || !canStartRestore(backup, legacyConfirmed)}
                 className="inline-flex items-center gap-2 rounded-md bg-destructive px-3.5 py-2 text-[13px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {starting && <Loader2 size={14} className="animate-spin" />}

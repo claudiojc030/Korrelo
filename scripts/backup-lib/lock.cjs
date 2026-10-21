@@ -21,8 +21,14 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const DEFAULT_STALE_TIMEOUT_MS = 12 * 60 * 60 * 1000; // 12h
+const DEFAULT_STALE_TIMEOUT_MS = 30 * 60 * 1000; // 30 min (mesma politica do lock de deploy)
 const HEARTBEAT_INTERVAL_MS = 60 * 1000;
+const FRESH_LOCK_GRACE_MS = 5 * 1000;
+
+/** Chave de lock de um banco (container = projeto + servico). */
+function lockKeyForContainer(containerName) {
+  return `db-${containerName}`;
+}
 
 /** Diretório padrão dos locks. */
 function defaultLockDir() {
@@ -63,9 +69,14 @@ function readLockOwner(lockPath) {
 }
 
 /**
- * O lock está "vivo"? (processo dono ainda existe OU foi atualizado
- * recentemente). Usado também pela retenção pra não apagar backup de
- * job em andamento.
+ * O lock está "vivo"?
+ *
+ * POLÍTICA (igual à do lock de deploy, `worker-lock.ts`):
+ * - o lock é ATIVO só se o HEARTBEAT for recente (o dono renova o mtime a
+ *   cada minuto) E o processo dono ainda existir;
+ * - heartbeat velho => lock ÓRFÃO, mesmo que o PID ainda exista (PID
+ *   reciclado não pode travar o backup do banco para sempre);
+ * - PID morto => lock órfão, recuperável.
  */
 function isLockActive(lockPath, staleTimeoutMs = DEFAULT_STALE_TIMEOUT_MS) {
   let stat;
@@ -74,11 +85,18 @@ function isLockActive(lockPath, staleTimeoutMs = DEFAULT_STALE_TIMEOUT_MS) {
   } catch {
     return false;
   }
+
+  const age = Date.now() - stat.mtimeMs;
+  if (age > staleTimeoutMs) return false;
+
   const owner = readLockOwner(lockPath);
-  if (owner && isProcessAlive(owner.pid)) return true;
-  if (Date.now() - stat.mtimeMs > staleTimeoutMs) return false;
-  // Sem dono válido e recente: trata como órfão (não bloqueia).
-  return false;
+  if (!owner) {
+    // Lock recém-criado (conteúdo ainda não gravado): trata como ATIVO
+    // pra não competir com quem está pegando o lock exatamente agora.
+    return age < FRESH_LOCK_GRACE_MS;
+  }
+
+  return isProcessAlive(owner.pid);
 }
 
 /**
@@ -196,6 +214,8 @@ module.exports = {
   isLockActive,
   readLockOwner,
   lockFileName,
+  lockKeyForContainer,
   defaultLockDir,
   DEFAULT_STALE_TIMEOUT_MS,
+  HEARTBEAT_INTERVAL_MS,
 };

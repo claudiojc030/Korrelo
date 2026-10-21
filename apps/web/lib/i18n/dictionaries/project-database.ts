@@ -80,6 +80,8 @@ export interface ProjectDatabaseDict {
   backupAlreadyRunning: string;
   backupLegacyBadge: string;
   backupLegacyHint: string;
+  restoreLegacyWarning: string;
+  restoreLegacyConfirmLabel: string;
   restoreConfirmTitle: string;
   restoreConfirmBody: string;
   restoreConfirmButton: string;
@@ -185,6 +187,8 @@ export const projectDatabaseEn: ProjectDatabaseDict = {
   backupAlreadyRunning: "A backup is already running for this project.",
   backupLegacyBadge: "Not verified",
   backupLegacyHint: "Made before backups had checksums, so it wasn't verified.",
+  restoreLegacyWarning: "This backup was created before backups had checksums. Its integrity can't be confirmed automatically.",
+  restoreLegacyConfirmLabel: "I understand this backup wasn't verified and want to restore it anyway.",
   restoreConfirmTitle: "Restore this backup?",
   restoreConfirmBody: "This replaces all data currently in this project's database with the contents of this backup. Before anything changes, a safety copy of the current data is saved.",
   restoreConfirmButton: "Restore, replacing current data",
@@ -290,6 +294,8 @@ export const projectDatabasePt: ProjectDatabaseDict = {
   backupAlreadyRunning: "Já tem um backup rodando pra este projeto.",
   backupLegacyBadge: "Não validado",
   backupLegacyHint: "Feito antes dos backups terem checksum, então não foi verificado.",
+  restoreLegacyWarning: "Este backup foi criado antes de os backups terem checksum. A integridade dele não pode ser confirmada automaticamente.",
+  restoreLegacyConfirmLabel: "Entendo que este backup não foi validado e quero restaurá-lo assim mesmo.",
   restoreConfirmTitle: "Restaurar esse backup?",
   restoreConfirmBody: "Isso substitui todos os dados que já estão no banco deste projeto pelo conteúdo desse backup. Antes de mudar qualquer coisa, uma cópia de segurança dos dados atuais é salva.",
   restoreConfirmButton: "Restaurar, substituindo os dados atuais",

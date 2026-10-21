@@ -23,6 +23,7 @@ const dumpLib = loadBackupLib<any>("dump.cjs");
 const restoreLib = loadBackupLib<any>("restore.cjs");
 const runnerLib = loadBackupLib<any>("process-runner.cjs");
 const fileLib = loadBackupLib<any>("backup-file.cjs");
+const lockLib = loadBackupLib<any>("lock.cjs");
 const retentionLib = loadBackupLib<any>("retention.cjs");
 const projectBackupLib = loadBackupLib<any>("project-backup.cjs");
 
@@ -79,8 +80,9 @@ describe("motor de backup/restore", () => {
   /** Runner falso: simula o dump escrevendo no arquivo em vários chunks. */
   function fakeRunner(options: {
     payload?: Buffer;
-    code?: number;
+    code?: number | null;
     stderr?: string;
+    error?: Error;
     writeError?: (Error & { code?: string }) | null;
     onCall?: (call: FakeCall) => void;
     calls?: FakeCall[];
@@ -115,6 +117,7 @@ describe("motor de backup/restore", () => {
       return baseResult({
         code: options.code ?? 0,
         stderr: options.stderr ?? "",
+        error: options.error ?? null,
         bytesWritten: runOptions.stdoutPath ? payload.length : 0,
       });
     };
@@ -869,6 +872,359 @@ describe("motor de backup/restore", () => {
       expect(fs.readFileSync(outFile, "utf-8")).toBe("SELECT 1;\n");
       expect(calls[0].args.join(" ")).not.toContain("senha-core");
       expect((calls[0].options.env as Record<string, string>).PGPASSWORD).toBe("senha-core");
+    });
+  });
+
+  describe("política de lock (PID reciclado, heartbeat, órfão)", () => {
+    function writeLockFile(lockPath: string, pid: number): void {
+      fs.writeFileSync(lockPath, JSON.stringify({ pid, acquiredAt: Date.now(), key: "db-teste" }));
+    }
+
+    it("lock ativo: PID vivo + heartbeat recente", () => {
+      const lockDir = path.join(workDir, "locks");
+      const lock = lockLib.acquireLock({ key: "db-ativo", dir: lockDir });
+
+      expect(lock.acquired).toBe(true);
+      expect(lockLib.isLockActive(lock.path, 60_000)).toBe(true);
+      lock.release();
+    });
+
+    it("lock órfão: PID morto", () => {
+      const lockDir = path.join(workDir, "locks");
+      fs.mkdirSync(lockDir, { recursive: true });
+      const lockPath = path.join(lockDir, "db-morto.lock");
+      writeLockFile(lockPath, 999999999);
+
+      expect(lockLib.isLockActive(lockPath, 60_000)).toBe(false);
+    });
+
+    it("lock órfão: PID VIVO mas heartbeat velho (PID reciclado)", () => {
+      const lockDir = path.join(workDir, "locks");
+      fs.mkdirSync(lockDir, { recursive: true });
+      const lockPath = path.join(lockDir, "db-reciclado.lock");
+      writeLockFile(lockPath, process.pid);
+      // Heartbeat de 10 minutos atrás: o dono não renova mais => órfão,
+      // mesmo que o PID exista (PID reciclado não pode travar o backup).
+      const antigo = new Date(Date.now() - 10 * 60 * 1000);
+      fs.utimesSync(lockPath, antigo, antigo);
+
+      expect(lockLib.isLockActive(lockPath, 60_000)).toBe(false);
+    });
+
+    it("recupera lock órfão (stale) de forma atômica", () => {
+      const lockDir = path.join(workDir, "locks");
+      fs.mkdirSync(lockDir, { recursive: true });
+      const lockPath = path.join(lockDir, "db-orfao.lock");
+      writeLockFile(lockPath, 999999999);
+
+      const lock = lockLib.acquireLock({ key: "db-orfao", dir: lockDir });
+
+      expect(lock.acquired).toBe(true);
+      // O lock agora é do processo atual (não sobrou o antigo).
+      expect(fs.readFileSync(lock.path, "utf-8")).toContain(String(process.pid));
+      lock.release();
+    });
+  });
+
+  describe("watchdog de inatividade (H1)", () => {
+    // Processo que NÃO escreve nada por um tempo (restore pode ficar
+    // minutos sem saída sem estar travado).
+    const SILENT_LONG = ["-e", "setTimeout(() => process.exit(0), 30000)"];
+    const SILENT_SHORT = ["-e", "setTimeout(() => process.exit(0), 2000)"];
+
+    it("NÃO encerra um processo silencioso quando o watchdog está desligado", async () => {
+      const result = await runnerLib.runProcess({
+        command: process.execPath,
+        args: SILENT_SHORT,
+        stdoutPath: path.join(workDir, "silencioso.bin"),
+        inactivityTimeoutMs: 0,
+        maxTimeoutMs: 30_000,
+      });
+
+      expect(result.timedOut).toBe(false);
+      expect(result.inactivityTimedOut).toBe(false);
+      expect(result.code).toBe(0);
+    });
+
+    it("encerra um processo silencioso quando o watchdog está ligado (controle)", async () => {
+      const result = await runnerLib.runProcess({
+        command: process.execPath,
+        args: SILENT_SHORT,
+        stdoutPath: path.join(workDir, "silencioso2.bin"),
+        inactivityTimeoutMs: 800,
+        killGraceMs: 200,
+      });
+
+      expect(result.inactivityTimedOut).toBe(true);
+      expect(result.timedOut).toBe(true);
+    });
+
+    it("mantém o teto absoluto mesmo com o watchdog de inatividade desligado", async () => {
+      const result = await runnerLib.runProcess({
+        command: process.execPath,
+        args: SILENT_LONG,
+        stdoutPath: path.join(workDir, "silencioso3.bin"),
+        inactivityTimeoutMs: 0,
+        maxTimeoutMs: 800,
+        killGraceMs: 200,
+      });
+
+      expect(result.maxTimedOut).toBe(true);
+      expect(result.timedOut).toBe(true);
+    });
+
+    it("o restore roda o comando destrutivo SEM watchdog de inatividade", async () => {
+      const outFile = path.join(workDir, "proj-mongodb.archive");
+      await dumpLib.dumpDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        outFile,
+        runProcess: fakeRunner({ payload: Buffer.from("conteudo") }),
+        lockDir: path.join(workDir, "locks"),
+      });
+
+      const calls: FakeCall[] = [];
+      await restoreLib.restoreDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        inFile: outFile,
+        preRestoreDir: path.join(workDir, "pre-restore"),
+        lockDir: path.join(workDir, "locks"),
+        runProcess: fakeRunner({ calls }),
+        dumpFn: async (dumpOptions: any) => ({
+          ok: true,
+          outFile: dumpOptions.outFile,
+          bytes: 10,
+          sha256: "abc",
+          manifest: null,
+        }),
+      });
+
+      const restoreCall = calls.find((call) => call.args.join(" ").includes("mongorestore"));
+      expect(restoreCall).toBeTruthy();
+      // Watchdog de inatividade DESLIGADO no restore (H1) - o teto
+      // absoluto continua valendo (default do runner = 12h).
+      expect(restoreCall!.options.inactivityTimeoutMs).toBe(0);
+      expect(restoreCall!.options.maxTimeoutMs).toBeUndefined();
+    });
+  });
+
+  describe("lock segurado durante o restore (M3)", () => {
+    async function makeBackup(name = "proj-mongodb.archive"): Promise<string> {
+      const outFile = path.join(workDir, name);
+      await dumpLib.dumpDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        username: "user",
+        password: "senha",
+        outFile,
+        runProcess: fakeRunner({ payload: Buffer.from("conteudo-do-dump") }),
+        lockDir: path.join(workDir, "locks"),
+      });
+      return outFile;
+    }
+
+    it("segura o lock do banco durante o backup pré-restore e o restore", async () => {
+      const outFile = await makeBackup();
+      const lockDir = path.join(workDir, "locks");
+      let recusadoDurantePreBackup = false;
+      let recusadoDuranteRestore = false;
+
+      const result = await restoreLib.restoreDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        inFile: outFile,
+        preRestoreDir: path.join(workDir, "pre-restore"),
+        lockDir,
+        runProcess: async () => {
+          // Enquanto o restore destrutivo roda, um backup do MESMO banco
+          // (cron ou botão manual) tem de ser recusado.
+          const concorrente = await dumpLib.dumpDatabase({
+            dbType: "mongodb",
+            containerName: "app-mongo-1",
+            outFile: path.join(workDir, "concorrente.archive"),
+            runProcess: fakeRunner({}),
+            lockDir,
+          });
+          if (!concorrente.ok) recusadoDuranteRestore = true;
+          return baseResult({});
+        },
+        dumpFn: async (dumpOptions: any) => {
+          const concorrente = await dumpLib.dumpDatabase({
+            dbType: "mongodb",
+            containerName: "app-mongo-1",
+            outFile: path.join(workDir, "concorrente2.archive"),
+            runProcess: fakeRunner({}),
+            lockDir,
+          });
+          if (!concorrente.ok) recusadoDurantePreBackup = true;
+          return { ok: true, outFile: dumpOptions.outFile, bytes: 10, sha256: "abc", manifest: null };
+        },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(recusadoDurantePreBackup).toBe(true);
+      expect(recusadoDuranteRestore).toBe(true);
+      // O dump pré-restore roda com o lock já segurado (sem auto-deadlock).
+      expect(fs.existsSync(path.join(workDir, "concorrente2.archive"))).toBe(false);
+    });
+
+    it("libera o lock depois de um restore com sucesso", async () => {
+      const outFile = await makeBackup();
+      const lockDir = path.join(workDir, "locks");
+
+      await restoreLib.restoreDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        inFile: outFile,
+        preRestoreDir: path.join(workDir, "pre-restore"),
+        lockDir,
+        runProcess: fakeRunner({}),
+        dumpFn: async (dumpOptions: any) => ({
+          ok: true,
+          outFile: dumpOptions.outFile,
+          bytes: 10,
+          sha256: "abc",
+          manifest: null,
+        }),
+      });
+
+      // Um novo backup do mesmo banco deve conseguir o lock.
+      const depois = await dumpLib.dumpDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        outFile: path.join(workDir, "depois.archive"),
+        runProcess: fakeRunner({}),
+        lockDir,
+      });
+      expect(depois.ok).toBe(true);
+    });
+
+    it("libera o lock depois de um restore que falhou", async () => {
+      const outFile = await makeBackup();
+      const lockDir = path.join(workDir, "locks");
+
+      const result = await restoreLib.restoreDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        inFile: outFile,
+        preRestoreDir: path.join(workDir, "pre-restore"),
+        lockDir,
+        runProcess: fakeRunner({ code: 1, stderr: "falhou" }),
+        dumpFn: async (dumpOptions: any) => ({
+          ok: true,
+          outFile: dumpOptions.outFile,
+          bytes: 10,
+          sha256: "abc",
+          manifest: null,
+        }),
+      });
+
+      expect(result.ok).toBe(false);
+
+      const depois = await dumpLib.dumpDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        outFile: path.join(workDir, "depois-falha.archive"),
+        runProcess: fakeRunner({}),
+        lockDir,
+      });
+      expect(depois.ok).toBe(true);
+    });
+
+    it("recusa o restore quando já existe um backup em andamento no mesmo banco", async () => {
+      const outFile = await makeBackup();
+      const lockDir = path.join(workDir, "locks");
+
+      const backupEmAndamento = lockLib.acquireLock({
+        key: lockLib.lockKeyForContainer("app-mongo-1"),
+        dir: lockDir,
+      });
+      expect(backupEmAndamento.acquired).toBe(true);
+
+      const result = await restoreLib.restoreDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        inFile: outFile,
+        preRestoreDir: path.join(workDir, "pre-restore"),
+        lockDir,
+        runProcess: fakeRunner({}),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain("já existe um backup");
+      backupEmAndamento.release();
+    });
+  });
+
+  describe("sanitização de erro/stderr (M4)", () => {
+    it("não deixa a senha vazar pelo stderr do comando", async () => {
+      const result = await dumpLib.dumpDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        username: "user",
+        password: "senha-topo-secreta",
+        outFile: path.join(workDir, "proj-mongodb.archive"),
+        runProcess: fakeRunner({
+          code: 1,
+          stderr: "Error: auth failed for senha-topo-secreta @ mongodb://user:outra-senha@host:27017",
+        }),
+        lockDir: path.join(workDir, "locks"),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).not.toContain("senha-topo-secreta");
+      expect(result.error).not.toContain("outra-senha");
+      expect(result.error).toContain("***");
+    });
+
+    it("não deixa a senha vazar pelo erro de execução", async () => {
+      const result = await dumpLib.dumpDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        username: "user",
+        password: "senha-topo-secreta",
+        outFile: path.join(workDir, "proj-mongodb2.archive"),
+        runProcess: fakeRunner({
+          code: null,
+          error: new Error("spawn falhou com senha-topo-secreta"),
+        }),
+        lockDir: path.join(workDir, "locks"),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).not.toContain("senha-topo-secreta");
+    });
+
+    it("não deixa a senha vazar pelo erro do restore", async () => {
+      const outFile = path.join(workDir, "proj-mongodb.archive");
+      await dumpLib.dumpDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        outFile,
+        runProcess: fakeRunner({ payload: Buffer.from("conteudo") }),
+        lockDir: path.join(workDir, "locks"),
+      });
+
+      const result = await restoreLib.restoreDatabase({
+        dbType: "mongodb",
+        containerName: "app-mongo-1",
+        password: "senha-topo-secreta",
+        inFile: outFile,
+        preRestoreDir: path.join(workDir, "pre-restore"),
+        lockDir: path.join(workDir, "locks"),
+        runProcess: fakeRunner({ code: 1, stderr: "erro com senha-topo-secreta" }),
+        dumpFn: async (dumpOptions: any) => ({
+          ok: true,
+          outFile: dumpOptions.outFile,
+          bytes: 10,
+          sha256: "abc",
+          manifest: null,
+        }),
+      });
+
+      expect(result.ok).toBe(false);
+      expect(result.error).not.toContain("senha-topo-secreta");
     });
   });
 

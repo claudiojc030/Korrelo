@@ -24,6 +24,7 @@ const path = require("node:path");
 const { runProcess } = require("./process-runner.cjs");
 const fileLib = require("./backup-file.cjs");
 const { dumpDatabase, randomJobId, describeFailure } = require("./dump.cjs");
+const { acquireLock, lockKeyForContainer } = require("./lock.cjs");
 const { redact } = require("./sanitize.cjs");
 const { createProgressWriter, ensureProgressDir } = require("./progress.cjs");
 
@@ -181,6 +182,7 @@ function buildRedisRestoreCommands(options) {
  * @param {string} options.containerName
  * @param {string} options.inFile
  * @param {string} [options.preRestoreDir]  onde gravar o backup de segurança
+ * @param {string} [options.lockDir]         onde fica o lock do banco
  * @param {Function} [options.runProcess]
  * @param {Function} [options.dumpFn]        injetável pra teste
  * @returns {Promise<RestoreResult>}
@@ -194,6 +196,7 @@ async function restoreDatabase(options) {
     databaseName = null,
     inFile,
     preRestoreDir = null,
+    lockDir = undefined,
     jobId = randomJobId(),
     projectId = null,
     serviceName = null,
@@ -218,12 +221,28 @@ async function restoreDatabase(options) {
   const heartbeat = setInterval(() => progress.update({}), 10_000);
   heartbeat.unref?.();
 
+  // O restore é DESTRUTIVO: ele segura o lock do banco ALVO do início ao
+  // fim (validação -> backup pré-restore -> restore). Sem isso, o cron ou o
+  // botão "Fazer backup agora" poderiam entrar no meio e capturar um banco
+  // pela metade. O backup pré-restore reaproveita ESTE lock
+  // (`lockAlreadyHeld`), então não há auto-deadlock.
+  const lock = acquireLock({ key: lockKeyForContainer(containerName), dir: lockDir, jobId });
+  if (!lock.acquired) {
+    const message = redact(
+      lock.reason || "já existe um backup ou restauração em andamento para este banco.",
+      secrets,
+    );
+    progress.close({ phase: "failed", errorMessage: message });
+    return { ok: false, error: message, preRestoreBackupPath: null };
+  }
+
   try {
     // 1) Validações do arquivo de backup.
     const validation = validateBackupFile(inFile);
     if (!validation.ok) {
-      progress.close({ phase: "failed", errorMessage: validation.error });
-      return { ok: false, error: validation.error, preRestoreBackupPath: null };
+      const message = redact(validation.error, secrets);
+      progress.close({ phase: "failed", errorMessage: message });
+      return { ok: false, error: message, preRestoreBackupPath: null };
     }
     if (validation.state === "legacy") {
       log("Aviso: backup legado (sem manifesto) - não validado por checksum.");
@@ -232,8 +251,9 @@ async function restoreDatabase(options) {
     // 2) Checksum (só quando existe manifesto).
     const checksum = await verifyChecksum(inFile, validation.manifest);
     if (!checksum.ok) {
-      progress.close({ phase: "failed", errorMessage: checksum.error });
-      return { ok: false, error: checksum.error, preRestoreBackupPath: null };
+      const message = redact(checksum.error, secrets);
+      progress.close({ phase: "failed", errorMessage: message });
+      return { ok: false, error: message, preRestoreBackupPath: null };
     }
 
     // 3) Backup de segurança do estado ATUAL do banco.
@@ -254,6 +274,7 @@ async function restoreDatabase(options) {
       projectId,
       serviceName,
       jobId: `${jobId}-pre`,
+      lockAlreadyHeld: true,
       runProcess,
       onLog: log,
       inactivityTimeoutMs,
@@ -262,7 +283,10 @@ async function restoreDatabase(options) {
     });
 
     if (!safety.ok) {
-      const message = `backup de segurança antes do restore falhou - restore abortado (nada foi alterado no banco): ${safety.error}`;
+      const message = redact(
+        `backup de segurança antes do restore falhou - restore abortado (nada foi alterado no banco): ${safety.error}`,
+        secrets,
+      );
       progress.close({ phase: "failed", errorMessage: message });
       return { ok: false, error: message, preRestoreBackupPath: null };
     }
@@ -292,12 +316,24 @@ async function restoreDatabase(options) {
         env: { ...spec.env, ...(extraEnv || {}) },
         stdinPath,
         stderrLimit,
-        inactivityTimeoutMs,
+        // H1: o watchdog de INATIVIDADE fica DESLIGADO no restore.
+        //
+        // O restore é destrutivo e pode ficar minutos (horas) sem produzir
+        // NENHUM byte sem estar travado: o `mongorestore --archive` só
+        // imprime por coleção (e o progresso por documento só sai em TTY,
+        // aqui a saída vai pro arquivo de log) e o `psql` só imprime o
+        // "COPY n" no final. Matar o processo no meio deixaria o banco
+        // pela metade - bem pior do que esperar. O único limite aqui é o
+        // TETO ABSOLUTO (12h por padrão).
+        inactivityTimeoutMs: 0,
         maxTimeoutMs,
       });
 
       if (result.error || result.writeError || result.timedOut || result.code !== 0) {
-        const message = `falha ao restaurar: ${describeFailure(result, secrets)}. O backup de segurança do estado anterior está em ${safetyFile}.`;
+        const message = redact(
+          `falha ao restaurar: ${describeFailure(result, secrets)}. O backup de segurança do estado anterior está em ${safetyFile}.`,
+          secrets,
+        );
         progress.close({ phase: "failed", errorMessage: message });
         return { ok: false, error: message, preRestoreBackupPath: safetyFile };
       }
@@ -307,6 +343,9 @@ async function restoreDatabase(options) {
     return { ok: true, error: null, preRestoreBackupPath: safetyFile };
   } finally {
     clearInterval(heartbeat);
+    // O lock do banco alvo fica preso durante TODO o restore (inclusive o
+    // backup pré-restore) e só é solto aqui - sucesso ou falha.
+    lock.release();
   }
 }
 
