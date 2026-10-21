@@ -49,6 +49,11 @@ export default function LoginPage() {
 
       if (!res.ok) {
         const respBody: unknown = await res.json().catch(() => ({}));
+        if (res.status === 429) {
+          // Rate limit NUNCA é "senha/2FA inválido": mostra a mensagem de
+          // espera e NÃO limpa o que o operador digitou.
+          throw new Error(translateApiError(t, respBody, t.apiErrors.TOO_MANY_REQUESTS));
+        }
         throw new Error(translateApiError(t, respBody, t.login.authFailedFallback));
       }
 

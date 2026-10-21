@@ -69,6 +69,13 @@ describe("proxy - sessão persistente (SSR)", () => {
     }
   });
 
+  it("4b) refresh com 429 (rate limit) -> segue a navegação (não desloga)", async () => {
+    global.fetch = jest.fn(async () => new Response("{}", { status: 429 })) as unknown as typeof fetch;
+    const response = await runProxy(makeRequest());
+    // 429 = API ocupada agora, não sessão inválida: sem redirect pro login.
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   it("5) erro de rede (API fora do ar) -> segue a navegação", async () => {
     global.fetch = jest.fn(async () => {
       throw new TypeError("fetch failed");

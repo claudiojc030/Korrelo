@@ -24,6 +24,20 @@ import {
   buildRefreshTokenCookieOptions,
 } from "./token-cookie";
 
+/**
+ * Limite de tentativas de autenticação: 5 por minuto.
+ *
+ * O POST /auth/login atende DUAS etapas (senha e validação de 2FA) e a
+ * chave do rate limit separa as duas (ver ApiThrottlerGuard.generateKey):
+ * o 2FA tem janela própria, então errar o código de verificação NÃO consome
+ * a janela da senha. Aqui, cada etapa tem 5 tentativas por minuto - o mesmo
+ * limite de antes, só que em buckets separados (não enfraquece a proteção
+ * contra brute-force).
+ *
+ * O /auth/refresh NÃO usa este limite: ele cai no limite global (120/min
+ * por IP) e, como a chave inclui o método do controller, nunca compartilha
+ * bucket com o login.
+ */
 const AUTH_ATTEMPT_LIMIT = { default: { ttl: 60_000, limit: 5 } };
 
 // Num servidor escutando em socket dual-stack (IPv4+IPv6), o Node reporta
