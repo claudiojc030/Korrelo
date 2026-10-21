@@ -9,6 +9,8 @@ export interface DashboardDict {
   overviewSubtitle: string;
   cpu: string;
   cpuDetail: string;
+  /** Mostrado quando ainda não há medição válida de CPU. */
+  cpuCollecting: string;
   memory: string;
   disk: string;
   memoryOf: string;
@@ -107,6 +109,7 @@ export const dashboardEn: DashboardDict = {
   overviewSubtitle: "server total",
   cpu: "CPU",
   cpuDetail: "average usage now",
+  cpuCollecting: "Collecting...",
   memory: "Memory",
   disk: "Disk",
   memoryOf: "of",
@@ -229,6 +232,7 @@ export const dashboardPt: DashboardDict = {
   overviewSubtitle: "total do servidor",
   cpu: "CPU",
   cpuDetail: "uso médio agora",
+  cpuCollecting: "Coletando...",
   memory: "Memória",
   disk: "Disco",
   memoryOf: "de",

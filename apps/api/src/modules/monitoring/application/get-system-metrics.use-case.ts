@@ -187,7 +187,9 @@ export class GetSystemMetricsUseCase {
   private degradedMetrics(): SystemMetrics {
     const totalMemMb = Math.round(os.totalmem() / 1024 / 1024);
     return {
-      cpuPercent: 0,
+      // Sem medição: null (a UI mostra "Coletando..."), nunca 0% - que
+      // pareceria "host ocioso" quando na verdade não se sabe.
+      cpuPercent: null,
       totalMemMb,
       freeMemMb: Math.round(os.freemem() / 1024 / 1024),
       usedMemPercent: 0,

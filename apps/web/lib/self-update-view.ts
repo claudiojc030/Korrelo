@@ -260,7 +260,9 @@ export function decidePhase(input: {
   return "running";
 }
 
-/** O job terminou (não fica preso em "Atualizando"). */
+/**
+ * O job terminou (não fica preso em "Atualizando").
+ */
 export function isTerminalStatus(status: string | null | undefined): boolean {
   if (!status) return false;
   return ["completed", "failed", "interrupted", "recovery_required", "recovery_deferred"].includes(
@@ -272,6 +274,36 @@ export function isTerminalStatus(status: string | null | undefined): boolean {
 export function isActiveStatus(status: string | null | undefined): boolean {
   if (!status) return false;
   return ["queued", "running", "restarting", "verifying"].includes(status);
+}
+
+/** Janela em que um job TERMINADO ainda é relevante para o operador. */
+export const RECENT_JOB_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * O modal deve reabrir automaticamente?
+ *
+ * - job ATIVO (running/queued/verifying): SEMPRE reabre - é o refresh
+ *   involuntário durante o update, e é exatamente o que se quer ver;
+ * - job TERMINADO: só reabre se terminou há pouco (10 min) E o operador
+ *   ainda não dispensou esse job. Sem essa regra, "Recarregar painel"
+ *   reabriria o modal em loop (o reload re-dispara o watcher).
+ */
+export function shouldReopenSelfUpdateJob(input: {
+  status: string | null | undefined;
+  finishedAt: string | null | undefined;
+  dismissed?: boolean;
+  now?: number;
+  windowMs?: number;
+}): boolean {
+  if (isActiveStatus(input.status)) return true;
+  if (!isTerminalStatus(input.status)) return false;
+  if (input.dismissed === true) return false;
+  if (!input.finishedAt) return false;
+  const finished = Date.parse(input.finishedAt);
+  if (!Number.isFinite(finished)) return false;
+  const now = input.now ?? Date.now();
+  const windowMs = input.windowMs ?? RECENT_JOB_WINDOW_MS;
+  return now - finished <= windowMs;
 }
 
 /**

@@ -1,11 +1,13 @@
 import type { LucideIcon } from "lucide-react";
 
-type Severity = "good" | "warning" | "critical";
+type Severity = "good" | "warning" | "critical" | "unknown";
 
 const SEVERITY_STYLE: Record<Severity, string> = {
   good: "bg-accent",
   warning: "bg-warning",
   critical: "bg-destructive",
+  // Sem medição válida: estado NEUTRO (nada de vermelho/verde falso).
+  unknown: "bg-muted-foreground/40",
 };
 
 function severityOf(percent: number): Severity {
@@ -19,13 +21,17 @@ export function MetricTile({
   icon: Icon,
   percent,
   detail,
+  /** Texto mostrado quando não há medição válida (ex.: "Coletando..."). */
+  pendingLabel,
 }: {
   label: string;
   icon: LucideIcon;
-  percent: number;
+  percent: number | null;
   detail: string;
+  pendingLabel?: string;
 }) {
-  const fill = SEVERITY_STYLE[severityOf(percent)];
+  const hasMeasurement = percent !== null && percent !== undefined;
+  const fill = SEVERITY_STYLE[hasMeasurement ? severityOf(percent) : "unknown"];
 
   return (
     <div className="rounded-xl border border-border-subtle bg-surface p-4">
@@ -36,13 +42,28 @@ export function MetricTile({
         </div>
         <span className={`h-1.5 w-1.5 rounded-full ${fill}`} />
       </div>
-      <p className="mt-3 font-mono text-[26px] font-semibold leading-none text-foreground">
-        {percent}
-        <span className="text-[15px] text-muted-foreground">%</span>
-      </p>
-      <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-muted">
-        <div className={`h-full rounded-full ${fill}`} style={{ width: `${Math.min(percent, 100)}%` }} />
-      </div>
+      {hasMeasurement ? (
+        <>
+          <p className="mt-3 font-mono text-[26px] font-semibold leading-none text-foreground">
+            {percent}
+            <span className="text-[15px] text-muted-foreground">%</span>
+          </p>
+          <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-muted">
+            <div
+              className={`h-full rounded-full ${fill}`}
+              style={{ width: `${Math.min(percent, 100)}%` }}
+            />
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Sem medição válida: nada de barra vermelha nem número inventado. */}
+          <p className="mt-3 font-mono text-[26px] font-semibold leading-none text-muted-foreground">
+            {pendingLabel ?? "—"}
+          </p>
+          <div className="mt-3 h-1 w-full overflow-hidden rounded-full bg-muted" />
+        </>
+      )}
       <p className="mt-2 text-[12px] text-muted-foreground">{detail}</p>
     </div>
   );

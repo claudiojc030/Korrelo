@@ -114,7 +114,18 @@ export interface ContainerSummary {
 }
 
 export interface SystemMetrics {
-  cpuPercent: number;
+  /**
+   * Uso REAL de CPU do host (0-100).
+   *
+   * null = ainda não há medição válida (a primeira amostra não tem delta
+   * contra o que veio antes). A UI mostra "Coletando..." - nunca 0% nem
+   * 100% inventados.
+   */
+  cpuPercent: number | null;
+  /** De onde veio a medição de CPU. */
+  cpuMeasurementSource?: "proc-stat" | "fallback";
+  /** Momento (ISO) da leitura que originou o percentual de CPU. */
+  cpuSampledAt?: string;
   totalMemMb: number;
   freeMemMb: number;
   usedMemPercent: number;

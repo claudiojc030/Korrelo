@@ -23,6 +23,26 @@ const NOT_CHECKED: UpdateStatus = {
 export class GitUpdateChecker implements UpdateChecker {
   private readonly logger = new Logger(GitUpdateChecker.name);
 
+  /**
+   * Commit local do checkout (sem rede - é só leitura do repositório).
+   *
+   * O `GetUpdateStatusUseCase` usa isso para invalidar o cache quando o
+   * self-update muda o HEAD: sem isso, o dashboard continuaria mostrando
+   * "atualização disponível" por até 10 minutos depois do update terminar.
+   */
+  async localCommit(): Promise<string | null> {
+    try {
+      const { stdout } = await execFile("git", ["rev-parse", "HEAD"], {
+        cwd: process.cwd(),
+        timeout: GIT_TIMEOUT_MS,
+      });
+      const commit = stdout.trim();
+      return commit.length > 0 ? commit : null;
+    } catch {
+      return null;
+    }
+  }
+
   async check(): Promise<UpdateStatus> {
     try {
       const cwd = process.cwd();

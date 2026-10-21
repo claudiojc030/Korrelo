@@ -32,6 +32,14 @@ export class RecordMetricSampleUseCase {
       return;
     }
 
+    // Sem medição de CPU válida (primeira amostra / leitura inválida) a
+    // amostra NÃO entra no histórico: gravar null como 0% ou 100% cria um
+    // pico artificial no gráfico.
+    if (metrics.cpuPercent === null || metrics.cpuPercent === undefined) {
+      this.logger.warn("[metrics] amostra ignorada: ainda sem medição válida de CPU");
+      return;
+    }
+
     const sample = MetricSample.create(metrics.cpuPercent, metrics.usedMemPercent, metrics.usedDiskPercent ?? 0);
     await this.repository.save(sample);
   }

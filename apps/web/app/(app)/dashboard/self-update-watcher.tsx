@@ -3,7 +3,8 @@
 import { useEffect } from "react";
 import { apiFetch, isAuthFailure } from "../../../lib/api-client";
 import { useSelfUpdateModal } from "../../../lib/self-update-modal-store";
-import { isActiveStatus, isTerminalStatus } from "../../../lib/self-update-view";
+import { isSelfUpdateJobDismissed } from "../../../lib/self-update-dismiss-store";
+import { shouldReopenSelfUpdateJob } from "../../../lib/self-update-view";
 import { UpdateProgressModal } from "./update-progress-modal";
 
 /**
@@ -48,16 +49,16 @@ export function SelfUpdateWatcher() {
         const id = data.jobId ?? data.job?.id ?? null;
         if (!id) return;
 
-        if (isActiveStatus(status)) {
-          // Update em andamento: reabre o modal e acompanha.
-          show(id);
-          return;
-        }
-
-        // Update terminado: mostra o estado final só se for recente (o
-        // operador voltou logo depois). Um update de dias atrás não abre
-        // modal nenhum.
-        if (isTerminalStatus(status) && isRecent(data.finishedAt)) {
+        // A decisão é a MESMA função testada (nada de lógica duplicada aqui):
+        // - job ATIVO sempre reabre (refresh involuntário durante o update);
+        // - job TERMINADO só reabre se for recente E não foi dispensado.
+        if (
+          shouldReopenSelfUpdateJob({
+            status,
+            finishedAt: data.finishedAt,
+            dismissed: isSelfUpdateJobDismissed(id),
+          })
+        ) {
           show(id);
         }
       } catch {
@@ -76,12 +77,4 @@ export function SelfUpdateWatcher() {
   // abrir. Assim nunca existem dois overlays sobrepostos.
   if (!open) return null;
   return <UpdateProgressModal jobId={jobId} onClose={hide} />;
-}
-
-/** Um update terminado há pouco tempo ainda é relevante para o operador. */
-function isRecent(finishedAt: string | null | undefined, windowMs = 10 * 60 * 1000): boolean {
-  if (!finishedAt) return false;
-  const at = Date.parse(finishedAt);
-  if (!Number.isFinite(at)) return false;
-  return Date.now() - at <= windowMs;
 }

@@ -3,8 +3,8 @@ import * as os from "node:os";
 import { classifyResourceTier, type ContainerSummary, type SystemMetrics } from "@korrelo/shared-types";
 import type { SystemMetricsCollector } from "../domain/system-metrics-collector";
 import { runCommand, type RunCommandResult } from "../../../infrastructure/command-runner";
+import { CpuUsageSampler } from "./cpu-usage-sampler";
 
-const CPU_SAMPLE_WINDOW_MS = 300;
 
 /**
  * Tempos limite de cada comando externo. Configuráveis por variável de
@@ -22,32 +22,6 @@ const DOCKER_LIST_TIMEOUT_MS = envInt("SYSTEM_METRICS_DOCKER_TIMEOUT_MS", 4_000)
 const DOCKER_STATS_TIMEOUT_MS = envInt("SYSTEM_METRICS_DOCKER_STATS_TIMEOUT_MS", 6_000);
 const DISK_TIMEOUT_MS = envInt("SYSTEM_METRICS_DISK_TIMEOUT_MS", 5_000);
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function sumCpuTimes() {
-  return os.cpus().reduce(
-    (acc, cpu) => {
-      acc.idle += cpu.times.idle;
-      acc.total += cpu.times.user + cpu.times.nice + cpu.times.sys + cpu.times.idle + cpu.times.irq;
-      return acc;
-    },
-    { idle: 0, total: 0 },
-  );
-}
-
-async function getCpuPercent(): Promise<number> {
-  const start = sumCpuTimes();
-  await sleep(CPU_SAMPLE_WINDOW_MS);
-  const end = sumCpuTimes();
-
-  const idleDelta = end.idle - start.idle;
-  const totalDelta = end.total - start.total;
-  if (totalDelta <= 0) return 0;
-
-  return Math.round((1 - idleDelta / totalDelta) * 100);
-}
 
 /** Descrição curta do motivo de uma falha de comando (sem vazar dados sensíveis). */
 function describeFailure(result: RunCommandResult): string {
@@ -221,19 +195,29 @@ async function getContainers(logger: Logger): Promise<ContainersResult> {
 @Injectable()
 export class OsSystemMetricsCollector implements SystemMetricsCollector {
   private readonly logger = new Logger(OsSystemMetricsCollector.name);
+  /**
+   * Amostrador de CPU: mantém o snapshot anterior em memória e calcula o
+   * percentual por DELTA entre coletas (o cálculo antigo, com janela de
+   * 300 ms, dava 100% num host de 1 vCPU ocioso).
+   */
+  private readonly cpuSampler = new CpuUsageSampler();
 
   async collect(): Promise<SystemMetrics> {
     const totalMemMb = Math.round(os.totalmem() / 1024 / 1024);
     const freeMemMb = Math.round(os.freemem() / 1024 / 1024);
 
-    const [cpuPercent, disk, containerResult] = await Promise.all([
-      getCpuPercent(),
+    const [cpu, disk, containerResult] = await Promise.all([
+      Promise.resolve(this.cpuSampler.sample()),
       getDiskUsage(),
       getContainers(this.logger),
     ]);
 
     return {
-      cpuPercent,
+      // null = ainda não há medição válida (primeira amostra). A UI mostra
+      // "Coletando..." em vez de um número inventado.
+      cpuPercent: cpu.percent,
+      cpuMeasurementSource: cpu.source,
+      cpuSampledAt: cpu.sampledAt,
       totalMemMb,
       freeMemMb,
       usedMemPercent: Math.round(((totalMemMb - freeMemMb) / totalMemMb) * 100),

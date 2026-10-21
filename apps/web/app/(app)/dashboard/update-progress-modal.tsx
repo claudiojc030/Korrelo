@@ -19,6 +19,7 @@ import {
   isTransientServerError,
 } from "../../../lib/api-client";
 import { useTranslation } from "../../../lib/i18n/locale-provider";
+import { dismissSelfUpdateJob } from "../../../lib/self-update-dismiss-store";
 import {
   decideNextPoll,
   decidePhase,
@@ -91,6 +92,8 @@ export function UpdateProgressModal({ onClose, jobId }: { onClose: () => void; j
   const [candidateCommit, setCandidateCommit] = useState<string | null>(null);
   const [startedAt, setStartedAt] = useState<string | null>(null);
   const [finishedAt, setFinishedAt] = useState<string | null>(null);
+  /** ID do job em acompanhamento (para marcar o dismiss). */
+  const [currentJobId, setCurrentJobId] = useState<string | undefined>(jobId);
   const [waiting, setWaiting] = useState(false);
   const [waitingDetails, setWaitingDetails] = useState<string[] | null>(null);
   const [nextRetryInSeconds, setNextRetryInSeconds] = useState<number | null>(null);
@@ -154,6 +157,7 @@ export function UpdateProgressModal({ onClose, jobId }: { onClose: () => void; j
         setCandidateCommit(data.candidateCommit ?? data.job?.candidateCommit ?? null);
         setStartedAt(data.startedAt ?? data.job?.startedAt ?? null);
         setFinishedAt(data.finishedAt ?? data.job?.finishedAt ?? null);
+        setCurrentJobId(data.jobId ?? data.job?.id ?? jobId);
 
         const jobStatus = data.jobStatus ?? data.job?.status ?? null;
         // A espera por recursos: o backend é a fonte da verdade; se ele for
@@ -331,7 +335,10 @@ export function UpdateProgressModal({ onClose, jobId }: { onClose: () => void; j
           </div>
           {canClose && (
             <button
-              onClick={onClose}
+              onClick={() => {
+                dismissSelfUpdateJob(currentJobId);
+                onClose();
+              }}
               aria-label={t.dashboard.updateCloseButton}
               className="flex-none text-muted-foreground hover:text-foreground"
             >
@@ -485,6 +492,10 @@ export function UpdateProgressModal({ onClose, jobId }: { onClose: () => void; j
           {phase === "success" && (
             <button
               onClick={() => {
+                // Marca o dismiss ANTES de recarregar: senão o watcher
+                // encontra o job terminal recente e reabre o modal, e o
+                // operador fica preso vendo o mesmo resultado.
+                dismissSelfUpdateJob(currentJobId);
                 setReloading(true);
                 window.location.reload();
               }}
@@ -496,7 +507,12 @@ export function UpdateProgressModal({ onClose, jobId }: { onClose: () => void; j
           )}
           {canClose && (
             <button
-              onClick={onClose}
+              onClick={() => {
+                // Mesmo aqui: o operador já viu o resultado, então o job
+                // não deve reabrir no próximo poll/reload.
+                dismissSelfUpdateJob(currentJobId);
+                onClose();
+              }}
               className="w-full rounded-md border border-border-subtle px-4 py-2.5 text-[13.5px] font-medium text-foreground hover:bg-muted sm:w-auto"
             >
               {t.dashboard.updateCloseButton}

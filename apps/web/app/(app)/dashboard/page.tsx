@@ -137,7 +137,13 @@ export default async function DashboardPage() {
             {t.dashboard.overview} <span className="text-muted-foreground/60">· {t.dashboard.overviewSubtitle}</span>
           </h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <MetricTile label={t.dashboard.cpu} icon={Cpu} percent={metrics.cpuPercent} detail={t.dashboard.cpuDetail} />
+            <MetricTile
+              label={t.dashboard.cpu}
+              icon={Cpu}
+              percent={metrics.cpuPercent}
+              detail={t.dashboard.cpuDetail}
+              pendingLabel={t.dashboard.cpuCollecting}
+            />
             <MetricTile
               label={t.dashboard.memory}
               icon={MemoryStick}
