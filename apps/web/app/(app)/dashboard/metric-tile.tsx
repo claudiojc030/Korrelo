@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import Link from "next/link";
 
 type Severity = "good" | "warning" | "critical" | "unknown";
 
@@ -23,12 +24,15 @@ export function MetricTile({
   detail,
   /** Texto mostrado quando não há medição válida (ex.: "Coletando..."). */
   pendingLabel,
+  /** Link discreto no rodapé do card (ex.: "Ver armazenamento"). */
+  action,
 }: {
   label: string;
   icon: LucideIcon;
   percent: number | null;
   detail: string;
   pendingLabel?: string;
+  action?: { href: string; label: string };
 }) {
   const hasMeasurement = percent !== null && percent !== undefined;
   const fill = SEVERITY_STYLE[hasMeasurement ? severityOf(percent) : "unknown"];
@@ -65,6 +69,14 @@ export function MetricTile({
         </>
       )}
       <p className="mt-2 text-[12px] text-muted-foreground">{detail}</p>
+      {action && (
+        <Link
+          href={action.href}
+          className="mt-1.5 inline-block text-[12px] font-medium text-accent hover:opacity-85"
+        >
+          {action.label}
+        </Link>
+      )}
     </div>
   );
 }

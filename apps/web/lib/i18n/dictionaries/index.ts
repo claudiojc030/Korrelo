@@ -15,6 +15,7 @@ import { projectTerminalEn, projectTerminalPt } from "./project-terminal";
 import { projectSettingsEn, projectSettingsPt } from "./project-settings";
 import { securityEn, securityPt } from "./security";
 import { systemServicesEn, systemServicesPt } from "./system-services";
+import { storageEn, storagePt } from "./storage";
 import { settingsEn, settingsPt } from "./settings";
 import { apiErrorsEn, apiErrorsPt } from "./api-errors";
 import { apiErrorsProjectsAEn, apiErrorsProjectsAPt } from "./api-errors-projects-a";
@@ -38,6 +39,7 @@ const en = {
   projectSettings: projectSettingsEn,
   security: securityEn,
   systemServices: systemServicesEn,
+  storage: storageEn,
   settings: settingsEn,
   apiErrors: { ...apiErrorsEn, ...apiErrorsProjectsAEn, ...apiErrorsProjectsBEn, ...apiErrorsMiscEn },
 };
@@ -59,6 +61,7 @@ const pt: typeof en = {
   projectSettings: projectSettingsPt,
   security: securityPt,
   systemServices: systemServicesPt,
+  storage: storagePt,
   settings: settingsPt,
   apiErrors: { ...apiErrorsPt, ...apiErrorsProjectsAPt, ...apiErrorsProjectsBPt, ...apiErrorsMiscPt },
 };

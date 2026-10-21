@@ -6,7 +6,6 @@ import { MetricsHistoryChart } from "./metrics-history-chart";
 import { OnboardingChecklist } from "./onboarding-checklist";
 import { UpdateBanner } from "./update-banner";
 import { SelfUpdateWatcher } from "./self-update-watcher";
-import { StoragePanel } from "./storage-panel";
 import { TierBadge } from "./tier-badge";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
 import { getRequestHostServer } from "../../../lib/get-request-host-server";
@@ -127,11 +126,6 @@ export default async function DashboardPage() {
         twoFactorEnabled={twoFactorStatus?.enabled ?? null}
       />
 
-      {/* Armazenamento do servidor: auditoria read-only + limpeza por allowlist. */}
-      <div className="mb-6">
-        <StoragePanel />
-      </div>
-
       {!metrics || metrics.available === false ? (
         <p className="text-[13.5px] text-destructive">{t.dashboard.metricsUnavailable}</p>
       ) : (
@@ -162,6 +156,7 @@ export default async function DashboardPage() {
                 icon={HardDrive}
                 percent={metrics.usedDiskPercent}
                 detail={`${((metrics.diskTotalGb ?? 0) - (metrics.diskFreeGb ?? 0)).toFixed(0)} GB ${t.dashboard.memoryOf} ${(metrics.diskTotalGb ?? 0).toFixed(0)} GB`}
+                action={{ href: "/storage", label: t.dashboard.viewStorage }}
               />
             ) : (
               <div className="rounded-xl border border-border-subtle bg-surface p-4">

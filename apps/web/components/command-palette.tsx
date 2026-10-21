@@ -11,6 +11,7 @@ import {
   FolderKanban,
   Search,
   CornerDownLeft,
+  HardDrive,
   type LucideIcon,
 } from "lucide-react";
 import { apiFetch } from "../lib/api-client";
@@ -78,6 +79,7 @@ export function CommandPalette() {
       { id: "nav-projects", label: t.nav.projects, href: "/projects", icon: FolderGit2 },
       { id: "nav-services", label: t.nav.systemServices, href: "/system-services", icon: ShieldHalf },
       { id: "nav-terminal", label: t.nav.systemTerminal, href: "/terminal", icon: SquareTerminal },
+      { id: "nav-storage", label: t.nav.storage, href: "/storage", icon: HardDrive },
       { id: "nav-security", label: t.nav.security, href: "/security", icon: ShieldCheck },
     ];
     const projectItems: PaletteItem[] = projects.map((project) => ({

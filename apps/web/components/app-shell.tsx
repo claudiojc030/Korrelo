@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { LayoutDashboard, FolderGit2, ShieldHalf, ShieldCheck, SquareTerminal, Settings, LogOut, Search } from "lucide-react";
+import { LogOut, Search } from "lucide-react";
 import { apiFetch } from "../lib/api-client";
+import { buildNavItems } from "../lib/nav-items";
 import { useTranslation } from "../lib/i18n/locale-provider";
 import { ThemeToggle } from "./theme-toggle";
 import { LanguageToggle } from "./language-toggle";
@@ -28,14 +29,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [username, setUsername] = useState<string | null>(null);
   const [isMac, setIsMac] = useState(false);
 
-  const NAV_ITEMS = [
-    { href: "/dashboard", label: t.nav.dashboard, icon: LayoutDashboard },
-    { href: "/projects", label: t.nav.projects, icon: FolderGit2 },
-    { href: "/system-services", label: t.nav.systemServices, icon: ShieldHalf },
-    { href: "/terminal", label: t.nav.systemTerminal, icon: SquareTerminal },
-    { href: "/security", label: t.nav.security, icon: ShieldCheck },
-    { href: "/settings", label: t.nav.settings, icon: Settings },
-  ];
+  const NAV_ITEMS = buildNavItems({
+    dashboard: t.nav.dashboard,
+    projects: t.nav.projects,
+    systemServices: t.nav.systemServices,
+    systemTerminal: t.nav.systemTerminal,
+    storage: t.nav.storage,
+    security: t.nav.security,
+    settings: t.nav.settings,
+  });
 
   useEffect(() => {
     apiFetch("/auth/me")

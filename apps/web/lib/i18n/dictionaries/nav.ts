@@ -3,6 +3,7 @@ export interface NavDict {
   dashboard: string;
   projects: string;
   systemServices: string;
+  storage: string;
   security: string;
   settings: string;
   logout: string;
@@ -24,6 +25,7 @@ export const navEn: NavDict = {
   dashboard: "Dashboard",
   projects: "Projects",
   systemServices: "Server services",
+  storage: "Storage",
   security: "Security",
   settings: "Settings",
   logout: "Log out",
@@ -46,6 +48,7 @@ export const navPt: NavDict = {
   dashboard: "Dashboard",
   projects: "Projetos",
   systemServices: "Serviços do servidor",
+  storage: "Armazenamento",
   security: "Segurança",
   settings: "Configurações",
   logout: "Sair",
