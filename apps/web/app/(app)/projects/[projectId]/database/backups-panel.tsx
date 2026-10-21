@@ -12,6 +12,10 @@ interface BackupEntry {
   dbType: "postgres" | "mongodb" | "redis";
   fileName: string;
   sizeBytes: number;
+  /** true quando o backup tem manifesto com checksum conferido. */
+  validated?: boolean;
+  /** true quando é um backup antigo, feito antes dos backups terem checksum. */
+  legacy?: boolean;
 }
 
 interface RestoreStatus {
@@ -125,6 +129,14 @@ export function BackupsPanel({ projectId }: { projectId: string }) {
               <div className="min-w-0">
                 <p className="text-[12.5px] text-foreground">{new Date(backup.createdAt).toLocaleString()}</p>
                 <p className="text-[11.5px] text-muted-foreground">{formatSize(backup.sizeBytes)}</p>
+                {backup.legacy && (
+                  <p
+                    className="text-[11px] text-muted-foreground"
+                    title={t.projectDatabase.backupLegacyHint}
+                  >
+                    {t.projectDatabase.backupLegacyBadge}
+                  </p>
+                )}
               </div>
               <div className="flex flex-none items-center gap-3">
                 <a

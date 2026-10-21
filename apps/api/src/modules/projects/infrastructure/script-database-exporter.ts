@@ -4,6 +4,8 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { DatabaseExporter, DatabaseExportStatus, StartExportOptions } from "../domain/database-exporter";
+import { isTempBackupName, readBackupState } from "./backup-manifest";
+import { isProcessAlive, PROGRESS_STALE_MS, readBackupProgress } from "./backup-progress";
 
 const STEP_MARKER = "__KORRELO_DBEXPORT_STEP__";
 const DONE_MARKER = "__KORRELO_DBEXPORT_DONE__";
@@ -15,20 +17,30 @@ const EXTENSION_BY_TYPE: Record<StartExportOptions["dbType"], string> = {
   redis: "rdb",
 };
 
+const KNOWN_EXTENSIONS = [".sql", ".archive", ".rdb"];
+
 @Injectable()
 export class ScriptDatabaseExporter implements DatabaseExporter {
   private readonly logger = new Logger(ScriptDatabaseExporter.name);
 
   private get exportsDir(): string {
-    return path.join(os.homedir(), "korrelo-backups", "exports");
+    return process.env.KORRELO_EXPORTS_DIR || path.join(os.homedir(), "korrelo-backups", "exports");
+  }
+
+  private get stateRoot(): string {
+    return process.env.KORRELO_STATE_DIR || path.join(os.homedir(), ".korrelo");
   }
 
   private get stateDir(): string {
-    return path.join(os.homedir(), ".korrelo", "database-export");
+    return path.join(this.stateRoot, "database-export");
   }
 
   private logPath(projectId: string): string {
     return path.join(this.stateDir, `${projectId}.log`);
+  }
+
+  private progressPath(projectId: string): string {
+    return path.join(this.stateDir, `${projectId}.progress.json`);
   }
 
   private outFilePath(projectId: string, dbType: StartExportOptions["dbType"]): string {
@@ -57,7 +69,10 @@ export class ScriptDatabaseExporter implements DatabaseExporter {
       fs.mkdirSync(this.exportsDir, { recursive: true });
       outFile = this.outFilePath(projectId, options.dbType);
     }
-    fs.rmSync(outFile, { force: true });
+    // O arquivo anterior NÃO é apagado aqui de propósito: o dump novo é
+    // escrito em arquivo temporário e só substitui o antigo por rename
+    // quando termina com sucesso (ver scripts/backup-lib/dump.cjs). Assim
+    // uma exportação que falha não deixa o usuário sem backup nenhum.
 
     const scriptPath = path.join(this.repoDir, "scripts", "export-database.sh");
     const out = fs.openSync(logPath, "a");
@@ -74,6 +89,13 @@ export class ScriptDatabaseExporter implements DatabaseExporter {
         DB_PASSWORD: options.password ?? "",
         DB_NAME: options.databaseName ?? "",
         OUT_FILE: outFile,
+        // Progresso/identificação do job: é o que permite saber se o dump
+        // continua vivo (bytes avançando) em vez de inferir por "log parou".
+        KORRELO_PROGRESS_FILE: this.progressPath(projectId),
+        KORRELO_JOB_ID: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        KORRELO_PROJECT_ID: projectId,
+        KORRELO_REASON: options.destDir && options.fileName ? "manual" : "export",
+        KORRELO_BACKUP_ROOT: process.env.BACKUP_DIR || path.join(os.homedir(), "korrelo-backups"),
       },
     });
     child.unref();
@@ -95,6 +117,38 @@ export class ScriptDatabaseExporter implements DatabaseExporter {
       return { ...parsed, running: false };
     }
 
+    // Progresso do job: enquanto o motor estiver escrevendo (heartbeat a
+    // cada 10s), o job está VIVO - mesmo que o dump leve horas.
+    const progress = readBackupProgress(this.progressPath(projectId));
+    if (progress) {
+      const lastProgressAt = progress.lastProgressAt ?? 0;
+      const age = Date.now() - lastProgressAt;
+      const alive = isProcessAlive(progress.pid);
+
+      if (age <= PROGRESS_STALE_MS || alive) {
+        return {
+          ...parsed,
+          running: true,
+          bytesWritten: progress.bytesWritten,
+          startedAt: progress.startedAt,
+          lastProgressAt: lastProgressAt || null,
+        };
+      }
+
+      return {
+        ...parsed,
+        running: false,
+        done: true,
+        success: false,
+        errorMessage: "A exportação parou de responder.",
+        bytesWritten: progress.bytesWritten,
+        startedAt: progress.startedAt,
+        lastProgressAt: lastProgressAt || null,
+      };
+    }
+
+    // Sem arquivo de progresso (job iniciado antes desta versão): cai no
+    // comportamento antigo, baseado no mtime do log.
     const stats = fs.statSync(logPath);
     if (Date.now() - stats.mtimeMs > STALE_THRESHOLD_MS) {
       return {
@@ -112,8 +166,24 @@ export class ScriptDatabaseExporter implements DatabaseExporter {
   async getFilePath(projectId: string): Promise<string | null> {
     const dir = this.exportsDir;
     if (!fs.existsSync(dir)) return null;
-    const match = fs.readdirSync(dir).find((name) => name.startsWith(`${projectId}.`));
-    return match ? path.join(dir, match) : null;
+
+    const candidates = fs
+      .readdirSync(dir)
+      .filter((name) => name.startsWith(`${projectId}.`))
+      // Ignora manifesto e arquivos temporários (dump em andamento).
+      .filter((name) => !name.endsWith(".manifest.json"))
+      .filter((name) => !isTempBackupName(name))
+      .filter((name) => KNOWN_EXTENSIONS.some((extension) => name.endsWith(extension)));
+
+    for (const name of candidates) {
+      const candidate = path.join(dir, name);
+      // Backup marcado como incompleto não é servido para download.
+      const state = await readBackupState(candidate);
+      if (state.state === "incomplete") continue;
+      return candidate;
+    }
+
+    return null;
   }
 
   private parseLog(log: string): Omit<DatabaseExportStatus, "running"> {

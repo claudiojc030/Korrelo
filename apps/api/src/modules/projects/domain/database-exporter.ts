@@ -7,6 +7,12 @@ export interface DatabaseExportStatus {
   success: boolean | null;
   errorMessage?: string;
   log: string;
+  /** Bytes já escritos no arquivo de backup (dump em andamento). */
+  bytesWritten?: number;
+  /** Epoch ms do início do job. */
+  startedAt?: number | null;
+  /** Epoch ms da última atualização de progresso (heartbeat). */
+  lastProgressAt?: number | null;
 }
 
 export interface StartExportOptions {

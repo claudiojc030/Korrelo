@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Project } from "../domain/project.entity";
 import type { DatabaseType } from "../domain/managed-database.entity";
+import { readBackupState } from "./backup-manifest";
 
 export interface ProjectBackupEntry {
   id: string;
@@ -11,6 +12,20 @@ export interface ProjectBackupEntry {
   dbType: Exclude<DatabaseType, "custom">;
   fileName: string;
   sizeBytes: number;
+  /**
+   * true quando o backup tem manifesto com status "complete" (checksum
+   * conferido no momento da criação do arquivo).
+   */
+  validated: boolean;
+  /**
+   * true quando é um backup antigo, feito antes do manifesto existir.
+   * Ele continua aparecendo e pode ser baixado/restaurado, mas é
+   * tratado como "não validado".
+   */
+  legacy: boolean;
+  sha256: string | null;
+  /** "cron" | "manual" | "pre-restore" (quando o manifesto existe). */
+  reason: string | null;
 }
 
 const EXTENSION_BY_TYPE: Record<Exclude<DatabaseType, "custom">, string> = {
@@ -65,12 +80,30 @@ export class ProjectBackupsService {
       if (!createdAt) continue; // pula "exports/" e qualquer outra coisa que não seja um snapshot diário
 
       const filePath = path.join(this.backupRoot, entry.name, targetFileName);
+      let stat;
       try {
-        const stat = await fs.stat(filePath);
-        entries.push({ id: entry.name, createdAt, dbType, fileName: targetFileName, sizeBytes: stat.size });
+        stat = await fs.stat(filePath);
       } catch {
         // Esse dia não tem backup desse projeto (falhou, ou o banco foi provisionado depois).
+        continue;
       }
+
+      // Backup marcado como incompleto (dump falhou no meio) NÃO aparece:
+      // o painel não deve oferecer um arquivo pela metade.
+      const state = await readBackupState(filePath);
+      if (state.state === "incomplete") continue;
+
+      entries.push({
+        id: entry.name,
+        createdAt,
+        dbType,
+        fileName: targetFileName,
+        sizeBytes: stat.size,
+        validated: state.state === "complete",
+        legacy: state.state === "legacy",
+        sha256: state.manifest?.sha256 ?? null,
+        reason: state.manifest?.reason ?? null,
+      });
     }
 
     return entries.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -93,6 +126,11 @@ export class ProjectBackupsService {
     } catch {
       return null;
     }
+
+    // Backup marcado como incompleto não pode ser baixado nem restaurado.
+    const state = await readBackupState(filePath);
+    if (state.state === "incomplete") return null;
+
     return { filePath, fileName };
   }
 }

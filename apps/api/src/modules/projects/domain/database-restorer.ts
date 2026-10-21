@@ -7,6 +7,12 @@ export interface DatabaseRestoreStatus {
   success: boolean | null;
   errorMessage?: string;
   log: string;
+  /** Bytes já escritos/ processados no job (quando disponível). */
+  bytesWritten?: number;
+  /** Epoch ms do início do job. */
+  startedAt?: number | null;
+  /** Epoch ms da última atualização de progresso (heartbeat). */
+  lastProgressAt?: number | null;
 }
 
 export interface StartRestoreOptions {

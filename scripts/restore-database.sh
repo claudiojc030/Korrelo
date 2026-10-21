@@ -5,51 +5,17 @@
 # ambiente, não por argumento, pra não deixar credenciais visíveis em "ps aux".
 #
 # DESTRUTIVO: substitui todo o conteúdo atual do banco pelo do backup.
+# Por isso o motor (scripts/backup-lib/restore-cli.cjs) só chega no
+# `--drop`/`DROP SCHEMA` depois de validar o arquivo (tamanho + sha256) e de
+# criar um backup de segurança do estado atual - se esse backup falhar, o
+# restore é abortado sem tocar no banco.
 set -uo pipefail
 
-step() {
-  echo "__KORRELO_DBRESTORE_STEP__|$1|$2"
-}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-fail() {
-  echo "__KORRELO_DBRESTORE_DONE__|failed|$1"
+if [ -z "${CONTAINER_NAME:-}" ] || [ -z "${DB_TYPE:-}" ] || [ -z "${IN_FILE:-}" ]; then
+  echo "__KORRELO_DBRESTORE_DONE__|failed|Variáveis obrigatórias ausentes (CONTAINER_NAME, DB_TYPE, IN_FILE)."
   exit 1
-}
+fi
 
-: "${CONTAINER_NAME:?}"
-: "${DB_TYPE:?}"
-: "${IN_FILE:?}"
-
-[ -f "$IN_FILE" ] || fail "Arquivo de backup não encontrado: $IN_FILE"
-
-step 10 "Restaurando banco de dados"
-case "$DB_TYPE" in
-  postgres)
-    # Schema limpo antes de restaurar: o dump (pg_dump sem --clean) só tem
-    # CREATE TABLE/INSERT, sem DROP - sem isso, restaurar por cima de tabelas
-    # já existentes falha com "already exists" na primeira linha.
-    docker exec "$CONTAINER_NAME" psql -U "$DB_USERNAME" -d "$DB_NAME" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" \
-      || fail "Falha ao limpar o schema do Postgres antes de restaurar."
-    docker exec -i "$CONTAINER_NAME" psql -U "$DB_USERNAME" -d "$DB_NAME" < "$IN_FILE" \
-      || fail "Falha ao restaurar o dump no Postgres."
-    ;;
-  mongodb)
-    # --drop: cada coleção do backup substitui a coleção atual de mesmo nome
-    # (coleções que só existem no banco atual, fora do backup, não são tocadas).
-    docker exec -i "$CONTAINER_NAME" mongorestore --username "$DB_USERNAME" --password "$DB_PASSWORD" --authenticationDatabase admin --archive --drop < "$IN_FILE" \
-      || fail "Falha ao restaurar o backup no MongoDB."
-    ;;
-  redis)
-    docker cp "$IN_FILE" "$CONTAINER_NAME:/data/dump.rdb" || fail "Falha ao copiar o RDB pro container."
-    # Redis só carrega o RDB do disco na inicialização - reinicia o processo
-    # pra recarregar (o container continua de pé, "restart: unless-stopped"
-    # no compose sobe o redis-server de novo sozinho).
-    docker restart "$CONTAINER_NAME" || fail "Falha ao reiniciar o Redis pra recarregar o RDB restaurado."
-    ;;
-  *)
-    fail "Tipo de banco não suportado pra restauração: $DB_TYPE"
-    ;;
-esac
-
-step 100 "Restauração concluída"
-echo "__KORRELO_DBRESTORE_DONE__|success"
+exec node "$SCRIPT_DIR/backup-lib/restore-cli.cjs"

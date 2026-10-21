@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { DatabaseRestorer, DatabaseRestoreStatus, StartRestoreOptions } from "../domain/database-restorer";
+import { isProcessAlive, PROGRESS_STALE_MS, readBackupProgress } from "./backup-progress";
 
 const STEP_MARKER = "__KORRELO_DBRESTORE_STEP__";
 const DONE_MARKER = "__KORRELO_DBRESTORE_DONE__";
@@ -13,14 +14,25 @@ const STALE_THRESHOLD_MS = 30 * 60 * 1000;
 export class ScriptDatabaseRestorer implements DatabaseRestorer {
   private readonly logger = new Logger(ScriptDatabaseRestorer.name);
 
+  private get stateRoot(): string {
+    return process.env.KORRELO_STATE_DIR || path.join(os.homedir(), ".korrelo");
+  }
+
   private get stateDir(): string {
-    return path.join(os.homedir(), ".korrelo", "database-restore");
+    return path.join(this.stateRoot, "database-restore");
   }
 
   private logPath(projectId: string): string {
     return path.join(this.stateDir, `${projectId}.log`);
   }
 
+  private progressPath(projectId: string): string {
+    return path.join(this.stateDir, `${projectId}.progress.json`);
+  }
+
+  private get backupRoot(): string {
+    return process.env.BACKUP_DIR || path.join(os.homedir(), "korrelo-backups");
+  }
   private get repoDir(): string {
     return path.resolve(process.cwd(), "..", "..");
   }
@@ -50,6 +62,13 @@ export class ScriptDatabaseRestorer implements DatabaseRestorer {
         DB_PASSWORD: options.password ?? "",
         DB_NAME: options.databaseName ?? "",
         IN_FILE: options.backupFilePath,
+        // O backup de segurança (estado atual do banco) fica num lugar
+        // próprio e identificável - nunca é apagado pelo próprio restore.
+        KORRELO_PRE_RESTORE_DIR: path.join(this.backupRoot, "pre-restore"),
+        KORRELO_PROGRESS_FILE: this.progressPath(projectId),
+        KORRELO_JOB_ID: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        KORRELO_PROJECT_ID: projectId,
+        KORRELO_BACKUP_ROOT: this.backupRoot,
       },
     });
     child.unref();
@@ -71,6 +90,38 @@ export class ScriptDatabaseRestorer implements DatabaseRestorer {
       return { ...parsed, running: false };
     }
 
+    // Progresso do job (heartbeat do motor): enquanto ele atualiza, o
+    // restore está VIVO - um restore grande pode levar horas.
+    const progress = readBackupProgress(this.progressPath(projectId));
+    if (progress) {
+      const lastProgressAt = progress.lastProgressAt ?? 0;
+      const age = Date.now() - lastProgressAt;
+      const alive = isProcessAlive(progress.pid);
+
+      if (age <= PROGRESS_STALE_MS || alive) {
+        return {
+          ...parsed,
+          running: true,
+          bytesWritten: progress.bytesWritten,
+          startedAt: progress.startedAt,
+          lastProgressAt: lastProgressAt || null,
+        };
+      }
+
+      return {
+        ...parsed,
+        running: false,
+        done: true,
+        success: false,
+        errorMessage: "A restauração parou de responder.",
+        bytesWritten: progress.bytesWritten,
+        startedAt: progress.startedAt,
+        lastProgressAt: lastProgressAt || null,
+      };
+    }
+
+    // Sem arquivo de progresso (job iniciado antes desta versão): fallback
+    // pro comportamento antigo, baseado no mtime do log.
     const stats = fs.statSync(logPath);
     if (Date.now() - stats.mtimeMs > STALE_THRESHOLD_MS) {
       return {

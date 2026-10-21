@@ -78,6 +78,8 @@ export interface ProjectDatabaseDict {
   backupRestoreButton: string;
   backupStartError: string;
   backupAlreadyRunning: string;
+  backupLegacyBadge: string;
+  backupLegacyHint: string;
   restoreConfirmTitle: string;
   restoreConfirmBody: string;
   restoreConfirmButton: string;
@@ -181,8 +183,10 @@ export const projectDatabaseEn: ProjectDatabaseDict = {
   backupRestoreButton: "Restore",
   backupStartError: "Failed to start the backup.",
   backupAlreadyRunning: "A backup is already running for this project.",
+  backupLegacyBadge: "Not verified",
+  backupLegacyHint: "Made before backups had checksums, so it wasn't verified.",
   restoreConfirmTitle: "Restore this backup?",
-  restoreConfirmBody: "This replaces all data currently in this project's database with the contents of this backup. This can't be undone.",
+  restoreConfirmBody: "This replaces all data currently in this project's database with the contents of this backup. Before anything changes, a safety copy of the current data is saved.",
   restoreConfirmButton: "Restore, replacing current data",
   restoreRunningTitle: "Restoring...",
   restoreDoneTitle: "Restore complete",
@@ -284,8 +288,10 @@ export const projectDatabasePt: ProjectDatabaseDict = {
   backupRestoreButton: "Restaurar",
   backupStartError: "Falha ao iniciar o backup.",
   backupAlreadyRunning: "Já tem um backup rodando pra este projeto.",
+  backupLegacyBadge: "Não validado",
+  backupLegacyHint: "Feito antes dos backups terem checksum, então não foi verificado.",
   restoreConfirmTitle: "Restaurar esse backup?",
-  restoreConfirmBody: "Isso substitui todos os dados que já estão no banco deste projeto pelo conteúdo desse backup. Não pode ser desfeito.",
+  restoreConfirmBody: "Isso substitui todos os dados que já estão no banco deste projeto pelo conteúdo desse backup. Antes de mudar qualquer coisa, uma cópia de segurança dos dados atuais é salva.",
   restoreConfirmButton: "Restaurar, substituindo os dados atuais",
   restoreRunningTitle: "Restaurando...",
   restoreDoneTitle: "Restauração concluída",
