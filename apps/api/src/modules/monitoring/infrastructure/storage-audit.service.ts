@@ -50,7 +50,7 @@ export const defaultCommandRunner: CommandRunner = (command, args, options) =>
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 
-/** Converte "1.2GB", "500MB", "12.3 kB" em bytes. */
+/** Conversão de tamanho humano ("4.058GB", "0B", "1.2 MB") em bytes. */
 export function parseHumanSize(value: string): number {
   const text = String(value ?? "").trim().toLowerCase();
   const match = /^([0-9]*\.?[0-9]+)\s*([kmgtpe]?b)?$/.exec(text);
@@ -67,6 +67,112 @@ export function parseHumanSize(value: string): number {
     pb: 1024 ** 5,
   };
   return Math.round(amount * (multipliers[unit] ?? 1));
+}
+
+/** Parcelas do cache de build, como o `docker builder du` reporta. */
+export interface BuilderDu {
+  totalBytes: number | null;
+  sharedBytes: number | null;
+  privateBytes: number | null;
+  /** O que o builder DU chama de "Reclaimable" - NÃO é o que o prune vai tirar. */
+  reclaimableBytes: number | null;
+  /** true quando o output traz as entradas com Shared/Reclaimable (verbose). */
+  hasEntries: boolean;
+  /** Quantas entradas marcaram "Reclaimable: true". */
+  reclaimableEntries: number;
+}
+
+/**
+ * Parser do `docker builder du`.
+ *
+ * Formato resumido:
+ *   Shared:      4.058GB
+ *   Private:     6.573GB
+ *   Reclaimable: 4.009GB
+ *   Total:       10.63GB
+ *
+ * Formato verbose (entradas):
+ *   ID      RECLAIMABLE   SIZE   LAST ACCESSED
+ *   abc123  true          1.2GB  ...
+ *   ...     Shared: true
+ *
+ * IMPORTANTE: o "Reclaimable" do builder du é o que o builder CONSIDERA
+ * recuperável - mas o `docker system df` é quem diz o que está REALMENTE
+ * liberável agora (o cache compartilhado com imagens/builds atuais não sai).
+ */
+export function parseBuilderDu(output: string): BuilderDu {
+  const result: BuilderDu = {
+    totalBytes: null,
+    sharedBytes: null,
+    privateBytes: null,
+    reclaimableBytes: null,
+    hasEntries: false,
+    reclaimableEntries: 0,
+  };
+  if (!output) return result;
+
+  for (const rawLine of output.split("\n")) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // Entradas do formato verbose: "Shared: true" / "Reclaimable: true".
+    if (/^Shared:\s*(true|false)$/i.test(line)) {
+      result.hasEntries = true;
+      continue;
+    }
+    if (/^Reclaimable:\s*(true|false)$/i.test(line)) {
+      result.hasEntries = true;
+      if (/true/i.test(line)) result.reclaimableEntries += 1;
+      continue;
+    }
+
+    const match = /^(Shared|Private|Reclaimable|Total):\s*([0-9.]+\s*[KMGTPE]?B)$/i.exec(line);
+    if (!match) continue;
+    const bytes = parseHumanSize(match[2].replace(/\s+/g, ""));
+    const key = match[1].toLowerCase();
+    if (key === "shared") result.sharedBytes = bytes;
+    else if (key === "private") result.privateBytes = bytes;
+    else if (key === "reclaimable") result.reclaimableBytes = bytes;
+    else if (key === "total") result.totalBytes = bytes;
+  }
+  return result;
+}
+
+/** O que o `docker system df` diz sobre o cache de build. */
+export interface SystemDfBuildCache {
+  /** Tamanho total do cache. */
+  sizeBytes: number | null;
+  /** Bytes REALMENTE liberáveis agora (coluna RECLAIMABLE). */
+  reclaimableBytes: number | null;
+}
+
+/**
+ * Segunda fonte de verdade: `docker system df`.
+ *
+ * A linha do Build Cache é:
+ *   TYPE            TOTAL   ACTIVE   SIZE      RECLAIMABLE
+ *   Build Cache     42      0        10.63GB   0B
+ *
+ * A coluna RECLAIMABLE é o que o Docker afirma que pode ser removido sem
+ * afetar imagens/caches existentes - é ela que vale (e NÃO o total, nem o
+ * "Reclaimable" do builder du).
+ */
+export function parseSystemDfBuildCache(output: string): SystemDfBuildCache | null {
+  if (!output) return null;
+  for (const rawLine of output.split("\n")) {
+    const line = rawLine.trim();
+    if (!/^Build\s+Cache\b/i.test(line)) continue;
+    const parts = line.split(/\s+/);
+    // TYPE + TOTAL + ACTIVE + SIZE + RECLAIMABLE
+    const size = parts[parts.length - 2];
+    const reclaimable = parts[parts.length - 1];
+    if (!size || !reclaimable) continue;
+    return {
+      sizeBytes: parseHumanSize(size.replace(/\s+/g, "")),
+      reclaimableBytes: parseHumanSize(reclaimable.replace(/\s+/g, "")),
+    };
+  }
+  return null;
 }
 
 /** Tamanho de um diretório/arquivo em bytes (du -sb). */
@@ -240,21 +346,72 @@ export class StorageAuditService {
       }
     }
 
-    // Cache de build.
+    // Cache de build (BuildKit).
+    //
+    // Duas fontes de verdade:
+    //  - `docker builder du`   -> total, compartilhado, privado e o
+    //                             "Reclaimable" do builder;
+    //  - `docker system df`     -> o RECLAIMABLE real (o que pode sair sem
+    //                             afetar imagens/builds existentes).
+    //
+    // O que vale para "seguro para limpar" é o RECLAIMABLE do system df.
+    // O total do cache (10 GB) NÃO é espaço recuperável: ele é
+    // compartilhado/referenciado por imagens e builds atuais. Classificar o
+    // total como SAFE fazia o painel prometer ~11 GB que o prune nunca
+    // entregaria.
     const builderResult = await this.runCommand("docker", ["builder", "du"], { timeoutMs: DEFAULT_TIMEOUT_MS });
     if (builderResult.exitCode === 0) {
-      const bytes = this.parseBuilderDuBytes(builderResult.stdout);
+      const builderDu = parseBuilderDu(builderResult.stdout);
+      const systemDf = await this.readSystemDfBuildCache();
+
+      const reclaimableSource = systemDf ? "docker-system-df" : builderDu.reclaimableBytes !== null ? "builder-du" : null;
+      const reclaimableBytes = systemDf
+        ? systemDf.reclaimableBytes
+        : builderDu.reclaimableBytes;
+      const totalBytes =
+        builderDu.totalBytes ?? systemDf?.sizeBytes ?? 0;
+
+      // Divergência entre as duas fontes: fica VISÍVEL (não escondida).
+      let divergenceWarning: string | null = null;
+      if (
+        systemDf &&
+        builderDu.reclaimableBytes !== null &&
+        systemDf.reclaimableBytes !== builderDu.reclaimableBytes
+      ) {
+        divergenceWarning =
+          `Parte do cache é compartilhada/referenciada e não pode ser liberada sem afetar caches/imagens existentes ` +
+          `(docker builder du diz ${formatBytesForMessage(builderDu.reclaimableBytes)} reclaimable, ` +
+          `docker system df diz ${formatBytesForMessage(systemDf.reclaimableBytes)}).`;
+      }
+
+      const hasReclaimable = (reclaimableBytes ?? 0) > 0;
       items.push({
         id: "docker:builder-cache",
         category: "docker",
         label: "Cache de build (BuildKit)",
-        bytes,
-        classification: "SAFE_TO_CLEAN",
-        reason:
-          "Cache de camadas de build: regenerável (rebuilda). A limpeza preserva o espaço reservado e não toca em imagens/volumes.",
-        proposedAction: "docker-builder-cache",
-        command: STORAGE_ACTIONS["docker-builder-cache"].command,
+        // O que o item ocupa é o TOTAL; o que é recuperável é o reclaimable.
+        bytes: totalBytes,
+        // Para o "Seguro para limpar" conta só o que o Docker diz que sai.
+        safeBytes: hasReclaimable ? (reclaimableBytes ?? 0) : undefined,
+        classification: hasReclaimable ? "SAFE_TO_CLEAN" : "KEEP",
+        reason: hasReclaimable
+          ? `Cache de camadas de build: ${formatBytesForMessage(reclaimableBytes ?? 0)} realmente liberáveis ` +
+            `(de ${formatBytesForMessage(totalBytes)} no total). A limpeza preserva o espaço reservado e não toca em imagens/volumes.`
+          : `Cache de build total: ${formatBytesForMessage(totalBytes)}, mas o Docker não reporta nada liberável agora ` +
+            `(reclaimable 0B): o cache está sendo reutilizado ou compartilhado por imagens/builds existentes. ` +
+            `Removê-lo à força não é necessário.`,
+        // A ação só é oferecida quando há BENEFÍCIO REAL.
+        proposedAction: hasReclaimable ? "docker-builder-cache" : null,
+        command: hasReclaimable ? STORAGE_ACTIONS["docker-builder-cache"].command : null,
         detail: null,
+        breakdown: {
+          totalBytes,
+          sharedBytes: builderDu.sharedBytes,
+          privateBytes: builderDu.privateBytes,
+          reclaimableBytes,
+          reclaimableSource,
+          divergenceWarning,
+        },
       });
     }
 
@@ -338,21 +495,22 @@ export class StorageAuditService {
     return used;
   }
 
-  /** Soma dos bytes de uma linha "Shared"/"Private" do `docker builder du`. */
-  private parseBuilderDuBytes(output: string): number {
-    let total = 0;
-    for (const line of output.split("\n")) {
-      // Formato: "Shared:  1.2GB" / "Private: 300MB" / "Reclaimable: 900MB".
-      const match = /^\s*(Shared|Private|Reclaimable):\s+([0-9.]+\s*[A-Za-z]+)/i.exec(line);
-      if (!match) continue;
-      const bytes = parseHumanSize(match[2].replace(/\s+/g, ""));
-      // "Shared" e "Private" somam o total do cache; "Reclaimable" é um
-      // subconjunto - somar os três contaria o mesmo cache duas vezes.
-      if (match[1].toLowerCase() === "shared" || match[1].toLowerCase() === "private") {
-        total += bytes;
-      }
+  /**
+   * Segunda fonte de verdade: `docker system df` (a coluna RECLAIMABLE da
+   * linha "Build Cache").
+   *
+   * É o Docker dizendo o que pode sair AGORA sem afetar imagens/builds
+   * existentes. Se o comando falhar, devolve null (o chamador usa o
+   * builder du e registra a fonte).
+   */
+  private async readSystemDfBuildCache(): Promise<SystemDfBuildCache | null> {
+    try {
+      const result = await this.runCommand("docker", ["system", "df"], { timeoutMs: DEFAULT_TIMEOUT_MS });
+      if (result.exitCode !== 0) return null;
+      return parseSystemDfBuildCache(result.stdout);
+    } catch {
+      return null;
     }
-    return total;
   }
 
   // ---------------------------------------------------------------- korrelo
@@ -525,8 +683,6 @@ export class StorageAuditService {
 
     const retentionMs = 7 * 24 * 60 * 60 * 1000;
     const now = Date.now();
-    let oldBytes = 0;
-    let oldCount = 0;
 
     for (const name of names) {
       if (name === "current.json") continue;
@@ -570,22 +726,21 @@ export class StorageAuditService {
         });
         continue;
       }
-      oldBytes += bytes;
-      oldCount += 1;
-    }
-
-    if (oldCount > 0) {
+      // UM ITEM POR ARQUIVO (e nunca o diretório inteiro): a limpeza
+      // remove o ARQUIVO antigo, não a pasta - apagar a pasta levaria
+      // junto o current.json e o job em andamento.
       items.push({
-        id: "korrelo:self-update:old",
+        id: `korrelo:self-update:${name}`,
         category: "korrelo",
-        label: `Registros antigos do self-update (${oldCount} arquivo(s), mais de 7 dias)`,
-        bytes: oldBytes,
+        label: `Registro antigo do self-update ${name}`,
+        bytes,
+        safeBytes: bytes,
         classification: "SAFE_TO_CLEAN",
         reason:
-          "Registros de self-update já concluídos, com mais de 7 dias. O job atual e o em andamento são preservados.",
+          "Registro de self-update já concluído, com mais de 7 dias. O job atual e o em andamento são preservados.",
         proposedAction: "self-update-old-logs",
         command: STORAGE_ACTIONS["self-update-old-logs"].command,
-        detail: dir,
+        detail: path.join(dir, name),
       });
     }
     return items;
@@ -721,8 +876,28 @@ export class StorageAuditService {
   }
 }
 
+/** Formata bytes para as mensagens (sem arredondar o valor interno). */
+function formatBytesForMessage(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return "?";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value.toFixed(value >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
 function sumClassification(items: StorageItem[], classification: StorageClassification): number {
   return items
     .filter((item) => item.classification === classification)
-    .reduce((sum, item) => sum + item.bytes, 0);
+    .reduce(
+      (sum, item) =>
+        // Para "SAFE_TO_CLEAN" conta o que é REALMENTE liberável (o cache de
+        // build ocupa 10 GB, mas pode liberar só 0 B). Para as demais
+        // classificações, conta o espaço ocupado.
+        sum + (classification === "SAFE_TO_CLEAN" ? item.safeBytes ?? item.bytes : item.bytes),
+      0,
+    );
 }

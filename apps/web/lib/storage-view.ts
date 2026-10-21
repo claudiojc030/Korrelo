@@ -29,6 +29,15 @@ export interface StorageItemLike {
   proposedAction: string | null;
   command: string | null;
   detail: string | null;
+  /** Detalhamento de espaço (cache de build: total/compartilhado/privado/liberável). */
+  breakdown?: {
+    totalBytes: number;
+    sharedBytes: number | null;
+    privateBytes: number | null;
+    reclaimableBytes: number | null;
+    reclaimableSource: string | null;
+    divergenceWarning: string | null;
+  };
 }
 
 /**

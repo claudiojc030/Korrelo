@@ -52,6 +52,15 @@ export interface StorageDict {
   detailsReason: string;
   detailsCommand: string;
   detailsProtections: string;
+  /** Detalhamento de espaço (cache de build). */
+  breakdownTitle: string;
+  breakdownTotal: string;
+  breakdownShared: string;
+  breakdownPrivate: string;
+  breakdownReclaimable: string;
+  /** Aviso de divergência entre o espaço medido e o reportado. */
+  cleanSummaryDivergence: string;
+  cleanSummaryDivergenceHint: string;
   noAction: string;
   noItems: string;
   protectNotice: string;
@@ -117,6 +126,14 @@ export const storageEn: StorageDict = {
   detailsReason: "Why this classification",
   detailsCommand: "Command that would be used",
   detailsProtections: "Detected protections",
+  breakdownTitle: "Space breakdown",
+  breakdownTotal: "Total",
+  breakdownShared: "Shared",
+  breakdownPrivate: "Private",
+  breakdownReclaimable: "Available for safe cleanup",
+  cleanSummaryDivergence: "The measured free space and the reported removal don't match",
+  cleanSummaryDivergenceHint:
+    "Other activity on the host happened during the cleanup. The real measured values are shown.",
   noAction: "No action (protected)",
   noItems: "No items found.",
   protectNotice:
@@ -183,6 +200,14 @@ export const storagePt: StorageDict = {
   detailsReason: "Por que esta classificação",
   detailsCommand: "Comando que seria usado",
   detailsProtections: "Proteções detectadas",
+  breakdownTitle: "Detalhamento do espaço",
+  breakdownTotal: "Total",
+  breakdownShared: "Compartilhado",
+  breakdownPrivate: "Privado",
+  breakdownReclaimable: "Disponível para limpeza segura",
+  cleanSummaryDivergence: "O espaço livre medido e a remoção reportada não batem",
+  cleanSummaryDivergenceHint:
+    "Houve outra atividade no host durante a limpeza. Os valores reais medidos estão sendo mostrados.",
   noAction: "Sem ação (protegido)",
   noItems: "Nenhum item encontrado.",
   protectNotice:

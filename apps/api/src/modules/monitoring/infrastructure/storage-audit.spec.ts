@@ -10,7 +10,13 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { StorageAuditService, parseHumanSize, type CommandRunner } from "./storage-audit.service";
+import {
+  StorageAuditService,
+  parseBuilderDu,
+  parseHumanSize,
+  parseSystemDfBuildCache,
+  type CommandRunner,
+} from "./storage-audit.service";
 import { CleanupStorageUseCase } from "../application/cleanup-storage.use-case";
 import { STORAGE_ACTIONS, type StorageActionId } from "../domain/storage-audit";
 import type { ProjectRepository } from "../../projects/domain/project.repository";
@@ -286,8 +292,14 @@ describe("storage - auditoria (read-only) e proteções", () => {
 
     expect(overview.safeToCleanBytes).toBeGreaterThan(0);
     expect(overview.neverTouchBytes).toBeGreaterThan(0);
-    // A soma das classificações bate com o total dos itens.
-    const soma = overview.items.reduce((sum, item) => sum + item.bytes, 0);
+    // A soma das classificações bate com o total dos itens. Para
+    // "SAFE_TO_CLEAN" conta o que é REALMENTE liberável (safeBytes), que
+    // pode ser menor que o espaço ocupado (cache de build).
+    const soma = overview.items.reduce(
+      (sum, item) =>
+        sum + (item.classification === "SAFE_TO_CLEAN" ? item.safeBytes ?? item.bytes : item.bytes),
+      0,
+    );
     const porClassificacao =
       overview.safeToCleanBytes +
       overview.reviewBytes +
@@ -403,6 +415,338 @@ describe("storage - auditoria (read-only) e proteções", () => {
       expect(comando).not.toContain("volume prune");
     }
     expect(result.logEntry.failures.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * CACHE DE BUILD (BuildKit) - o caso real da VPS.
+ *
+ * `docker builder du` dizia 10.63 GB (4.058 shared + 6.573 private,
+ * "Reclaimable: 4.009GB") e o `docker system df` dizia Build Cache
+ * 10.63GB com Reclaimable 0B. O painel classificava os 10.63 GB inteiros
+ * como "SAFE TO CLEAN" e oferecia a limpeza - que não liberou nada.
+ */
+describe("storage - cache de build (BuildKit)", () => {
+  const BUILDER_DU_REAL = [
+    "Shared:      4.058GB",
+    "Private:     6.573GB",
+    "Reclaimable: 4.009GB",
+    "Total:       10.63GB",
+  ].join("\n");
+
+  const SYSTEM_DF_SEM_RECLAIMABLE = [
+    "TYPE            TOTAL      ACTIVE     SIZE      RECLAIMABLE",
+    "Images          12         2          8.5GB     4GB",
+    "Containers      5          0          100MB     0B",
+    "Local Volumes   3          0          2GB       1GB",
+    "Build Cache     42         0          10.63GB   0B",
+  ].join("\n");
+
+  const SYSTEM_DF_COM_RECLAIMABLE = [
+    "TYPE            TOTAL      ACTIVE     SIZE      RECLAIMABLE",
+    "Images          12         2          8.5GB     4GB",
+    "Build Cache     42         0          3GB       3GB",
+  ].join("\n");
+
+  it("A) parser do builder du: total, shared, private e reclaimable", () => {
+    const parsed = parseBuilderDu(BUILDER_DU_REAL);
+
+    expect(parsed.totalBytes).toBe(parseHumanSize("10.63GB"));
+    expect(parsed.sharedBytes).toBe(parseHumanSize("4.058GB"));
+    expect(parsed.privateBytes).toBe(parseHumanSize("6.573GB"));
+    expect(parsed.reclaimableBytes).toBe(parseHumanSize("4.009GB"));
+  });
+
+  it("A2) parser do builder du: entradas com Shared/Reclaimable true|false", () => {
+    const parsed = parseBuilderDu(
+      [
+        "ID                      RECLAIMABLE     SIZE      LAST ACCESSED",
+        "abc123                  true            1.2GB     2 days ago",
+        "def456                  false           800MB     3 days ago",
+        "Shared: true",
+        "Reclaimable: true",
+        "Reclaimable: false",
+      ].join("\n"),
+    );
+
+    expect(parsed.hasEntries).toBe(true);
+    expect(parsed.reclaimableEntries).toBe(1);
+  });
+
+  it("A3) parser do docker system df: a coluna RECLAIMABLE do Build Cache", () => {
+    const parsed = parseSystemDfBuildCache(SYSTEM_DF_SEM_RECLAIMABLE);
+
+    expect(parsed?.sizeBytes).toBe(parseHumanSize("10.63GB"));
+    expect(parsed?.reclaimableBytes).toBe(0);
+  });
+
+  it("B) system df com reclaimable 3GB -> o reclaimable é lido", () => {
+    const parsed = parseSystemDfBuildCache(SYSTEM_DF_COM_RECLAIMABLE);
+
+    expect(parsed?.reclaimableBytes).toBe(parseHumanSize("3GB"));
+  });
+
+  it("C) o cache compartilhado NUNCA entra automaticamente no SAFE_TO_CLEAN", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "korrelo-builder-"));
+    process.env.KORRELO_STATE_DIR = dir;
+    try {
+      const projects = { findAll: async () => [] } as unknown as ProjectRepository;
+      const runner: CommandRunner = async (command, args) => {
+        if (command === "df") {
+          return ok("Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/sda1 50000000 28000000 22000000 56% /");
+        }
+        if (command === "docker" && args[0] === "builder") return ok(BUILDER_DU_REAL);
+        if (command === "docker" && args[0] === "system" && args[1] === "df") {
+          return ok(SYSTEM_DF_SEM_RECLAIMABLE);
+        }
+        if (command === "docker" && args[0] === "images") return ok("");
+        if (command === "docker" && args[0] === "ps") return ok("");
+        if (command === "docker" && args[0] === "volume") return ok("");
+        if (command === "du") return ok("0\t/tmp");
+        return fail();
+      };
+      const audit = new StorageAuditService(projects, runner);
+
+      const overview = await audit.audit();
+      const cache = overview.items.find((item) => item.id === "docker:builder-cache");
+
+      // O TOTAL do cache é o que ele ocupa...
+      expect(cache?.bytes).toBe(parseHumanSize("10.63GB"));
+      // ...mas o que é realmente liberável é 0B -> NÃO é SAFE.
+      expect(cache?.classification).toBe("KEEP");
+      expect(cache?.proposedAction).toBeNull();
+      expect(cache?.command).toBeNull();
+      // E o "Safe to clean" do painel não pode incluir os 10.63 GB.
+      expect(overview.safeToCleanBytes).toBe(0);
+      expect(cache?.breakdown?.reclaimableBytes).toBe(0);
+      expect(cache?.breakdown?.reclaimableSource).toBe("docker-system-df");
+      // A divergência entre as duas fontes fica VISÍVEL.
+      expect(cache?.breakdown?.divergenceWarning).toContain("compartilhada");
+    } finally {
+      delete process.env.KORRELO_STATE_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("D) com reclaimable real (3GB), o valor liberável vira o SAFE e a ação aparece", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "korrelo-builder-"));
+    process.env.KORRELO_STATE_DIR = dir;
+    try {
+      const projects = { findAll: async () => [] } as unknown as ProjectRepository;
+      const runner: CommandRunner = async (command, args) => {
+        if (command === "df") {
+          return ok("Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/sda1 50000000 28000000 22000000 56% /");
+        }
+        if (command === "docker" && args[0] === "builder") return ok(BUILDER_DU_REAL);
+        if (command === "docker" && args[0] === "system" && args[1] === "df") {
+          return ok(SYSTEM_DF_COM_RECLAIMABLE);
+        }
+        if (command === "docker" && args[0] === "images") return ok("");
+        if (command === "docker" && args[0] === "ps") return ok("");
+        if (command === "docker" && args[0] === "volume") return ok("");
+        if (command === "du") return ok("0\t/tmp");
+        return fail();
+      };
+      const audit = new StorageAuditService(projects, runner);
+
+      const overview = await audit.audit();
+      const cache = overview.items.find((item) => item.id === "docker:builder-cache");
+
+      expect(cache?.classification).toBe("SAFE_TO_CLEAN");
+      expect(cache?.proposedAction).toBe("docker-builder-cache");
+      // O SAFE conta só o que é REALMENTE liberável (3GB), não os 10.63GB.
+      expect(cache?.breakdown?.reclaimableBytes).toBe(parseHumanSize("3GB"));
+      expect(overview.safeToCleanBytes).toBe(parseHumanSize("3GB"));
+    } finally {
+      delete process.env.KORRELO_STATE_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("E) o comando oferecido NUNCA é um prune forçado", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "korrelo-builder-"));
+    process.env.KORRELO_STATE_DIR = dir;
+    try {
+      const projects = { findAll: async () => [] } as unknown as ProjectRepository;
+      const runner: CommandRunner = async (command, args) => {
+        if (command === "df") return ok("Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/sda1 50000000 28000000 22000000 56% /");
+        if (command === "docker" && args[0] === "builder") return ok(BUILDER_DU_REAL);
+        if (command === "docker" && args[0] === "system" && args[1] === "df") {
+          return ok(SYSTEM_DF_COM_RECLAIMABLE);
+        }
+        if (command === "docker" && args[0] === "images") return ok("");
+        if (command === "docker" && args[0] === "ps") return ok("");
+        if (command === "docker" && args[0] === "volume") return ok("");
+        if (command === "du") return ok("0\t/tmp");
+        return fail();
+      };
+      const audit = new StorageAuditService(projects, runner);
+      const overview = await audit.audit();
+      const cache = overview.items.find((item) => item.id === "docker:builder-cache");
+
+      // Preserva o espaço reservado; nunca "-a" nem "system prune".
+      expect(cache?.command).toBe("docker builder prune -f --reserved-space 2GB");
+      expect(cache?.command).not.toContain("-a");
+      expect(cache?.command).not.toContain("system prune");
+    } finally {
+      delete process.env.KORRELO_STATE_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("F) nenhuma proteção mudou de classificação com a nova métrica", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "korrelo-builder-"));
+    process.env.KORRELO_STATE_DIR = dir;
+    try {
+      const projects = {
+        findAll: async () => [
+          { currentImage: "korrelo-mesatta:commit-atual", previousImage: "korrelo-mesatta:commit-anterior" },
+        ],
+      } as unknown as ProjectRepository;
+      const runner: CommandRunner = async (command, args) => {
+        if (command === "df") return ok("Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/sda1 50000000 28000000 22000000 56% /");
+        if (command === "docker" && args[0] === "builder") return ok(BUILDER_DU_REAL);
+        if (command === "docker" && args[0] === "system" && args[1] === "df") {
+          return ok(SYSTEM_DF_SEM_RECLAIMABLE);
+        }
+        if (command === "docker" && args[0] === "images") {
+          return ok(
+            [
+              "korrelo-mesatta:commit-atual\tabc\t1757MB",
+              "korrelo-mesatta:commit-anterior\tdef\t1757MB",
+            ].join("\n"),
+          );
+        }
+        if (command === "docker" && args[0] === "ps") return ok("");
+        if (command === "docker" && args[0] === "volume") return ok("uploads-data\nmesatta-mongo-data");
+        if (command === "du") return ok("0\t/tmp");
+        return fail();
+      };
+      const audit = new StorageAuditService(projects, runner);
+      const overview = await audit.audit();
+
+      // Imagens protegidas, volumes: tudo continua NEVER_TOUCH.
+      for (const item of overview.items) {
+        if (
+          item.id.startsWith("docker:image:") ||
+          item.id.startsWith("docker:volume:")
+        ) {
+          expect(item.classification).toBe("NEVER_TOUCH");
+        }
+      }
+    } finally {
+      delete process.env.KORRELO_STATE_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("storage - resumo da limpeza (mesma base antes/depois)", () => {
+  it("G) livre antes/depois e o espaço recuperado usam a MESMA fonte (df de /)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "korrelo-free-"));
+    process.env.KORRELO_STATE_DIR = dir;
+    try {
+      const projects = { findAll: async () => [] } as unknown as ProjectRepository;
+      // 20 GB livres -> 20 GB + 723 MB depois da limpeza.
+      const livreAntes = 20 * 1024 ** 3;
+      const livreDepois = livreAntes + 758_255_616;
+      // O df é lido pelo audit "before", pelo plan() do cleanFiles e pelo
+      // audit "after": a 3ª leitura é a de depois.
+      let leiturasDf = 0;
+      const runner: CommandRunner = async (command, args) => {
+        if (command === "df") {
+          leiturasDf += 1;
+          const livre = leiturasDf <= 2 ? livreAntes : livreDepois;
+          const total = 50 * 1024 ** 3;
+          return ok(
+            `Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/sda1 ${Math.floor(
+              total / 1024,
+            )} ${Math.floor((total - livre) / 1024)} ${Math.floor(livre / 1024)} 56% /`,
+          );
+        }
+        if (command === "docker" && args[0] === "builder") return ok("Total:       1GB");
+        if (command === "docker" && args[0] === "system" && args[1] === "df") return fail();
+        if (command === "docker" && args[0] === "images") return ok("");
+        if (command === "docker" && args[0] === "ps") return ok("");
+        if (command === "docker" && args[0] === "volume") return ok("");
+        if (command === "du") return ok("0\t/tmp");
+        return fail();
+      };
+      const audit = new StorageAuditService(projects, runner);
+      const cleanup = new CleanupStorageUseCase(audit, async () => ok("ok"));
+
+      const result = await cleanup.clean(["npm-cache"], "operador");
+
+      // O log carrega LIVRE antes e LIVRE depois (a mesma base).
+      expect(result.logEntry.freeBeforeBytes).toBeGreaterThan(0);
+      expect(result.logEntry.freeAfterBytes).toBeGreaterThan(result.logEntry.freeBeforeBytes);
+      // E o espaço recuperado é a diferença entre eles (coerente).
+      const esperado = result.logEntry.freeAfterBytes - result.logEntry.freeBeforeBytes;
+      expect(result.logEntry.bytesFreed).toBe(esperado);
+      // O valor antigo (723 MB) aparece como o espaço real recuperado.
+      expect(result.logEntry.bytesFreed).toBeGreaterThan(700 * 1024 * 1024);
+      expect(result.logEntry.bytesFreed).toBeLessThan(800 * 1024 * 1024);
+    } finally {
+      delete process.env.KORRELO_STATE_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("H) a divergência entre medido e reportado é sinalizada (sem fabricar reconciliação)", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "korrelo-free-"));
+    process.env.KORRELO_STATE_DIR = dir;
+    try {
+      // Um log de self-update VELHO (dentro da allowlist de paths): a ação
+      // de arquivo realmente o remove e reporta os bytes -> dá para
+      // comparar o medido com o reportado.
+      const selfUpdateDir = path.join(dir, "self-update");
+      fs.mkdirSync(selfUpdateDir, { recursive: true });
+      const antigo = path.join(selfUpdateDir, "upd-velho.log");
+      fs.writeFileSync(antigo, "x".repeat(1024 * 1024));
+      const passado = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      fs.utimesSync(antigo, passado, passado);
+
+      const projects = { findAll: async () => [] } as unknown as ProjectRepository;
+      let leiturasDf = 0;
+      const runner: CommandRunner = async (command, args) => {
+        if (command === "df") {
+          leiturasDf += 1;
+          // Na leitura "depois" o host GANHOU 5 GB por outra atividade.
+          const livre = leiturasDf <= 2 ? 20 * 1024 ** 3 : 25 * 1024 ** 3;
+          const total = 50 * 1024 ** 3;
+          return ok(
+            `Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/sda1 ${Math.floor(
+              total / 1024,
+            )} ${Math.floor((total - livre) / 1024)} ${Math.floor(livre / 1024)} 50% /`,
+          );
+        }
+        if (command === "docker" && args[0] === "builder") return ok("Total:       1GB");
+        if (command === "docker" && args[0] === "system" && args[1] === "df") return fail();
+        if (command === "docker" && args[0] === "images") return ok("");
+        if (command === "docker" && args[0] === "ps") return ok("");
+        if (command === "docker" && args[0] === "volume") return ok("");
+        if (command === "du") {
+          if ((args[1] ?? "").includes("self-update")) {
+            return ok(`${1024 * 1024}\t${args[1]}`);
+          }
+          return ok("0\t/tmp");
+        }
+        return fail();
+      };
+      const audit = new StorageAuditService(projects, runner);
+      const cleanup = new CleanupStorageUseCase(audit, async () => ok("ok"));
+
+      const result = await cleanup.clean(["self-update-old-logs"], "operador");
+
+      // Os números REAIS são mostrados (medido = 5 GB de espaço livre) e a
+      // divergência com o reportado fica sinalizada.
+      expect(result.logEntry.bytesFreed).toBe(5 * 1024 ** 3);
+      expect(result.logEntry.reportedBytesFreed).not.toBeNull();
+      expect(result.logEntry.measurementDiverged).toBe(true);
+    } finally {
+      delete process.env.KORRELO_STATE_DIR;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

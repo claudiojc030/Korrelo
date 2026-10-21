@@ -137,6 +137,16 @@ export interface StorageItem {
   label: string;
   /** Tamanho em bytes (0 quando não se sabe). */
   bytes: number;
+  /**
+   * Bytes que contam para a classificação SAFE_TO_CLEAN.
+   *
+   * O padrão é o próprio `bytes`, mas existe para os itens em que ocupar
+   * espaço e LIBERAR espaço são coisas diferentes: o cache de build ocupa
+   * 10 GB, mas só 0 B (ou o que o Docker disser) é realmente liberável.
+   * Sem essa distinção, o painel prometeria 10 GB de limpeza que o prune
+   * nunca entrega.
+   */
+  safeBytes?: number;
   classification: StorageClassification;
   /** Por que está nesta classificação. */
   reason: string;
@@ -146,6 +156,33 @@ export interface StorageItem {
   command: string | null;
   /** Detalhe livre (ex.: a tag da imagem, o path). */
   detail: string | null;
+  /**
+   * Detalhamento de um item com várias parcelas (o cache de build é o caso
+   * real: total, compartilhado, privado e o que é REALMENTE liberável).
+   */
+  breakdown?: StorageBreakdown;
+}
+
+/** Detalhamento de espaço de um item. */
+export interface StorageBreakdown {
+  /** Tamanho TOTAL ocupado. */
+  totalBytes: number;
+  /** Parcela compartilhada (referenciada por outros artefatos). */
+  sharedBytes: number | null;
+  /** Parcela privada (exclusiva deste item). */
+  privateBytes: number | null;
+  /**
+   * Bytes que o Docker diz que REALMENTE podem ser liberados agora.
+   *
+   * É o que o `docker system df` reporta como RECLAIMABLE - não o total do
+   * cache. Cache compartilhado/referenciado por imagens e builds atuais não
+   * sai com o prune.
+   */
+  reclaimableBytes: number | null;
+  /** De onde veio o número de reclaimable (a fonte de verdade). */
+  reclaimableSource: "docker-system-df" | "builder-du" | null;
+  /** Aviso de divergência entre `builder du` e `docker system df`. */
+  divergenceWarning: string | null;
 }
 
 export interface StorageCategorySummary {
@@ -200,8 +237,21 @@ export interface StorageCleanupLogEntry {
   /** Ação pedida (pode não ter sido executada). */
   requested: string[];
   items: number;
-  bytesBefore: number;
-  bytesAfter: number;
+  /**
+   * Espaço LIVRE do MESMO filesystem (/) antes e depois, em bytes.
+   *
+   * A mesma fonte (df) e o mesmo filesystem nos dois pontos: é o que torna
+   * "livre antes" e "livre depois" comparáveis. Sem isso, o painel mostrava
+   * "livre antes" (df) ao lado de "usado depois" (df) - números que não
+   * tinham relação nenhuma entre si.
+   */
+  freeBeforeBytes: number;
+  freeAfterBytes: number;
+  /** Espaço medido (freeAfter - freeBefore), na mesma base. */
   bytesFreed: number;
+  /** Soma do que as ações reportaram ter removido (null = nenhuma mediu). */
+  reportedBytesFreed: number | null;
+  /** true quando a medição e o relatório divergem (atividade externa). */
+  measurementDiverged: boolean;
   failures: string[];
 }

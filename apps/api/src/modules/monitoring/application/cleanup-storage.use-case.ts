@@ -41,6 +41,14 @@ const FILE_CLEANUP_ACTIONS: StorageActionId[] = [
   "temp-korrelo",
 ];
 
+/**
+ * Tolerância (bytes) entre o espaço medido no disco e o que as ações
+ * reportaram. Acima disso, o painel assume que houve OUTRA atividade no
+ * host durante a limpeza e mostra os dois números - sem fabricar
+ * reconciliação.
+ */
+const DIVERGENCE_TOLERANCE_BYTES = 64 * 1024 * 1024;
+
 @Injectable()
 export class CleanupStorageUseCase {
   private readonly logger = new Logger(CleanupStorageUseCase.name);
@@ -151,7 +159,26 @@ export class CleanupStorageUseCase {
       }
 
       const after = await this.audit.audit();
-      const bytesFreed = Math.max(0, before.usedBytes - after.usedBytes);
+
+      // ANTES x DEPOIS: o MESMO filesystem (/) e a MESMA fonte (df), em
+      // bytes, sem arredondar antes do cálculo.
+      //
+      // O bug antigo misturava bases: o painel mostrava "livre antes" (df)
+      // ao lado de "usado depois" (df) - daí "20 GB -> 26 GB" com 723 MB
+      // recuperados, números que não tinham relação entre si.
+      const freeBeforeBytes = before.freeBytes;
+      const freeAfterBytes = after.freeBytes;
+      const bytesFreed = Math.max(0, freeAfterBytes - freeBeforeBytes);
+
+      // O que as ações reportaram ter removido. Só serve de comparação se
+      // alguma ação consegue medir (as de comando não sabem).
+      const reported = results
+        .map((result) => result.bytesFreed)
+        .filter((value) => value > 0);
+      const reportedBytesFreed = reported.length > 0 ? reported.reduce((a, b) => a + b, 0) : null;
+      const measurementDiverged =
+        reportedBytesFreed !== null &&
+        Math.abs(bytesFreed - reportedBytesFreed) > DIVERGENCE_TOLERANCE_BYTES;
 
       const logEntry: StorageCleanupLogEntry = {
         at: new Date().toISOString(),
@@ -159,9 +186,11 @@ export class CleanupStorageUseCase {
         action: requested.length === 1 ? requested[0] : null,
         requested,
         items: results.length,
-        bytesBefore: before.usedBytes,
-        bytesAfter: after.usedBytes,
+        freeBeforeBytes,
+        freeAfterBytes,
         bytesFreed,
+        reportedBytesFreed,
+        measurementDiverged,
         failures,
       };
       this.appendLog(logEntry);

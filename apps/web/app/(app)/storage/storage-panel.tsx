@@ -27,6 +27,15 @@ interface StorageItem {
   proposedAction: string | null;
   command: string | null;
   detail: string | null;
+  /** Detalhamento de espaço (cache de build: total/compartilhado/privado/liberável). */
+  breakdown?: {
+    totalBytes: number;
+    sharedBytes: number | null;
+    privateBytes: number | null;
+    reclaimableBytes: number | null;
+    reclaimableSource: string | null;
+    divergenceWarning: string | null;
+  };
 }
 
 interface StorageAction {
@@ -77,6 +86,8 @@ export function StoragePanel() {
     failures: string[];
     freeBefore: number;
     freeAfter: number;
+    diverged: boolean;
+    reported: number | null;
   } | null>(null);
   const [classificationFilter, setClassificationFilter] = useState<Classification | "ALL">("ALL");
   const [categoryFilter, setCategoryFilter] = useState<StorageCategoryKey | "ALL">("ALL");
@@ -139,21 +150,31 @@ export function StoragePanel() {
       const body = (await res.json().catch(() => ({}))) as {
         bytesFreed?: number;
         results?: { action: string; executed: boolean; error: string | null }[];
-        logEntry?: { bytesBefore?: number; bytesAfter?: number };
+        logEntry?: {
+          freeBeforeBytes?: number;
+          freeAfterBytes?: number;
+          bytesFreed?: number;
+          reportedBytesFreed?: number | null;
+          measurementDiverged?: boolean;
+        };
       };
       if (!res.ok) {
         setError(s.cleanFailed);
         return;
       }
-      const overview = data?.overview;
+      // ANTES x DEPOIS: mesma base (espaço livre do mesmo filesystem),
+      // sempre com os valores do log - nunca com números misturados.
+      const log = body.logEntry;
       setSummary({
         items: body.results?.filter((item) => item.executed).length ?? 0,
-        freed: body.bytesFreed ?? 0,
+        freed: log?.bytesFreed ?? body.bytesFreed ?? 0,
         failures: (body.results ?? [])
           .filter((item) => item.error)
           .map((item) => `${item.action}: ${item.error}`),
-        freeBefore: overview?.freeBytes ?? 0,
-        freeAfter: body.logEntry?.bytesAfter ?? overview?.freeBytes ?? 0,
+        freeBefore: log?.freeBeforeBytes ?? 0,
+        freeAfter: log?.freeAfterBytes ?? 0,
+        diverged: log?.measurementDiverged === true,
+        reported: log?.reportedBytesFreed ?? null,
       });
       setConfirming(false);
       // Refaz a auditoria automaticamente depois da limpeza.
@@ -311,6 +332,13 @@ export function StoragePanel() {
               {s.cleanSummaryFailures}: {summary.failures.join(" · ")}
             </p>
           )}
+          {summary.diverged && (
+            <p className="mt-2 text-[12px] text-warning">
+              {s.cleanSummaryDivergence}:{" "}
+              {s.cleanSummaryDivergenceHint}
+              {summary.reported !== null && ` (${formatStorageBytes(summary.reported)})`}
+            </p>
+          )}
         </div>
       )}
 
@@ -434,6 +462,37 @@ export function StoragePanel() {
                   </button>
                   {open && (
                     <div className="space-y-2 border-t border-border-subtle bg-background px-4 py-3">
+                      {item.breakdown && (
+                        <div>
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                            {s.breakdownTitle}
+                          </p>
+                          <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                            {(
+                              [
+                                [s.breakdownTotal, item.breakdown.totalBytes],
+                                [s.breakdownShared, item.breakdown.sharedBytes],
+                                [s.breakdownPrivate, item.breakdown.privateBytes],
+                                [s.breakdownReclaimable, item.breakdown.reclaimableBytes],
+                              ] as [string, number | null][]
+                            ).map(([label, value]) => (
+                              <div key={label} className="rounded-md bg-surface px-2.5 py-1.5">
+                                <p className="text-[10.5px] uppercase tracking-wide text-muted-foreground">
+                                  {label}
+                                </p>
+                                <p className="mt-0.5 font-mono text-[12px] text-foreground">
+                                  {value === null ? "-" : formatStorageBytes(value)}
+                                </p>
+                              </div>
+                            ))}
+                          </div>
+                          {item.breakdown.divergenceWarning && (
+                            <p className="mt-2 text-[12px] text-warning">
+                              {item.breakdown.divergenceWarning}
+                            </p>
+                          )}
+                        </div>
+                      )}
                       <div>
                         <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
                           {s.detailsPath}
