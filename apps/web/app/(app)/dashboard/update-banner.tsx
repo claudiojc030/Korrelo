@@ -4,7 +4,7 @@ import { useState } from "react";
 import { ArrowUpCircle, Check, Copy } from "lucide-react";
 import { apiFetch } from "../../../lib/api-client";
 import { useTranslation } from "../../../lib/i18n/locale-provider";
-import { UpdateProgressModal } from "./update-progress-modal";
+import { useSelfUpdateModal } from "../../../lib/self-update-modal-store";
 
 interface UpdateStatus {
   checked: boolean;
@@ -24,10 +24,9 @@ pm2 restart ecosystem.config.js`;
 
 export function UpdateBanner({ status }: { status: UpdateStatus }) {
   const { t } = useTranslation();
+  const { show } = useSelfUpdateModal();
   const [copied, setCopied] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const [updating, setUpdating] = useState(false);
-  const [updateJobId, setUpdateJobId] = useState<string | undefined>(undefined);
   const [startError, setStartError] = useState<string | null>(null);
 
   if (!status.updateAvailable) {
@@ -62,9 +61,9 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
         setStartError(t.dashboard.updateAlreadyRunning);
       }
       // Mesmo se já estava rodando, abre o painel pra acompanhar o progresso
-      // em vez de deixar o usuário sem feedback nenhum.
-      setUpdateJobId(data.jobId);
-      setUpdating(true);
+      // em vez de deixar o usuário sem feedback nenhum. O modal tem UM só
+      // dono (o provider), então não duplica overlay.
+      show(data.jobId);
     } catch {
       setStartError(t.dashboard.updateStartFailed);
     }
@@ -118,8 +117,6 @@ export function UpdateBanner({ status }: { status: UpdateStatus }) {
           </div>
         </div>
       )}
-
-      {updating && <UpdateProgressModal jobId={updateJobId} onClose={() => setUpdating(false)} />}
     </div>
   );
 }

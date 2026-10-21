@@ -11,11 +11,116 @@ import {
   type SelfUpdateJobRepository,
 } from "../domain/self-update-job.entity";
 import { formatDirtyWorkingTreeMessage, inspectWorkingTree } from "../../../infrastructure/git-working-tree";
+import { sanitizeSelfUpdateLog } from "./self-update-log-sanitizer";
 import { DeployQueueService } from "../../projects/infrastructure/deploy-queue.service";
 import { FileSelfUpdateJobRepository } from "./file-self-update-job.repository";
 
 const STEP_MARKER = "__KORRELO_UPDATE_STEP__";
 const DONE_MARKER = "__KORRELO_UPDATE_DONE__";
+
+/**
+ * SINAIS DE ESPERA POR RECURSOS (lidos do log que o runner já grava).
+ *
+ * O resource guard do rollout (scripts/rollout/lib/resource-guard.cjs)
+ * escreve, a cada tentativa:
+ *
+ *   [rollout] <label>: aguardando recursos
+ *   swap em uso=601 MB (limite 512)
+ *   load average (1min)=3.19 (limite 1.5)
+ *   tentativa=1
+ *   próxima checagem em 10s
+ *
+ * e, quando o host normaliza:
+ *
+ *   [rollout] <label>: recursos normalizados após 30s
+ *
+ * O operador precisa distinguir "TRAVADO" de "AGUARDANDO": inferimos o
+ * estado comparando as duas últimas ocorrências no log. NADA é inventado:
+ * os detalhes mostrados são exatamente os que o executor mediu.
+ *
+ * O executor NÃO é alterado - isto é só leitura do log já persistido.
+ */
+const WAITING_MARKER = "aguardando recursos";
+const NORMALIZED_MARKER = "recursos normalizados";
+const ATTEMPT_PATTERN = /^tentativa=(\d+)$/;
+const NEXT_RETRY_PATTERN = /próxima checagem em (\d+)s/;
+
+export interface ResourceWaitSignal {
+  /** true quando a ÚLTIMA sinalização foi de espera (normalização é mais antiga). */
+  waiting: boolean;
+  /** Linhas de detalhe da espera (as medições do executor). */
+  details: string[] | null;
+  /** "próxima checagem em Ns" -> N. */
+  nextRetryInSeconds: number | null;
+  /** Número da tentativa. */
+  attempt: number | null;
+}
+
+/**
+ * Infere a espera por recursos a partir do log do runner.
+ *
+ * Regra: vale a ÚLTIMA sinalização. Se "aguardando recursos" é mais recente
+ * que "recursos normalizados", o executor está esperando. Se um NOVO stage
+ * começou depois, o job volta a "running" (o guard só escreve
+ * "normalizados" quando o host normaliza, mas um stage novo também
+ * significa que o rollout avançou).
+ */
+export function detectResourceWait(log: string): ResourceWaitSignal {
+  const empty: ResourceWaitSignal = {
+    waiting: false,
+    details: null,
+    nextRetryInSeconds: null,
+    attempt: null,
+  };
+  if (!log) return empty;
+
+  const lines = log.split("\n");
+  let waitIndex = -1;
+  let normalizedIndex = -1;
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.includes(WAITING_MARKER)) waitIndex = i;
+    else if (line.includes(NORMALIZED_MARKER)) normalizedIndex = i;
+  }
+
+  if (waitIndex < 0) return empty;
+  // A normalização (ou um stage novo) é mais recente que a espera.
+  if (normalizedIndex > waitIndex) return empty;
+
+  // Um NOVO stage depois da espera significa que o rollout avançou (o guard
+  // foi satisfied e o build começou): não está mais esperando.
+  for (let i = waitIndex + 1; i < lines.length; i += 1) {
+    if (lines[i].startsWith(STEP_MARKER)) return empty;
+  }
+
+  // Coleta o bloco de detalhes da espera (até a linha "tentativa=").
+  const details: string[] = [];
+  let attempt: number | null = null;
+  let nextRetryInSeconds: number | null = null;
+  for (let i = waitIndex + 1; i < lines.length; i += 1) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    if (line.startsWith("[")) break; // começa outro bloco do log
+    const attemptMatch = ATTEMPT_PATTERN.exec(line);
+    if (attemptMatch) {
+      attempt = Number.parseInt(attemptMatch[1], 10);
+      continue;
+    }
+    const retryMatch = NEXT_RETRY_PATTERN.exec(line);
+    if (retryMatch) {
+      nextRetryInSeconds = Number.parseInt(retryMatch[1], 10);
+      continue;
+    }
+    details.push(line);
+  }
+
+  return {
+    waiting: true,
+    details: details.length > 0 ? details : null,
+    nextRetryInSeconds: Number.isFinite(nextRetryInSeconds) ? nextRetryInSeconds : null,
+    attempt: Number.isFinite(attempt) ? attempt : null,
+  };
+}
 
 /**
  * Self-update do KORRELO - Wave 3: DESACOPLADO.
@@ -190,7 +295,9 @@ export class ScriptSelfUpdater implements SelfUpdater {
 
   async getJobLog(id: string): Promise<string> {
     const repo = this.jobs as FileSelfUpdateJobRepository;
-    return repo.readLog(id);
+    // O log é sanitizado ANTES de sair da API (a view também filtra, mas o
+    // dado que trafega já vem limpo).
+    return sanitizeSelfUpdateLog(repo.readLog(id));
   }
 
   /**
@@ -267,14 +374,21 @@ export class ScriptSelfUpdater implements SelfUpdater {
     // não tem progresso gravado.
     const percent = job.progress > 0 ? job.progress : parsed.percent;
     const label = job.currentStage ?? parsed.label ?? "";
+    // A espera por recursos é inferida do log que o runner já grava: nada
+    // novo é persistido e o executor não muda.
+    const wait = detectResourceWait(log);
     const status: SelfUpdateStatus = {
       running: this.isJobActive(job) && this.isRunnerAlive(job),
       percent: parsed.done ? 100 : percent,
       label,
       done: parsed.done || ["completed", "failed", "interrupted"].includes(job.status),
       success: parsed.done ? parsed.success : job.status === "completed" ? true : null,
-      errorMessage: parsed.errorMessage ?? job.failureReason ?? undefined,
-      log,
+      errorMessage: sanitizeSelfUpdateLog(
+        parsed.errorMessage ?? job.failureReason ?? "",
+      ).trim() || undefined,
+      // O log que vai para a UI é sanitizado AQUI (no backend): nenhum
+      // segredo trafega em direção ao frontend.
+      log: sanitizeSelfUpdateLog(log),
       jobId: job.id,
       jobStatus: job.status,
       currentStage: job.currentStage ?? parsed.label ?? null,
@@ -283,6 +397,17 @@ export class ScriptSelfUpdater implements SelfUpdater {
       previousBranch: job.previousBranch,
       recoveryStatus: job.recoveryStatus,
       interrupted: job.status === "interrupted",
+      // Observabilidade (novo): o operador vê se está EXECUTANDO ou
+      // AGUARDANDO recursos, e há quanto tempo.
+      waiting: wait.waiting,
+      waitingDetails: wait.details
+        ? wait.details.map((detail) => sanitizeSelfUpdateLog(detail))
+        : null,
+      nextRetryInSeconds: wait.nextRetryInSeconds,
+      startedAt: job.startedAt,
+      finishedAt: job.finishedAt,
+      progress: parsed.done ? 100 : percent,
+      lastMessage: job.lastMessage,
     };
     return status;
   }

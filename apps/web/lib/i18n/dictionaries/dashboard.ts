@@ -77,6 +77,23 @@ export interface DashboardDict {
   updateStageLabel: string;
   updatePreviousVersion: string;
   updateCandidateVersion: string;
+  /** Observabilidade do self-update (estado, etapa, tempo e atividade). */
+  updateStateLabel: string;
+  updateStateRunning: string;
+  updateStateWaiting: string;
+  updateStateSuccess: string;
+  updateStateFailed: string;
+  updateWaitingTitle: string;
+  updateWaitingSubtitle: string;
+  updateWaitingNextRetry: string;
+  updateElapsedLabel: string;
+  updateActivityTitle: string;
+  updateActivityEmpty: string;
+  updateReloadDashboard: string;
+  updateFailedStageLabel: string;
+  updateDurationLabel: string;
+  /** Nomes amigáveis das etapas do rollout. */
+  updateStages: Record<string, string>;
 }
 
 export const dashboardEn: DashboardDict = {
@@ -144,7 +161,7 @@ export const dashboardEn: DashboardDict = {
   updateStartFailed: "Couldn't start the update.",
   updateRestartingTitle: "Restarting the server...",
   updateRestartingSubtitle: "This can take a few seconds. The page will reload automatically.",
-  updateDoneTitle: "Update complete!",
+  updateDoneTitle: "Update completed successfully",
   updateDoneSubtitle: "Reloading the page...",
   updateFailedTitle: "Update failed",
   updateLogLabel: "Process log",
@@ -157,6 +174,48 @@ export const dashboardEn: DashboardDict = {
   updateStageLabel: "Stage",
   updatePreviousVersion: "Previous version",
   updateCandidateVersion: "Updating to",
+  updateStateLabel: "State",
+  updateStateRunning: "RUNNING",
+  updateStateWaiting: "WAITING",
+  updateStateSuccess: "SUCCESS",
+  updateStateFailed: "FAILED",
+  updateWaitingTitle: "Waiting for VPS resources",
+  updateWaitingSubtitle:
+    "The update is not stuck - it's waiting for the host to free up resources before it can continue.",
+  updateWaitingNextRetry: "Next check in",
+  updateElapsedLabel: "Elapsed time",
+  updateActivityTitle: "Recent activity",
+  updateActivityEmpty: "No activity yet.",
+  updateReloadDashboard: "Reload dashboard",
+  updateFailedStageLabel: "Failed at",
+  updateDurationLabel: "Duration",
+  updateStages: {
+    preflight: "Checking the update",
+    lock: "Blocking concurrent updates",
+    "worker-drain": "Pausing new deploys",
+    "git-check": "Checking the working tree",
+    "resource-preflight": "Measuring host resources",
+    "snapshot-before": "Protecting project state",
+    "core-backup": "Backing up the Core",
+    "git-update": "Updating the code",
+    "artifacts-snapshot": "Snapshotting Core artifacts",
+    install: "Installing dependencies",
+    "worktree-check": "Checking the install",
+    "toolchain-check": "Validating the build toolchain",
+    "build-shared": "Building shared packages",
+    "build-api": "Building the API",
+    "build-web": "Building the dashboard",
+    "web-assets": "Copying web assets",
+    migration: "Applying Core migrations",
+    permissions: "Fixing Core file permissions",
+    "pm2-restart": "Restarting Korrelo",
+    "health-core": "Checking health",
+    "snapshot-after": "Verifying the projects",
+    "compare-projects": "Confirming the projects didn't change",
+    "git-verify": "Verifying the final commit",
+    "worker-release": "Releasing the deploy worker",
+    complete: "Done",
+  },
 };
 
 export const dashboardPt: DashboardDict = {
@@ -224,7 +283,7 @@ export const dashboardPt: DashboardDict = {
   updateStartFailed: "Não foi possível iniciar a atualização.",
   updateRestartingTitle: "Reiniciando o servidor...",
   updateRestartingSubtitle: "Isso pode levar alguns segundos. A página vai recarregar sozinha.",
-  updateDoneTitle: "Atualização concluída!",
+  updateDoneTitle: "Atualização concluída com sucesso",
   updateDoneSubtitle: "Recarregando a página...",
   updateFailedTitle: "Falha na atualização",
   updateLogLabel: "Log do processo",
@@ -238,4 +297,46 @@ export const dashboardPt: DashboardDict = {
   updateStageLabel: "Etapa",
   updatePreviousVersion: "Versão anterior",
   updateCandidateVersion: "Atualizando para",
+  updateStateLabel: "Estado",
+  updateStateRunning: "EXECUTANDO",
+  updateStateWaiting: "AGUARDANDO",
+  updateStateSuccess: "CONCLUÍDO",
+  updateStateFailed: "FALHOU",
+  updateWaitingTitle: "Aguardando recursos da VPS",
+  updateWaitingSubtitle:
+    "A atualização não está travada - está esperando o host liberar recursos para poder continuar.",
+  updateWaitingNextRetry: "Próxima checagem em",
+  updateElapsedLabel: "Tempo decorrido",
+  updateActivityTitle: "Atividade recente",
+  updateActivityEmpty: "Nenhuma atividade ainda.",
+  updateReloadDashboard: "Recarregar painel",
+  updateFailedStageLabel: "Falhou em",
+  updateDurationLabel: "Duração",
+  updateStages: {
+    preflight: "Verificando atualização",
+    lock: "Bloqueando atualizações concorrentes",
+    "worker-drain": "Pausando novos deploys",
+    "git-check": "Conferindo o working tree",
+    "resource-preflight": "Medindo os recursos do host",
+    "snapshot-before": "Protegendo o estado dos projetos",
+    "core-backup": "Backup do Core",
+    "git-update": "Atualizando código",
+    "artifacts-snapshot": "Guardando os artefatos do Core",
+    install: "Instalando dependências",
+    "worktree-check": "Conferindo a instalação",
+    "toolchain-check": "Validando a toolchain de build",
+    "build-shared": "Compilando pacotes compartilhados",
+    "build-api": "Compilando API",
+    "build-web": "Compilando painel",
+    "web-assets": "Copiando arquivos do painel",
+    migration: "Aplicando migrations do Core",
+    permissions: "Ajustando permissões do Core",
+    "pm2-restart": "Reiniciando Korrelo",
+    "health-core": "Verificando saúde",
+    "snapshot-after": "Verificando projetos",
+    "compare-projects": "Confirmando que projetos não mudaram",
+    "git-verify": "Verificando o commit final",
+    "worker-release": "Liberando o worker de deploy",
+    complete: "Concluído",
+  },
 };

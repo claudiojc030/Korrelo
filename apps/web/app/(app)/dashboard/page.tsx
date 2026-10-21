@@ -5,6 +5,7 @@ import { MetricTile } from "./metric-tile";
 import { MetricsHistoryChart } from "./metrics-history-chart";
 import { OnboardingChecklist } from "./onboarding-checklist";
 import { UpdateBanner } from "./update-banner";
+import { SelfUpdateWatcher } from "./self-update-watcher";
 import { TierBadge } from "./tier-badge";
 import { authHeaderServer } from "../../../lib/auth-cookie-server";
 import { getRequestHostServer } from "../../../lib/get-request-host-server";
@@ -113,6 +114,11 @@ export default async function DashboardPage() {
       </div>
 
       {updateStatus && <UpdateBanner status={updateStatus} />}
+
+      {/* Dono único do modal do self-update: reabre sozinho se o update
+          estiver em andamento (ou tiver acabado de acabar) - o update roda
+          detached e sobrevive ao reload da página. */}
+      <SelfUpdateWatcher />
 
       <OnboardingChecklist
         githubConnected={githubStatus?.connected ?? null}
