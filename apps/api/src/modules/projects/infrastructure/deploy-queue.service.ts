@@ -510,10 +510,18 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
     // máxima: nunca é reduzida pra "cabar" espaço de build).
     let stagingReservationMb = 0;
     let productionReservedMb = 0;
+    let productionLimitMb = 0;
+    let productionContainerName: string | null = null;
     try {
       const reservation = await this.deployProject.estimateMemoryReservation(job.projectId);
       stagingReservationMb = reservation.stagingLimitMb;
+      productionLimitMb = reservation.productionLimitMb;
       productionReservedMb = await this.sumProductionReservation();
+      // Container de produção do projeto: o consumo ATUAL dele é medido
+      // (somente leitura) para o guard contar só o HEADROOM, não o limite
+      // inteiro - MemAvailable já desconta o que ele usa hoje.
+      const project = await this.projectRepository.findById(job.projectId);
+      productionContainerName = project?.containerName ?? null;
     } catch (error) {
       this.logger.warn(
         `[deploy] não foi possível estimar a reserva de memória do projeto ${job.projectId}: ${(error as Error).message}`,
@@ -524,6 +532,8 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
       activeBuilds: 0,
       stagingReservationMb,
       productionReservedMb,
+      productionLimitMb,
+      productionContainerName,
     });
     this.lastPreflight = { ...(preflight.metrics as unknown as Record<string, number | boolean | null>) };
 

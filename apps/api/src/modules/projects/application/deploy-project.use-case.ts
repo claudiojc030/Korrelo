@@ -318,7 +318,12 @@ export class DeployProjectUseCase {
       if (!project.skipStagingTest) {
         await this.setStage(job, "staging-start", context);
         const hostWait = await this.resourcePreflight.waitForSafeHost({
-          requiredMemoryMb: plan.productionLimitMb,
+          // A política é a MESMA do preflight da fila: requisito base do
+          // build (1024) + o HEADROOM da produção (limite - uso atual) +
+          // margem + staging. MemAvailable já desconta o consumo atual, por
+          // isso o limite inteiro da produção não é somado de novo.
+          productionLimitMb: plan.productionLimitMb,
+          productionContainerName: project.containerName,
           requiredDiskMb: undefined,
           stagingReservationMb: plan.stagingLimitMb,
           log: (message) => this.deployLogger.log("staging-start", context, message),

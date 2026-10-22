@@ -3,6 +3,7 @@ import * as os from "node:os";
 import { readFileSync } from "node:fs";
 import { runCommand } from "../../../infrastructure/command-runner";
 import {
+  computeBuildMemoryRequirementMb,
   evaluateHostResources,
   readBuildThresholds,
   readHostResources,
@@ -39,6 +40,12 @@ export interface PreflightMetrics {
   requiredDiskMb: number;
   /** Memória que os containers de PRODUÇÃO já reservam (intocável). */
   productionReservedMb: number;
+  /** Limite do container de produção do projeto (diagnóstico). */
+  productionLimitMb: number;
+  /** Consumo ATUAL da produção em MB (null = não foi possível medir). */
+  productionUsageMb: number | null;
+  /** Requisito final de MemAvailable (mesma política da espera do job). */
+  requiredHostMemoryMb: number;
   /** Memória que o container de teste vai reservar. */
   stagingReservationMb: number;
   /** Memória realmente disponível para o build. */
@@ -105,10 +112,15 @@ export class ResourcePreflightService {
   async waitForSafeHost(options: {
     timeoutSec?: number;
     intervalSec?: number;
+    /** RAM que o BUILD precisa por si (requisito base, o mesmo do check()). */
     requiredMemoryMb?: number;
     requiredDiskMb?: number;
     /** Memória que o container de teste vai reservar (sobe junto do build). */
     stagingReservationMb?: number;
+    /** Limite do container de produção do projeto (entra como HEADROOM). */
+    productionLimitMb?: number;
+    /** Container de produção cujo consumo atual é medido (somente leitura). */
+    productionContainerName?: string | null;
     sleep?: (ms: number) => Promise<void>;
     now?: () => number;
     log?: (message: string) => void;
@@ -119,6 +131,7 @@ export class ResourcePreflightService {
     const now = options.now ?? (() => Date.now());
     const log = options.log ?? ((message: string) => this.logger.warn(message));
     const thresholds = readBuildThresholds();
+    const buildRequirementMb = options.requiredMemoryMb ?? DEFAULT_BUILD_MEMORY_REQUIREMENT_MB;
 
     const startedAt = now();
     let attempts = 0;
@@ -130,18 +143,24 @@ export class ResourcePreflightService {
         provider: this.resourceProvider,
         measureSwapActivity: true,
       });
+      // Consumo ATUAL da produção: MemAvailable já o desconta. Só o que
+      // ainda pode crescer (headroom) precisa continuar livre.
+      const productionUsageMb = await this.measureProductionUsageMb(options.productionContainerName);
+      const requirement = computeBuildMemoryRequirementMb({
+        hostFloorMb: thresholds.memAvailableMb,
+        buildRequirementMb,
+        safetyMarginMb: DEFAULT_BUILD_SAFETY_MARGIN_MB,
+        stagingReservationMb: options.stagingReservationMb ?? 0,
+        productionLimitMb: options.productionLimitMb ?? 0,
+        productionUsageMb,
+      });
       const evaluation = evaluateHostResources({
         resources,
         thresholds: {
           ...thresholds,
-          // O PISO do host (1200 MB) e a necessidade do build são um PISO,
-          // nunca um teto: o build só começa com o MAIOR dos dois.
-          memAvailableMb: Math.max(
-            thresholds.memAvailableMb,
-            (options.requiredMemoryMb ?? 0) +
-              DEFAULT_BUILD_SAFETY_MARGIN_MB +
-              (options.stagingReservationMb ?? 0),
-          ),
+          // PISO do host e necessidade do build continuam um PISO, nunca
+          // um teto (ver computeBuildMemoryRequirementMb).
+          memAvailableMb: requirement.requiredMb,
           diskFreeMb: options.requiredDiskMb ?? thresholds.diskFreeMb,
         },
       });
@@ -176,24 +195,33 @@ export class ResourcePreflightService {
   /**
    * Verifica se há headroom para um build + container de teste.
    *
-   * PRIORIDADE: a produção existente. O cálculo é:
+   * PRIORIDADE: a produção existente. O cálculo é (ver
+   * computeBuildMemoryRequirementMb - a MESMA política de waitForSafeHost):
    *
-   *   memória livre real (os containers de produção JÁ estão descontados)
-   *     − margem de segurança
-   *     − reserva do container de teste (que vai subir junto do build)
-   *   = memória disponível para o build
+   *   headroom da produção = consumo atual já descontado do MemAvailable;
+   *     só o que ela ainda pode crescer precisa continuar livre;
+   *   + requisito do build (ou o headroom, o que for maior)
+   *   + margem de segurança
+   *   + reserva do container de teste
    *
    * Se não sobrar, o build NÃO começa. A produção nunca é reduzida,
    * parada ou reiniciada pra "cabar" espaço.
    */
   async check(params: {
+    /** RAM que o BUILD precisa por si (requisito base). */
     requiredMemoryMb?: number;
     requiredDiskMb?: number;
     activeBuilds?: number;
     /** Memória que o container de teste vai reservar. */
     stagingReservationMb?: number;
-    /** Soma dos limites dos containers de produção já rodando. */
+    /** Soma dos limites dos containers de produção já rodando (diagnóstico). */
     productionReservedMb?: number;
+    /** Limite do container de produção do projeto (entra como HEADROOM). */
+    productionLimitMb?: number;
+    /** Consumo atual da produção medido pelo chamador (null = desconhecido). */
+    productionUsageMb?: number | null;
+    /** Container de produção cujo consumo é medido (somente leitura). */
+    productionContainerName?: string | null;
     /** Informa se o Docker responde (evita a sonda real - usado nos testes). */
     dockerReachable?: boolean;
   }): Promise<PreflightResult> {
@@ -231,6 +259,9 @@ export class ResourcePreflightService {
       requiredMemoryMb,
       requiredDiskMb,
       productionReservedMb,
+      productionLimitMb: params.productionLimitMb ?? 0,
+      productionUsageMb: null,
+      requiredHostMemoryMb: 0,
       stagingReservationMb,
       availableForBuildMb,
     };
@@ -248,29 +279,43 @@ export class ResourcePreflightService {
     // validado no rollout do Core. Uma VPS saturada NÃO deve começar um
     // build: é exatamente o que derrubou o Mesatta no incidente.
     //
-    // FÓRMULA FINAL da memória (o piso é um PISO, nunca um teto):
+    // FÓRMULA FINAL (a MESMA de waitForSafeHost, ver
+    // computeBuildMemoryRequirementMb):
     //
-    //   memRequired = max(
-    //       1200 MB                      <- piso de segurança do host
-    //                                      (mesmo valor do Core, validado
-    //                                       em produção)
-    //       requiredMemoryMb + 256 MB    <- o build precisa da memória do
-    //                    (margem)         container + margem de segurança
-    //              + stagingReservation  <- e da reserva do container de
-    //                                      teste que sobe junto do build
+    //   headroom = usoConhecido
+    //       ? max(0, productionLimit - productionUsage)   <- produção só
+    //       : productionLimit                             <- fallback
+    //   required = max(
+    //       1200 MB                                       <- piso do host
+    //       max(requiredMemoryMb, headroom) + 256 MB      <- build OU headroom
+    //         + stagingReservationMb                      <- reserva do teste
     //   )
     //
-    //   bloqueia se memAvailable < memRequired
+    // MemAvailable já desconta o consumo atual: somar o limite inteiro da
+    // produção contaria esse consumo duas vezes.
+    // bloqueia se memAvailable < required
     // ------------------------------------------------------------------
     const hostThresholds = readBuildThresholds();
     const hostResources = await readHostResources({
       provider: this.resourceProvider,
       measureSwapActivity: true,
     });
-    const memRequiredMb = Math.max(
-      hostThresholds.memAvailableMb,
-      requiredMemoryMb + DEFAULT_BUILD_SAFETY_MARGIN_MB + stagingReservationMb,
-    );
+    const productionUsageMb =
+      params.productionUsageMb !== undefined
+        ? params.productionUsageMb
+        : await this.measureProductionUsageMb(params.productionContainerName);
+    const requirement = computeBuildMemoryRequirementMb({
+      hostFloorMb: hostThresholds.memAvailableMb,
+      buildRequirementMb: requiredMemoryMb,
+      safetyMarginMb: DEFAULT_BUILD_SAFETY_MARGIN_MB,
+      stagingReservationMb,
+      productionLimitMb: params.productionLimitMb ?? 0,
+      productionUsageMb,
+    });
+    const memRequiredMb = requirement.requiredMb;
+    metrics.requiredHostMemoryMb = memRequiredMb;
+    metrics.productionUsageMb = productionUsageMb;
+    metrics.productionLimitMb = params.productionLimitMb ?? 0;
     const hostEvaluation = evaluateHostResources({
       resources: hostResources,
       thresholds: { ...hostThresholds, memAvailableMb: memRequiredMb },
@@ -308,6 +353,24 @@ export class ResourcePreflightService {
     }
 
     return { ok: true, reason: null, metrics };
+  }
+
+  /**
+   * Consumo atual (MB) do container de produção - SOMENTE LEITURA
+   * (`docker stats`). Devolve null quando não há como medir; quem chama
+   * cai no fallback conservador (headroom = limite inteiro).
+   *
+   * NUNCA inicia, para ou altera um container.
+   */
+  private async measureProductionUsageMb(containerName?: string | null): Promise<number | null> {
+    if (!containerName) return null;
+    const measure = this.resourceProvider.getContainerMemoryUsageMb;
+    if (!measure) return null;
+    try {
+      return await measure.call(this.resourceProvider, [containerName]);
+    } catch {
+      return null;
+    }
   }
 
   /** Swap total/livre. Em Linux vem do /proc/meminfo; fora disso, 0/0. */

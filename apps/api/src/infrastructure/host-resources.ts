@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import * as os from "node:os";
+import { runCommand } from "./command-runner";
 
 /**
  * MÉTRICAS DE RECURSO DO HOST (lado da API).
@@ -63,6 +64,12 @@ export interface HostResourceProvider {
   getDiskFreeMb(): Promise<number | null>;
   getSwapActivity(options?: { sampleMs?: number }): Promise<SwapActivity>;
   getMemoryPressure(): Promise<MemoryPressure>;
+  /**
+   * Consumo REAL (MB) dos containers informados, lido com `docker stats`
+   * (somente leitura, fora dos cgroups). `null` = não foi possível medir -
+   * quem consome deve cair no fallback conservador, nunca assumir zero.
+   */
+  getContainerMemoryUsageMb?(containerNames: string[]): Promise<number | null>;
 }
 
 export interface HostResourceCheck {
@@ -155,6 +162,35 @@ const sleepDefault = (ms: number): Promise<void> =>
     timer.unref?.();
   });
 
+/**
+ * Converte a coluna de uso do `docker stats` em MB.
+ *
+ * Formato típico: "123.4MiB / 1.5GiB" (o limite depois da barra é ignorado -
+ * aqui interessa o consumo real). Aceita B, KiB/MiB/GiB (1024) e kB/MB/GB
+ * (1000). Devolve null quando o formato não é reconhecido.
+ */
+export function parseDockerMemoryUsageMb(raw: string): number | null {
+  const usage = raw.split("/")[0]?.trim() ?? "";
+  const match = /^([0-9]+(?:[.,][0-9]+)?)\s*([KMGTP]?i?B)$/i.exec(usage);
+  if (!match) return null;
+  const value = Number.parseFloat(match[1].replace(",", "."));
+  if (!Number.isFinite(value)) return null;
+  const unit = match[2].toLowerCase();
+  const power = unit.startsWith("k")
+    ? 1
+    : unit.startsWith("m")
+      ? 2
+      : unit.startsWith("g")
+        ? 3
+        : unit.startsWith("t")
+          ? 4
+          : unit.startsWith("p")
+            ? 5
+            : 0;
+  const base = unit.includes("i") ? 1024 : 1000;
+  return Math.round((value * Math.pow(base, power)) / 1024 / 1024);
+}
+
 /** Provider real (Linux). */
 export const realHostResourceProvider: HostResourceProvider = {
   async getMemInfo() {
@@ -207,6 +243,31 @@ export const realHostResourceProvider: HostResourceProvider = {
       return { available: false, someAvg10: null, fullAvg10: null };
     }
   },
+  async getContainerMemoryUsageMb(containerNames: string[]) {
+    if (containerNames.length === 0) return 0;
+    try {
+      const result = await runCommand(
+        "docker",
+        ["stats", "--no-stream", "--format", "{{.Name}}\t{{.MemUsage}}", ...containerNames],
+        { timeoutMs: 10_000 },
+      );
+      if (result.timedOut || result.exitCode !== 0) return null;
+      const lines = result.stdout.trim().split("\n").filter(Boolean);
+      // Menos linhas do que containers = algum não existe (ou o Docker
+      // omitiu). Sem o dado completo, o resultado é "desconhecido".
+      if (lines.length < containerNames.length) return null;
+      let total = 0;
+      for (const line of lines) {
+        const [name, usage] = line.split("\t");
+        const mb = parseDockerMemoryUsageMb(usage ?? "");
+        if (!name || mb === null) return null;
+        total += mb;
+      }
+      return Math.round(total);
+    } catch {
+      return null;
+    }
+  },
 };
 
 /**
@@ -225,6 +286,8 @@ export function safeHostResourceProvider(
     diskFreeMb?: number;
     swapActivity?: SwapActivity;
     memoryPressure?: MemoryPressure;
+    /** Consumo REAL dos containers de produção (null = desconhecido). */
+    containerMemoryUsageMb?: number | null;
   } = {},
 ): HostResourceProvider {
   const values = {
@@ -236,6 +299,7 @@ export function safeHostResourceProvider(
     diskFreeMb: 20 * 1024,
     swapActivity: { available: true, swapInDelta: 0, swapOutDelta: 0 } as SwapActivity,
     memoryPressure: { available: true, someAvg10: 0, fullAvg10: 0 } as MemoryPressure,
+    containerMemoryUsageMb: null as number | null,
     ...overrides,
   };
   return {
@@ -258,6 +322,9 @@ export function safeHostResourceProvider(
     },
     async getMemoryPressure() {
       return values.memoryPressure;
+    },
+    async getContainerMemoryUsageMb() {
+      return values.containerMemoryUsageMb;
     },
   };
 }
@@ -386,6 +453,79 @@ export function evaluateHostResources({
         ? "recursos dentro dos limites"
         : failed.map((check) => `${check.name}: ${check.detail}`).join("; "),
     checks,
+  };
+}
+
+/**
+ * REQUISITO DE MEMÓRIA DO BUILD (política ÚNICA, compartilhada).
+ *
+ * Usado tanto pelo preflight da fila (`check`) quanto pela espera antes do
+ * build (`waitForSafeHost`) - os dois NÃO podem discordar sobre o mesmo
+ * estado do host.
+ *
+ * POR QUE O HEADROOM E NÃO O LIMITE:
+ * `MemAvailable` (de /proc/meminfo) já é a memória livre DEPOIS do consumo
+ * atual dos containers. Somar o limite inteiro da produção por cima disso
+ * conta o consumo dela duas vezes. O que a produção ainda pode consumir é
+ * só o headroom (limite - uso); é isso que precisa continuar livre.
+ *
+ * O `max(buildRequirement, headroom)` mantém as duas reservas que disputam
+ * a MESMA memória livre sem somá-las: o build precisa da sua própria RAM e
+ * a produção pode crescer até o limite. Vale a maior, somada à margem de
+ * segurança e à reserva do container de teste.
+ *
+ * Quando o uso real é DESCONHECIDO (docker stats falhou, container sumiu,
+ * métrica não injetada), o headroom vira o limite inteiro - o
+ * comportamento conservador anterior. Nunca assume consumo zero.
+ */
+export interface BuildMemoryRequirementParams {
+  /** Piso de segurança do host (nunca menor que isso). */
+  hostFloorMb: number;
+  /** RAM que o build precisa por si (requisito base). */
+  buildRequirementMb: number;
+  /** Margem de segurança mantida livre durante o build. */
+  safetyMarginMb: number;
+  /** Reserva do container de teste que sobe junto do build. */
+  stagingReservationMb: number;
+  /** Limite do container de produção do projeto. */
+  productionLimitMb: number;
+  /** Consumo ATUAL da produção (null = desconhecido). */
+  productionUsageMb: number | null;
+}
+
+export interface BuildMemoryRequirement {
+  requiredMb: number;
+  /** Quanto a produção ainda pode crescer dentro do limite. */
+  productionHeadroomMb: number;
+  /** true quando o uso real estava disponível. */
+  usageKnown: boolean;
+  /** Qual parcela mandou na conta (diagnóstico). */
+  basis: "host-floor" | "build" | "production-headroom";
+}
+
+export function computeBuildMemoryRequirementMb(
+  params: BuildMemoryRequirementParams,
+): BuildMemoryRequirement {
+  const usage = params.productionUsageMb;
+  const usageKnown = typeof usage === "number" && Number.isFinite(usage) && usage >= 0;
+  const limit = Math.max(0, params.productionLimitMb);
+
+  const productionHeadroomMb = usageKnown ? Math.max(0, limit - (usage as number)) : limit;
+
+  const base = Math.max(params.buildRequirementMb, productionHeadroomMb);
+  const reservation = base + params.safetyMarginMb + params.stagingReservationMb;
+  const requiredMb = Math.max(params.hostFloorMb, reservation);
+
+  return {
+    requiredMb,
+    productionHeadroomMb,
+    usageKnown,
+    basis:
+      reservation < params.hostFloorMb
+        ? "host-floor"
+        : productionHeadroomMb >= params.buildRequirementMb
+          ? "production-headroom"
+          : "build",
   };
 }
 

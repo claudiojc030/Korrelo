@@ -90,7 +90,10 @@ export class PreviewProjectDeployUseCase {
     });
     const hostResources = await readHostResources({ measureSwapActivity: false });
     const preflight = await this.preflight.check({
-      requiredMemoryMb: plan.productionLimitMb,
+      // Mesma política do deploy real: requisito base do build + HEADROOM da
+      // produção (limite - uso atual). MemAvailable já desconta o consumo.
+      productionLimitMb: plan.productionLimitMb,
+      productionContainerName: project.containerName,
       requiredDiskMb: undefined,
       stagingReservationMb: plan.stagingLimitMb,
       productionReservedMb: 0,
