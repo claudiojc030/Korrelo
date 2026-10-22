@@ -23,6 +23,7 @@
 
 require("dotenv/config");
 const { PrismaClient } = require("@prisma/client");
+const fsSync = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 
@@ -31,6 +32,78 @@ const { backupProjects } = require("../../../scripts/backup-lib/project-backup.c
 const { pruneOldBackups } = require("../../../scripts/backup-lib/retention.cjs");
 const { runProcess } = require("../../../scripts/backup-lib/process-runner.cjs");
 const fileLib = require("../../../scripts/backup-lib/backup-file.cjs");
+
+/**
+ * Credencial do banco gerenciado: cifrada em repouso no Core.
+ *
+ * O backup diario lia o Prisma direto (o caminho da API passa pelo
+ * repositorio, que descriptografa). Sem descriptografar aqui, a senha
+ * CIFRADA ia parar no argv do mongodump e o backup falhava com
+ * AuthenticationFailed/SCRAM-SHA-256.
+ *
+ * Usa o MESMO mecanismo oficial do caminho manual (EnvVarCipher +
+ * resolveDatabaseCredential, compilados em apps/api/dist) - nenhum
+ * algoritmo de crypto duplicado aqui.
+ */
+function loadCredentialSupport() {
+  const cryptoDir = path.join(__dirname, "..", "dist", "infrastructure", "crypto");
+  const cipherPath = path.join(cryptoDir, "env-var-cipher.js");
+  const helperPath = path.join(cryptoDir, "resolve-database-credential.js");
+  if (!fsSync.existsSync(cipherPath) || !fsSync.existsSync(helperPath)) {
+    throw new Error(
+      "O Core precisa estar compilado para o backup diario (npm run build): " +
+        "o modulo oficial de criptografia nao foi encontrado em " +
+        cryptoDir +
+        ". Sem ele a senha cifrada chegaria ao mongodump.",
+    );
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { EnvVarCipher } = require(cipherPath);
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { decryptManagedDatabaseCredentials } = require(helperPath);
+  return { EnvVarCipher, decryptManagedDatabaseCredentials };
+}
+
+/**
+ * Descriptografa as credenciais dos bancos gerenciados (em memoria).
+ * O valor em texto puro nao vai para log, manifesto nem arquivo.
+ */
+function decryptDatabaseCredentials(projects, support) {
+  const { EnvVarCipher, decryptManagedDatabaseCredentials } = support;
+  const cipher = new EnvVarCipher();
+  const debug = process.env.BACKUP_DEBUG === "1";
+
+  // Flags de diagnostico calculadas sobre o valor ORIGINAL (cifrado ou
+  // legado) e sobre o resultado - sem nunca imprimir o valor.
+  const flags = new Map();
+  if (debug) {
+    for (const project of projects) {
+      for (const db of project.managedDatabases || []) {
+        flags.set(
+          `${project.id}:${db.type}`,
+          `passwordEncrypted=${String(db.password || "").startsWith("enc:v1:")} ` +
+            `hasPassword=${Boolean(db.password)}`,
+        );
+      }
+    }
+  }
+
+  const decrypted = decryptManagedDatabaseCredentials(projects, cipher);
+
+  if (debug) {
+    for (const project of decrypted) {
+      for (const db of project.managedDatabases || []) {
+        const info = flags.get(`${project.id}:${db.type}`) || "";
+        console.log(
+          `[backup-debug] project=${project.id} db=${db.type} ${info} ` +
+            `passwordDecrypted=${Boolean(db.password)}`,
+        );
+      }
+    }
+  }
+
+  return decrypted;
+}
 
 const BACKUP_ROOT = process.env.BACKUP_DIR || path.join(os.homedir(), "korrelo-backups");
 const RETENTION_DAYS = Number(process.env.BACKUP_RETENTION_DAYS || 7);
@@ -61,7 +134,10 @@ async function backupCoreDatabase(destDir) {
 }
 
 async function backupManagedDatabases(prisma, destDir) {
-  const projects = await prisma.project.findMany({ include: { managedDatabases: true } });
+  const rows = await prisma.project.findMany({ include: { managedDatabases: true } });
+  // A senha guardada esta CIFRADA: e preciso descriptografar ANTES de
+  // entregar o dump (ver decryptDatabaseCredentials).
+  const projects = decryptDatabaseCredentials(rows, loadCredentialSupport());
   const { failures } = await backupProjects(projects, {
     destDir,
     backupRoot: BACKUP_ROOT,

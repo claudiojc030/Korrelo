@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../../../infrastructure/prisma/prisma.service";
 import { EnvVarCipher } from "../../../infrastructure/crypto/env-var-cipher";
+import { resolveDatabaseCredential } from "../../../infrastructure/crypto/resolve-database-credential";
 import { ManagedDatabase, type DatabaseType } from "../domain/managed-database.entity";
 import type { ManagedDatabaseRepository } from "../domain/managed-database.repository";
 
@@ -76,9 +77,12 @@ export class PrismaManagedDatabaseRepository implements ManagedDatabaseRepositor
       row.type as DatabaseType,
       row.serviceName,
       row.username,
-      row.password ? this.cipher.decrypt(row.password) : row.password,
+      // Mesma normalizacao usada pelo backup diario (ver
+      // resolveDatabaseCredential): a credencial gravada e cifrada em
+      // repouso e devolvida em texto puro.
+      resolveDatabaseCredential(row.password, this.cipher),
       row.databaseName,
-      row.connectionString ? this.cipher.decrypt(row.connectionString) : row.connectionString,
+      resolveDatabaseCredential(row.connectionString, this.cipher),
       row.envVarKey,
       row.persistent,
       row.memoryLimitMb,
