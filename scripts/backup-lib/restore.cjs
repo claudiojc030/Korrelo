@@ -201,7 +201,9 @@ async function restoreDatabase(options) {
     projectId = null,
     serviceName = null,
     progressFile = null,
-    runProcess = runProcess,
+    // Default precisa de outro nome: `runProcess = runProcess` cairia na
+    // TDZ do próprio binding desestruturado.
+    runProcess: runProcessImpl = runProcess,
     dumpFn = dumpDatabase,
     onLog = () => {},
     onStep = () => {},
@@ -275,7 +277,7 @@ async function restoreDatabase(options) {
       serviceName,
       jobId: `${jobId}-pre`,
       lockAlreadyHeld: true,
-      runProcess,
+      runProcess: runProcessImpl,
       onLog: log,
       inactivityTimeoutMs,
       maxTimeoutMs,
@@ -310,7 +312,7 @@ async function restoreDatabase(options) {
 
     for (const spec of commands) {
       const stdinPath = spec.stdinPath === "FILE" ? inFile : spec.stdinPath;
-      const result = await runProcess({
+      const result = await runProcessImpl({
         command: spec.command,
         args: spec.args,
         env: { ...spec.env, ...(extraEnv || {}) },

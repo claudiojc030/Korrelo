@@ -219,7 +219,12 @@ async function dumpDatabase(options) {
     backupRoot = null,
     writeManifest = true,
     lockAlreadyHeld = false,
-    runProcess = runProcess,
+    // O default NÃO pode referenciar o próprio binding desestruturado
+    // (`runProcess = runProcess`): o valor padrão é avaliado no escopo do
+    // binding novo, que ainda está em TDZ -> "Cannot access 'runProcess'
+    // before initialization". O nome local é outro e o default aponta para
+    // o runProcess REAL importado no módulo.
+    runProcess: runProcessImpl = runProcess,
     onLog = () => {},
     inactivityTimeoutMs = undefined,
     maxTimeoutMs = undefined,
@@ -292,7 +297,7 @@ async function dumpDatabase(options) {
     } else if (dbType === "redis") {
       // Redis é em duas etapas: SAVE (dentro do container) + cp do RDB.
       const saveSpec = buildRedisSaveCommand({ containerName, password });
-      const saveResult = await runProcess({
+      const saveResult = await runProcessImpl({
         command: saveSpec.command,
         args: saveSpec.args,
         env: { ...saveSpec.env, ...(extraEnv || {}) },
@@ -307,7 +312,7 @@ async function dumpDatabase(options) {
       }
 
       commandSpec = buildRedisCopyCommand({ containerName, outFile: tempPath });
-      const copyResult = await runProcess({
+      const copyResult = await runProcessImpl({
         command: commandSpec.command,
         args: commandSpec.args,
         env: { ...commandSpec.env, ...(extraEnv || {}) },
@@ -341,7 +346,7 @@ async function dumpDatabase(options) {
     }
 
     if (dbType !== "redis") {
-      const result = await runProcess({
+      const result = await runProcessImpl({
         command: commandSpec.command,
         args: commandSpec.args,
         env: { ...commandSpec.env, ...(extraEnv || {}) },
@@ -460,7 +465,9 @@ async function dumpUploads(options) {
     containerName,
     outDir,
     jobId = randomJobId(),
-    runProcess = runProcess,
+    // Default precisa de outro nome: `runProcess = runProcess` cairia na
+    // TDZ do próprio binding desestruturado.
+    runProcess: runProcessImpl = runProcess,
     onLog = () => {},
     stderrLimit = undefined,
     inactivityTimeoutMs = undefined,
@@ -476,7 +483,7 @@ async function dumpUploads(options) {
   fileLib.removeQuietly(tempDir);
 
   const spec = buildUploadsCopyCommand({ containerName, outDir: tempDir });
-  const result = await runProcess({
+  const result = await runProcessImpl({
     command: spec.command,
     args: spec.args,
     env: spec.env,
@@ -556,7 +563,9 @@ async function dumpCoreDatabase(options) {
     sqliteFile = null,
     jobId = randomJobId(),
     reason = "cron",
-    runProcess = runProcess,
+    // Default precisa de outro nome: `runProcess = runProcess` cairia na
+    // TDZ do próprio binding desestruturado.
+    runProcess: runProcessImpl = runProcess,
     onLog = () => {},
     writeManifest = true,
     inactivityTimeoutMs = undefined,
@@ -584,7 +593,7 @@ async function dumpCoreDatabase(options) {
         args: [sqliteFile, `.backup '${tempPath}'`],
         env: { ...process.env },
       };
-      const backupResult = await runProcess({
+      const backupResult = await runProcessImpl({
         command: backupSpec.command,
         args: backupSpec.args,
         env: backupSpec.env,
@@ -605,7 +614,7 @@ async function dumpCoreDatabase(options) {
         }
       } else {
         // Integridade: o backup do Core precisa passar no integrity_check.
-        const checkResult = await runProcess({
+        const checkResult = await runProcessImpl({
           command: "sqlite3",
           args: [tempPath, "PRAGMA integrity_check;"],
           env: { ...process.env },
@@ -623,7 +632,7 @@ async function dumpCoreDatabase(options) {
     } else if (databaseUrl.startsWith("postgres")) {
       const spec = buildCorePostgresDumpCommand({ databaseUrl });
       secrets.push(databaseUrl);
-      const result = await runProcess({
+      const result = await runProcessImpl({
         command: spec.command,
         args: spec.args,
         env: spec.env,
