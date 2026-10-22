@@ -14,7 +14,18 @@ import { SHARED_NETWORK } from "./docker-compose-file-builder";
 const execFile = promisify(execFileCallback);
 
 const PROMOTE_TIMEOUT_MS = 120_000;
-const STAGING_TIMEOUT_MS = 15 * 60 * 1000;
+/**
+ * Timeout (ms) da subida + build do container de TESTE.
+ *
+ * Era 15min (900s). No Mesatta o build passou disso e foi morto durante
+ * "Linting and checking validity of types ..." - não era erro de
+ * compilação, era o limite. 30min dá folga pro build lento em VPS pequena
+ * sem tornar o timeout infinito (o comando continua sendo abortado).
+ *
+ * Vale SÓ para o staging: promoção, remoção do staging e prune têm
+ * constantes próprias abaixo e não são afetadas.
+ */
+const STAGING_TIMEOUT_MS = 30 * 60 * 1000;
 const REMOVE_STAGING_TIMEOUT_MS = 30_000;
 const PRUNE_TIMEOUT_MS = 60_000;
 
@@ -158,8 +169,9 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
         "app_staging",
       ]);
       const { stdout, stderr } = await execFile(build.command, build.args, {
-        // 15min: exportar a imagem pro storage do Docker pode ser lento numa
-        // VPS pequena sob carga (I/O de disco), 5min matava builds legítimos.
+        // 30min: exportar a imagem pro storage do Docker pode ser lento numa
+        // VPS pequena sob carga (I/O de disco) e o build inclui instalação de
+        // dependências + lint/typecheck do projeto.
         cwd: config.projectPath,
         timeout: STAGING_TIMEOUT_MS,
       });
