@@ -23,3 +23,15 @@ export function getProjectSecretsDir(projectId: string): string {
 export function getProjectSecretsPath(projectId: string): string {
   return path.join(getProjectSecretsDir(projectId), ".env.korrelo");
 }
+
+/**
+ * Arquivo de ambiente EXCLUSIVO do container de TESTE.
+ *
+ * Contém apenas as variáveis que o projeto declarou com o prefixo
+ * `KORRELO_STAGING_` (o prefixo é removido aqui). Fica no mesmo diretório
+ * seguro (fora do contexto de build) e é passado como SEGUNDO `env_file`
+ * só do serviço `app_staging` - a produção nunca lê este arquivo.
+ */
+export function getProjectStagingSecretsPath(projectId: string): string {
+  return path.join(getProjectSecretsDir(projectId), ".env.korrelo.staging");
+}

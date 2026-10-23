@@ -1,5 +1,5 @@
 export type DeployStatus = "running" | "success" | "failed";
-export type DeployTrigger = "manual" | "webhook";
+export type DeployTrigger = "manual" | "webhook" | "staging";
 
 export class DeployRecord {
   constructor(

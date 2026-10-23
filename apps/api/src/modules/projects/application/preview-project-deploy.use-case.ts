@@ -12,6 +12,7 @@ import {
   type ContainerTruth,
 } from "../infrastructure/docker-container-inspector";
 import { decideStagingHealthTimeout } from "../domain/staging-config";
+import { STAGING_DEPLOY_ENV_VALUE } from "../domain/staging-config";
 
 /** Token do inspetor de container (injetável nos testes). */
 export const CONTAINER_INSPECTOR = Symbol("CONTAINER_INSPECTOR");
@@ -125,7 +126,8 @@ export class PreviewProjectDeployUseCase {
           "ele conecta no banco de produção. O Korrelo NÃO roda migration nenhuma nesse banco e " +
           "sobe o staging com --no-deps (nunca inicia/recria o banco), mas o PRÓPRIO app pode " +
           "rodar migrations/trabalho de fundo ao subir - isso não é controlável pelo Korrelo. " +
-          "Use envs de staging (prefixo STAGING_) para desativar workers/cron no container de teste.",
+          "O staging recebe KORRELO_DEPLOY_ENV=staging e pode usar isso para desligar " +
+          "workers/cron/pollers; variáveis KORRELO_STAGING_* também só chegam ao teste.",
       );
     }
     warnings.push(
@@ -200,6 +202,8 @@ export class PreviewProjectDeployUseCase {
         // De onde veio o limite: configuração do projeto ou rateio automático.
         memoryLimitSource: plan.stagingLimitSource,
         memoryLimitApplied: plan.stagingLimitApplied,
+        // Identificação exclusiva do container de teste.
+        deployEnv: STAGING_DEPLOY_ENV_VALUE,
         // Timeout da espera de health do container de TESTE.
         healthTimeoutSeconds: stagingHealthTimeout.seconds,
         healthTimeoutSource: stagingHealthTimeout.source,

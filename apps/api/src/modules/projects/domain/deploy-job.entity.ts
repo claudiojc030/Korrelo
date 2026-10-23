@@ -29,7 +29,7 @@ export type DeployJobStage =
   | "cleanup"
   | "complete";
 
-export type DeployJobTrigger = "manual" | "webhook";
+export type DeployJobTrigger = "manual" | "webhook" | "staging";
 
 export class DeployJob {
   constructor(

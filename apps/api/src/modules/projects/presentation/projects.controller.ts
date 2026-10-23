@@ -303,6 +303,26 @@ export class ProjectsController {
     return this.listDeployRecords.execute(id, offset ? Number(offset) : 0);
   }
 
+  /**
+   * STAGING-ONLY (opcional): builda, sobe SÓ o container de teste, roda o
+   * health, registra o resultado e remove o container. Não promove, não
+   * altera currentImage/previousImage e não reinicia a produção.
+   *
+   * O fluxo padrão (`POST :id/deploy`) continua com promoção automática.
+   */
+  @Post(":id/deploy-staging")
+  @HttpCode(202)
+  async deployStagingOnly(@Param("id") id: string) {
+    const project = await this.getProject.execute(id);
+    const { job, created } = await this.deployQueue.enqueue({
+      projectId: project.id,
+      commitSha: null,
+      branch: project.deployBranch,
+      trigger: "staging",
+    });
+    return { ok: true, jobId: job.id, status: job.status, stagingOnly: true, created };
+  }
+
   @Delete(":id")
   @HttpCode(204)
   async remove(@Param("id") id: string) {

@@ -32,6 +32,7 @@ import { DockerComposeFileBuilder } from "../infrastructure/docker-compose-file-
 import {
   getProjectSecretsDir,
   getProjectSecretsPath,
+  getProjectStagingSecretsPath,
   getProjectWorkspacePath,
 } from "../infrastructure/workspace-paths";
 import {
@@ -50,6 +51,10 @@ import {
 import { DEPLOY_JOB_REPOSITORY, type DeployJobRepository } from "../domain/deploy-job.repository";
 import { DeployJob, type DeployJobStage } from "../domain/deploy-job.entity";
 import { decideStagingHealthTimeout } from "../domain/staging-config";
+import {
+  STAGING_DEPLOY_ENV_VAR,
+  STAGING_ENV_PREFIX,
+} from "../domain/staging-config";
 import type { HealthcheckConfig } from "../domain/container-orchestrator";
 
 const HEALTH_CHECK_TIMEOUT_MS = 30_000;
@@ -133,6 +138,10 @@ export class DeployProjectUseCase {
       projectId: job.projectId,
       commitSha: job.commitSha,
     };
+    // Job "staging": constrói, sobe o container de teste, roda o health e
+    // remove — SEM promover. O fluxo padrão (manual/webhook) continua
+    // promovendo automaticamente quando o staging passa.
+    const stagingOnly = job.trigger === "staging";
 
     const project = await this.repository.findById(job.projectId);
     if (!project) {
@@ -247,7 +256,7 @@ export class DeployProjectUseCase {
       // 4. arquivos: secrets FORA do contexto, .dockerignore garantido,
       //    compose com a tag da imagem
       // ------------------------------------------------------------------
-      const secretsPath = await this.writeEnvFile(project);
+      const envFiles = await this.writeEnvFile(project);
       // O workspace sempre existe depois do clone, mas garantimos aqui: um
       // diretório faltando faria o deploy falhar na hora de escrever o
       // compose (e a produção nem seria tocada).
@@ -294,7 +303,8 @@ export class DeployProjectUseCase {
         })),
         imageName,
         imageTag,
-        envFilePath: secretsPath,
+        envFilePath: envFiles.envFilePath,
+        stagingEnvFilePath: envFiles.stagingEnvFilePath,
         projectId: project.id,
         deployJobId: job.id,
         commitSha: prepared.sha,
@@ -328,7 +338,7 @@ export class DeployProjectUseCase {
       // deploy por causa dela é desperdício. A produção em execução NUNCA é
       // parada, reduzida ou reiniciada para liberar recurso.
       // ------------------------------------------------------------------
-      if (!project.skipStagingTest) {
+      if (stagingOnly || !project.skipStagingTest) {
         await this.setStage(job, "staging-start", context);
         const hostWait = await this.resourcePreflight.waitForSafeHost({
           // A política é a MESMA do preflight da fila: requisito base do
@@ -391,39 +401,49 @@ export class DeployProjectUseCase {
       }
 
       // ------------------------------------------------------------------
-      // 6. promote: troca a versão em produção
+      // 6/7. promote + saúde da produção
+      //
+      // Modo staging-only: a validação termina no health do container de
+      // teste. Nada é promovido, nenhuma imagem do projeto muda e o
+      // container de produção não é reiniciado.
       // ------------------------------------------------------------------
-      await this.setStage(job, "promote", context);
-      const promoteLog = await this.orchestrator.promote(deployConfig, {
-        deployJobId: job.id,
-        projectId: project.id,
-        containerName: deployConfig.containerName,
-        kind: "promote",
-        previousImage,
-      });
-      promoted = true;
-      deployRecord = await this.deployRecordRepository.save(
-        deployRecord.appendLog(`--- promote ---\n${promoteLog}`),
-      );
+      if (!stagingOnly) {
+        await this.setStage(job, "promote", context);
+        const promoteLog = await this.orchestrator.promote(deployConfig, {
+          deployJobId: job.id,
+          projectId: project.id,
+          containerName: deployConfig.containerName,
+          kind: "promote",
+          previousImage,
+        });
+        promoted = true;
+        deployRecord = await this.deployRecordRepository.save(
+          deployRecord.appendLog(`--- promote ---\n${promoteLog}`),
+        );
 
-      // ------------------------------------------------------------------
-      // 7. produção saudável? se não, rollback
-      // ------------------------------------------------------------------
-      await this.setStage(job, "production-health", context);
-      const productionHealthy = await this.healthChecker.waitUntilHealthy(
-        deployConfig.hostPort,
-        HEALTH_CHECK_TIMEOUT_MS,
-      );
+        await this.setStage(job, "production-health", context);
+        const productionHealthy = await this.healthChecker.waitUntilHealthy(
+          deployConfig.hostPort,
+          HEALTH_CHECK_TIMEOUT_MS,
+        );
 
-      if (!productionHealthy) {
-        await this.setStage(job, "rollback", context);
-        rollbackSucceeded = await this.rollbackIfPossible(deployConfig, previousImage, context);
-        await this.deployJobRepository.save(job.withRollback(true, rollbackSucceeded));
-        throw new DeployFailure(
-          rollbackSucceeded
-            ? `A versão nova não respondeu em produção. Rollback executado: a versão anterior está no ar de novo.`
-            : `A versão nova não respondeu em produção e o ROLLBACK FALHOU. Ação manual necessária.`,
-          !rollbackSucceeded,
+        if (!productionHealthy) {
+          await this.setStage(job, "rollback", context);
+          rollbackSucceeded = await this.rollbackIfPossible(deployConfig, previousImage, context);
+          await this.deployJobRepository.save(job.withRollback(true, rollbackSucceeded));
+          throw new DeployFailure(
+            rollbackSucceeded
+              ? `A versão nova não respondeu em produção. Rollback executado: a versão anterior está no ar de novo.`
+              : `A versão nova não respondeu em produção e o ROLLBACK FALHOU. Ação manual necessária.`,
+            !rollbackSucceeded,
+          );
+        }
+      } else {
+        this.deployLogger.log(
+          "staging-health",
+          context,
+          "staging-only: promoção pulada - a produção NÃO foi alterada",
+          { commit: prepared.sha },
         );
       }
 
@@ -438,6 +458,18 @@ export class DeployProjectUseCase {
       stagingRemoved = true;
 
       await this.setStage(job, "complete", context);
+
+      if (stagingOnly) {
+        // Validação concluída sem promoção: currentImage/previousImage e o
+        // estado do projeto ficam EXATAMENTE como estavam.
+        await this.deployRecordRepository.save(deployRecord.withResult("success", null));
+        await this.deployJobRepository.save(job.withStatus("succeeded"));
+        this.deployLogger.log("complete", context, "staging-only concluído (produção não foi alterada)", {
+          image: candidateImage,
+        });
+        return;
+      }
+
       const deployed = project
         .withDeployment(deployConfig.containerName, deployConfig.hostPort)
         .withImages(candidateImage, previousImage)
@@ -466,15 +498,18 @@ export class DeployProjectUseCase {
       // versão realmente entrou e NÃO deu pra voltar. Falha de staging (ou
       // deploy com rollback bem-sucedido) mantém o runtime como estava -
       // cron, backup e terminal continuam funcionando.
-      let current = await this.repository.findById(project.id);
-      if (current) {
-        if (productionAffected) {
-          current = current.withFailedDeployment();
+      // staging-only não mexe no estado do projeto: a produção não foi tocada.
+      if (!stagingOnly) {
+        let current = await this.repository.findById(project.id);
+        if (current) {
+          if (productionAffected) {
+            current = current.withFailedDeployment();
+          }
+          current = current.withLastDeployStatus(
+            rollbackSucceeded ? "rolled-back" : "failed",
+          );
+          await this.repository.save(current);
         }
-        current = current.withLastDeployStatus(
-          rollbackSucceeded ? "rolled-back" : "failed",
-        );
-        await this.repository.save(current);
       }
 
       // DIAGNÓSTICO DO STAGING (somente observabilidade): se o container de
@@ -570,23 +605,74 @@ export class DeployProjectUseCase {
   }
 
   /**
-   * Escreve o arquivo de ambiente do projeto FORA do diretório do projeto,
-   * para que ele nunca entre no contexto de build (e nem numa camada de
-   * imagem). O compose aponta pra esse caminho absoluto.
+   * Escreve os arquivos de ambiente do projeto FORA do diretório do projeto,
+   * para que nunca entrem no contexto de build (e nem numa camada de imagem).
+   *
+   * DOIS arquivos, com papéis diferentes:
+   *
+   * - `.env.korrelo`          -> produção E staging (env comum);
+   * - `.env.korrelo.staging`  -> SÓ o serviço `app_staging` (segundo env_file).
+   *
+   * As variáveis `KORRELO_STAGING_*` são retiradas do arquivo comum (a
+   * produção nunca as vê) e escritas no arquivo de staging com o prefixo
+   * removido (`KORRELO_STAGING_FOO=1` chega ao teste como `FOO=1`).
+   *
+   * `KORRELO_DEPLOY_ENV` é RESERVADA: se o projeto tentar defini-la, o
+   * deploy é recusado em vez de sobrescrever o valor em silêncio.
    */
-  private async writeEnvFile(project: Project): Promise<string> {
+  private async writeEnvFile(
+    project: Project,
+  ): Promise<{ envFilePath: string; stagingEnvFilePath: string | null }> {
     const secretsDir = getProjectSecretsDir(project.id);
     const secretsPath = getProjectSecretsPath(project.id);
+    const stagingSecretsPath = getProjectStagingSecretsPath(project.id);
     await fs.mkdir(secretsDir, { recursive: true });
 
     const envVars = await this.envVarRepository.findByProjectId(project.id);
-    const envFileContent = envVars.map((v) => `${v.key}=${v.value}`).join("\n") + "\n";
+
+    if (
+      envVars.some(
+        (v) =>
+          v.key === STAGING_DEPLOY_ENV_VAR ||
+          v.key === `${STAGING_ENV_PREFIX}${STAGING_DEPLOY_ENV_VAR}`,
+      )
+    ) {
+      throw new DeployFailure(
+        `A variável ${STAGING_DEPLOY_ENV_VAR} é reservada pelo Korrelo e não pode ser ` +
+          "definida nas variáveis de ambiente do projeto (nem direto, nem via prefixo " +
+          `${STAGING_ENV_PREFIX}). Ela identifica o container de teste e nunca existe em ` +
+          "produção. Remova/renomeie essa variável para o deploy continuar.",
+        false,
+      );
+    }
+
+    const stagingVars = envVars
+      .filter((v) => v.key.startsWith(STAGING_ENV_PREFIX))
+      .map((v) => ({ key: v.key.slice(STAGING_ENV_PREFIX.length), value: v.value }))
+      .filter((v) => v.key.length > 0);
+    const productionVars = envVars.filter((v) => !v.key.startsWith(STAGING_ENV_PREFIX));
+
+    const envFileContent = productionVars.map((v) => `${v.key}=${v.value}`).join("\n") + "\n";
     await fs.writeFile(secretsPath, envFileContent, "utf-8");
+
+    let stagingEnvFilePath: string | null = null;
+    if (stagingVars.length > 0) {
+      const stagingContent = stagingVars.map((v) => `${v.key}=${v.value}`).join("\n") + "\n";
+      await fs.writeFile(stagingSecretsPath, stagingContent, "utf-8");
+      stagingEnvFilePath = stagingSecretsPath;
+    } else {
+      // Sem variáveis de staging: remove um arquivo antigo para não vazar
+      // valor de um deploy anterior.
+      await fs.rm(stagingSecretsPath, { force: true });
+    }
+
     // Só o dono do Core lê os segredos do projeto.
-    try {
-      await fs.chmod(secretsPath, 0o600);
-    } catch {
-      // best effort
+    for (const filePath of [secretsPath, stagingEnvFilePath].filter(Boolean) as string[]) {
+      try {
+        await fs.chmod(filePath, 0o600);
+      } catch {
+        // best effort
+      }
     }
 
     // Remove a cópia antiga (dentro do workspace) se existir: ela ficaria
@@ -598,7 +684,7 @@ export class DeployProjectUseCase {
       // best effort
     }
 
-    return secretsPath;
+    return { envFilePath: secretsPath, stagingEnvFilePath };
   }
 
   /**

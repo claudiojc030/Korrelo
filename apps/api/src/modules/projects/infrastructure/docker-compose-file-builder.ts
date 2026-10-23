@@ -1,6 +1,10 @@
 import { Injectable } from "@nestjs/common";
 import type { DeployConfig, DatabaseServiceConfig, HealthcheckConfig } from "../domain/container-orchestrator";
 import { ENV_FILENAME } from "../domain/container-orchestrator";
+import {
+  STAGING_DEPLOY_ENV_VALUE,
+  STAGING_DEPLOY_ENV_VAR,
+} from "../domain/staging-config";
 import { computeNodeHeapMb } from "./memory-budget";
 
 const LOGGING_BLOCK = [
@@ -168,8 +172,15 @@ export class DockerComposeFileBuilder {
       "    restart: \"no\"",
       "    env_file:",
       `      - ${envFilePath}`,
+      // Arquivo EXCLUSIVO do teste (variáveis KORRELO_STAGING_*). A produção
+      // nunca recebe este arquivo.
+      ...(config.stagingEnvFilePath ? [`      - ${config.stagingEnvFilePath}`] : []),
       "    environment:",
       `      NODE_OPTIONS: "${stagingNodeOptions}"`,
+      // Identificação do ambiente de teste. Fica em `environment:` (tem
+      // precedência sobre env_file) e SÓ no app_staging: a aplicação pode usar
+      // isso para desligar workers/cron/pollers no container de teste.
+      `      ${STAGING_DEPLOY_ENV_VAR}: "${STAGING_DEPLOY_ENV_VALUE}"`,
       "    ports:",
       `      - "127.0.0.1:${config.staging.hostPort}:${config.containerPort}"`,
       "    volumes:",

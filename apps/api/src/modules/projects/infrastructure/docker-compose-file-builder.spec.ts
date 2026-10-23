@@ -99,4 +99,35 @@ describe("DockerComposeFileBuilder (Wave 2)", () => {
     // 700 * 0.7 = 490
     expect(compose).toContain('NODE_OPTIONS: "--max-old-space-size=490"');
   });
+
+  it("só o app_staging recebe a identificação de ambiente de teste", () => {
+    const compose = builder.build(baseConfig(), "Node.js");
+    const appBlock = compose.slice(compose.indexOf("  app:"), compose.indexOf("  app_staging:"));
+    const stagingBlock = compose.slice(compose.indexOf("  app_staging:"));
+
+    expect(stagingBlock).toContain('KORRELO_DEPLOY_ENV: "staging"');
+    // Produção NUNCA recebe a variável.
+    expect(appBlock).not.toContain("KORRELO_DEPLOY_ENV");
+  });
+
+  it("env_file exclusivo do staging só entra no app_staging", () => {
+    const compose = builder.build(
+      baseConfig({ stagingEnvFilePath: "/tmp/secrets/app-1234abcd/.env.korrelo.staging" }),
+      "Node.js",
+    );
+    const appBlock = compose.slice(compose.indexOf("  app:"), compose.indexOf("  app_staging:"));
+    const stagingBlock = compose.slice(compose.indexOf("  app_staging:"));
+
+    expect(appBlock).not.toContain(".env.korrelo.staging");
+    expect(stagingBlock).toContain("- /tmp/secrets/app-1234abcd/.env.korrelo.staging");
+    // O arquivo comum continua valendo para os dois.
+    expect(stagingBlock).toContain("- /tmp/secrets/app-1234abcd/.env.korrelo");
+  });
+
+  it("sem env extra, o staging usa apenas o arquivo comum", () => {
+    const compose = builder.build(baseConfig(), "Node.js");
+    const stagingBlock = compose.slice(compose.indexOf("  app_staging:"));
+
+    expect(stagingBlock).not.toContain(".env.korrelo.staging");
+  });
 });

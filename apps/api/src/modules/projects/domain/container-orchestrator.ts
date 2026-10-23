@@ -61,6 +61,9 @@ export interface DeployConfig {
   // diretório do projeto de propósito: assim ele nunca entra no contexto de
   // build (e nem numa camada de imagem).
   envFilePath?: string;
+  // Arquivo de ambiente EXCLUSIVO do staging (variáveis `KORRELO_STAGING_*`
+  // com o prefixo removido). Só o serviço `app_staging` lê este arquivo.
+  stagingEnvFilePath?: string | null;
   projectId?: string;
   deployJobId?: string;
   commitSha?: string | null;

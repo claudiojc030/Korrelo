@@ -50,8 +50,11 @@ class FakeOrchestrator {
   failStaging = false;
   failPromote = false;
   failRollback = false;
+  /** Config recebida em deployStaging (para checar env do staging). */
+  lastConfig: any = null;
 
-  async deployStaging(): Promise<string> {
+  async deployStaging(config?: any): Promise<string> {
+    this.lastConfig = config ?? null;
     this.stagingCalls += 1;
     if (this.failStaging) throw new Error("falha no staging");
     return "staging ok";
@@ -214,6 +217,20 @@ class EmptyRepository {
   async upsertOne(): Promise<void> {}
 }
 
+/** Repositório de env vars controlável por teste (default: vazio). */
+class FakeEnvVarRepository {
+  vars: { id: string; projectId: string; key: string; value: string; createdAt: Date }[] = [];
+  async findByProjectId(projectId: string): Promise<any[]> {
+    return this.vars.filter((v) => v.projectId === projectId);
+  }
+  async findAll(): Promise<any[]> {
+    return this.vars;
+  }
+  async save(entity: any): Promise<any> {
+    return entity;
+  }
+}
+
 describe("DeployProjectUseCase (Wave 2)", () => {
   let tempWorkspaceDir: string;
   let useCase: any;
@@ -226,6 +243,7 @@ describe("DeployProjectUseCase (Wave 2)", () => {
   const deployRecordRepository = new FakeDeployRecordRepository();
   const deployJobRepository = new FakeDeployJobRepository();
   const cloner = new FakeCloner();
+  const envVarRepository = new FakeEnvVarRepository();
   const stagingDiagnostics = new FakeStagingDiagnostics();
   /** Porta alocada seguinte (a de produção vem antes da do staging). */
   let nextPort = 3200;
@@ -254,7 +272,7 @@ describe("DeployProjectUseCase (Wave 2)", () => {
       { supports: () => true, generate: () => ({ dockerfile: "FROM node:20-alpine\n", dockerignore: ".env.korrelo\n" }) },
       orchestrator,
       healthChecker,
-      new EmptyRepository(),
+      envVarRepository,
       new EmptyRepository(),
       deployRecordRepository,
       cloner,
@@ -292,6 +310,8 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     deployRecordRepository.records = [];
     stagingDiagnostics.calls = [];
     stagingDiagnostics.fail = false;
+    envVarRepository.vars = [];
+    orchestrator.lastConfig = null;
 
     projectRepository.project = new ProjectEntity(
       "proj-1",
@@ -559,5 +579,90 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     // Sem override: o default de 30s vale para o staging.
     expect(healthChecker.timeouts[0]).toBe(30_000);
     expect(healthChecker.timeouts[1]).toBe(30_000);
+  });
+
+  // ---------------------------------------------------- staging-only / env
+  function makeStagingJob(): any {
+    const job = DeployJobEntity.create({
+      projectId: "proj-1",
+      commitSha: null,
+      branch: "develop",
+      trigger: "staging",
+    });
+    deployJobRepository.jobs.set(job.id, job);
+    return job;
+  }
+
+  it("staging-only: valida, remove o container e NÃO promove nem altera imagens", async () => {
+    const job = makeStagingJob();
+
+    await useCase.executeJob(job);
+
+    expect(orchestrator.stagingCalls).toBe(1);
+    expect(orchestrator.promoteCalls).toBe(0);
+    expect(orchestrator.removeStagingCalls).toBe(1);
+    // Nenhuma imagem do projeto muda (nada foi promovido).
+    expect(projectRepository.project?.currentImage).toBe("korrelo-x:commit-antiga");
+    expect(projectRepository.project?.previousImage).toBe("korrelo-x:commit-anterior");
+    expect(deployJobRepository.jobs.get(job.id)?.status).toBe("succeeded");
+    expect(deployRecordRepository.records.at(-1)?.status).toBe("success");
+  });
+
+  it("staging-only com falha no health: cleanup acontece e nada é promovido", async () => {
+    healthChecker.results = [false];
+    const job = makeStagingJob();
+
+    await expect(useCase.executeJob(job)).rejects.toThrow(/não respondeu/);
+
+    expect(orchestrator.promoteCalls).toBe(0);
+    expect(orchestrator.removeStagingCalls).toBe(1);
+    expect(projectRepository.project?.currentImage).toBe("korrelo-x:commit-antiga");
+    expect(projectRepository.project?.previousImage).toBe("korrelo-x:commit-anterior");
+    expect(deployJobRepository.jobs.get(job.id)?.status).toBe("failed");
+  });
+
+  it("variável reservada KORRELO_DEPLOY_ENV: deploy é recusado antes do build", async () => {
+    envVarRepository.vars = [
+      { id: "e1", projectId: "proj-1", key: "KORRELO_DEPLOY_ENV", value: "production", createdAt: new Date() },
+    ];
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/reservada/);
+    // Falhou antes de qualquer build/staging.
+    expect(orchestrator.stagingCalls).toBe(0);
+  });
+
+  it("env KORRELO_STAGING_* vai SÓ para o container de teste", async () => {
+    envVarRepository.vars = [
+      { id: "e1", projectId: "proj-1", key: "API_KEY", value: "prod-value", createdAt: new Date() },
+      {
+        id: "e2",
+        projectId: "proj-1",
+        key: "KORRELO_STAGING_EMAIL_POLLER",
+        value: "0",
+        createdAt: new Date(),
+      },
+    ];
+
+    await useCase.executeJob(makeJob());
+
+    const secretsDir = path.join(tempWorkspaceDir, "proj-1-secrets");
+    const prodFile = fs.readFileSync(path.join(secretsDir, ".env.korrelo"), "utf-8");
+    const stagingFile = fs.readFileSync(path.join(secretsDir, ".env.korrelo.staging"), "utf-8");
+
+    // Produção: valor normal e NENHUMA variável de staging.
+    expect(prodFile).toContain("API_KEY=prod-value");
+    expect(prodFile).not.toContain("KORRELO_STAGING_");
+    // Staging: prefixo removido, sem herdar o arquivo de produção.
+    expect(stagingFile).toContain("EMAIL_POLLER=0");
+    expect(stagingFile).not.toContain("API_KEY");
+
+    expect(orchestrator.lastConfig?.envFilePath).toMatch(/\.env\.korrelo$/);
+    expect(orchestrator.lastConfig?.stagingEnvFilePath).toMatch(/\.env\.korrelo\.staging$/);
+  });
+
+  it("sem envs de staging, o compose não recebe arquivo extra", async () => {
+    await useCase.executeJob(makeJob());
+
+    expect(orchestrator.lastConfig?.stagingEnvFilePath).toBeNull();
   });
 });

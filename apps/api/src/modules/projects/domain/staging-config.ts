@@ -27,6 +27,30 @@ export const MIN_STAGING_HEALTH_TIMEOUT_SECONDS = 10;
 export const MAX_STAGING_HEALTH_TIMEOUT_SECONDS = 300;
 
 /**
+ * Variável RESERVADA que identifica o container de TESTE.
+ *
+ * O Korrelo injeta `KORRELO_DEPLOY_ENV=staging` em `app_staging` e em
+ * NENHUM outro lugar. A aplicação pode usar isso para desligar workers,
+ * cron, pollers e tarefas agendadas no ambiente de teste.
+ *
+ * É reservada: um projeto que tente definir essa chave nas variáveis de
+ * ambiente tem o deploy recusado (não sobrescrevemos valor do projeto em
+ * silêncio).
+ */
+export const STAGING_DEPLOY_ENV_VAR = "KORRELO_DEPLOY_ENV";
+export const STAGING_DEPLOY_ENV_VALUE = "staging";
+
+/**
+ * Prefixo de variável de ambiente aplicada SÓ no staging.
+ *
+ * `KORRELO_STAGING_FOO=bar` é removida do ambiente de produção e chega ao
+ * container de teste como `FOO=bar`. Serve para overrides por ambiente
+ * (ex.: desligar um worker, apontar para um bucket separado) sem que a
+ * produção veja o valor.
+ */
+export const STAGING_ENV_PREFIX = "KORRELO_STAGING_";
+
+/**
  * De onde veio o valor efetivo do staging.
  *
  * - "project-override": o projeto configurou explicitamente.
