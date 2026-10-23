@@ -430,6 +430,11 @@ describe("deploy de projeto - proteção da produção", () => {
           orchestrator.calls.push("removeStaging");
         },
         pruneProjectImages: async () => false,
+        pruneUnusedBuildArtifacts: async () => ({
+          imagePrune: { ok: true, output: null, error: null },
+          builderPrune: { ok: true, output: null, error: null },
+          reservedSpace: "2GB",
+        }),
       };
 
       const useCase = new DeployProjectUseCase(
@@ -461,7 +466,7 @@ describe("deploy de projeto - proteção da produção", () => {
         { allocate: async () => 3200 } as any,
         { build: () => "services: {}\n" } as any,
         deployJobSelf as any,
-        { log: () => undefined, error: () => undefined } as any,
+        { log: () => undefined, warn: () => undefined, error: () => undefined } as any,
         new ResourcePreflightService(safeHostResourceProvider()),
         // Diagnóstico do staging: fake (nada de Docker nos testes).
         { collect: async () => ({ containerName: "staging", state: null, logs: null, errors: [] }) } as any,

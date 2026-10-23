@@ -42,6 +42,11 @@ import {
 import { ensureDockerignore } from "../infrastructure/dockerignore";
 import { DeployLogger } from "../infrastructure/deploy-logger";
 import { ResourcePreflightService } from "../infrastructure/resource-preflight.service";
+import { WorkerLock } from "../infrastructure/worker-lock";
+import {
+  defaultSelfUpdateState,
+  type SelfUpdateStateLike,
+} from "../../../infrastructure/self-update-state";
 import {
   StagingDiagnosticsCollector,
   formatStagingDiagnostics,
@@ -130,6 +135,19 @@ export class DeployProjectUseCase {
      */
     @Optional()
     private readonly stagingDiagnostics: StagingDiagnosticsCollectorLike | null = null,
+    /**
+     * Lock do worker de deploy - o MESMO que a fila segura enquanto o job
+     * roda. A limpeza de cache só executa se este processo for o dono dele
+     * (ou seja, nenhum outro worker está buildando neste instante).
+     */
+    @Optional()
+    private readonly deployLock?: WorkerLock,
+    /**
+     * Estado do self-update (lock do rollout). Injetável nos testes; em
+     * produção lê ~/.korrelo/self-update.lock no momento da limpeza.
+     */
+    @Optional()
+    private readonly selfUpdateState: SelfUpdateStateLike | null = null,
   ) {}
 
   async executeJob(job: DeployJob): Promise<void> {
@@ -557,6 +575,77 @@ export class DeployProjectUseCase {
           this.logger.warn(`Falha ao limpar imagens antigas: ${(error as Error).message}`);
         }
       }
+
+      // Cache de build + imagens dangling: SEMPRE depois do deploy (sucesso
+      // ou falha), com checagem de concorrência feita AGORA. Nunca altera o
+      // resultado original do job (método trata os próprios erros).
+      await this.cleanupBuildCache(job, context);
+    }
+  }
+
+  /**
+   * Limpeza do cache de build/imagens dangling APÓS o deploy.
+   *
+   * POR QUE AQUI (e não só no promote): um staging que falha nunca promove,
+   * então o cache daquele build ficava preso para sempre. O `finally` cobre
+   * sucesso, falha de staging, falha de promoção e rollback.
+   *
+   * CONCORRÊNCIA VERIFICADA NO MOMENTO DA EXECUÇÃO (não no início do deploy):
+   *  1. este processo precisa ser o dono do lock do worker de deploy;
+   *  2. nenhum self-update/rollout do Core pode estar em andamento;
+   *  3. nenhum OUTRO job de deploy pode estar em execução.
+   *
+   * Se qualquer condição falhar, a limpeza é RECUSADA e registrada. Erros
+   * da própria limpeza também são registrados e nunca propagam (estamos no
+   * finally do deploy).
+   */
+  private async cleanupBuildCache(
+    job: DeployJob,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<void> {
+    try {
+      const reasons: string[] = [];
+
+      if (this.deployLock && !this.deployLock.isHeldByMe()) {
+        reasons.push("lock do worker de deploy não pertence a este processo");
+      }
+
+      const selfUpdate = this.selfUpdateState ?? defaultSelfUpdateState;
+      if (selfUpdate.isRunning()) {
+        reasons.push("self-update do Korrelo em andamento");
+      }
+
+      const running = await this.deployJobRepository.findAllByStatus("running");
+      const others = running.filter((other) => other.id !== job.id);
+      if (others.length > 0) {
+        reasons.push(`outro deploy em andamento (${others.map((other) => other.id).join(", ")})`);
+      }
+
+      if (reasons.length > 0) {
+        this.deployLogger.warn(
+          "cleanup",
+          context,
+          `limpeza do cache de build recusada: ${reasons.join("; ")}`,
+        );
+        return;
+      }
+
+      const result = await this.orchestrator.pruneUnusedBuildArtifacts();
+      const imageLine = result.imagePrune.ok
+        ? "imagens dangling: ok"
+        : `imagens dangling: FALHOU (${result.imagePrune.error ?? "erro desconhecido"})`;
+      const builderLine = result.builderPrune.ok
+        ? `cache BuildKit: ok (reserva ${result.reservedSpace})`
+        : `cache BuildKit: FALHOU (${result.builderPrune.error ?? "erro desconhecido"})`;
+
+      if (result.imagePrune.ok && result.builderPrune.ok) {
+        this.deployLogger.log("cleanup", context, `limpeza de cache concluída - ${imageLine}; ${builderLine}`);
+      } else {
+        this.deployLogger.warn("cleanup", context, `limpeza de cache parcial - ${imageLine}; ${builderLine}`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.deployLogger.warn("cleanup", context, `falha ao limpar cache de build: ${message}`);
     }
   }
 

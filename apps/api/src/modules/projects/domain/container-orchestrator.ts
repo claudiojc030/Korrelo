@@ -126,4 +126,29 @@ export interface ContainerOrchestrator {
   // Remove imagens DO PROJETO que não estão protegidas. As imagens
   // protegidas (atual, anterior, candidata) nunca são removidas.
   pruneProjectImages(config: { imageName: string; protectedImages: string[] }): Promise<string>;
+  /**
+   * Limpa cache de build não utilizado (BuildKit) e imagens DANGLING.
+   *
+   * NUNCA remove imagem com tag `commit-*`, container, volume ou banco.
+   * Não lança: devolve o resultado de cada comando (ok/erro) para o chamador
+   * registrar. A reserva mínima de cache é mantida.
+   */
+  pruneUnusedBuildArtifacts(): Promise<BuildArtifactPruneResult>;
+}
+
+/** Resultado de um comando de limpeza (nunca lança por falha do Docker). */
+export interface BuildArtifactPruneOutcome {
+  ok: boolean;
+  /** Saída combinada (truncada) quando o comando terminou. */
+  output: string | null;
+  error: string | null;
+}
+
+export interface BuildArtifactPruneResult {
+  /** `docker image prune -f` - só camadas sem tag. */
+  imagePrune: BuildArtifactPruneOutcome;
+  /** `docker builder prune -f --reserved-space <reserva>`. */
+  builderPrune: BuildArtifactPruneOutcome;
+  /** Reserva mínima de cache preservada (ex.: "2GB"). */
+  reservedSpace: string;
 }

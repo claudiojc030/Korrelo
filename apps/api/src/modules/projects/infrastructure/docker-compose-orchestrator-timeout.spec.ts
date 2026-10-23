@@ -152,10 +152,11 @@ describe("timeout da subida do staging", () => {
     expect(remove?.timeout).toBe(30_000);
 
     const pruneImage = calls.find((call) => call.args[0] === "image" && call.args[1] === "prune");
-    expect(pruneImage?.timeout).toBe(60_000);
-
     const pruneBuilder = calls.find((call) => call.args[0] === "builder" && call.args[1] === "prune");
-    expect(pruneBuilder?.timeout).toBe(60_000);
+    // A limpeza de cache saiu de `promote()` (Wave 1): roda no finally do
+    // deploy, com teste próprio em docker-compose-orchestrator-prune.spec.ts.
+    expect(pruneImage).toBeUndefined();
+    expect(pruneBuilder).toBeUndefined();
 
     // Nenhuma etapa fora do staging herdou os 30min.
     const others = calls.filter((call) => !call.args.includes("app_staging"));

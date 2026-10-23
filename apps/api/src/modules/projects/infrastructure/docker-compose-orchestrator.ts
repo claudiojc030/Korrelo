@@ -3,6 +3,8 @@ import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { apiError } from "../../../infrastructure/api-error";
 import type {
+  BuildArtifactPruneOutcome,
+  BuildArtifactPruneResult,
   ContainerOrchestrator,
   DeployConfig,
   ProductionAction,
@@ -14,6 +16,14 @@ import { SHARED_NETWORK } from "./docker-compose-file-builder";
 const execFile = promisify(execFileCallback);
 
 const PROMOTE_TIMEOUT_MS = 120_000;
+/**
+ * Reserva mínima de cache de build preservada entre deploys.
+ *
+ * O prune do BuildKit devolve o cache até este teto; abaixo disso o cache é
+ * considerado útil e é mantido. Valor fixo de propósito: a reserva é parte da
+ * garantia de que o próximo build não fica lento por falta de cache.
+ */
+export const BUILD_CACHE_RESERVE = "2GB";
 /**
  * Timeout (ms) da subida + build do container de TESTE.
  *
@@ -28,6 +38,14 @@ const PROMOTE_TIMEOUT_MS = 120_000;
 const STAGING_TIMEOUT_MS = 30 * 60 * 1000;
 const REMOVE_STAGING_TIMEOUT_MS = 30_000;
 const PRUNE_TIMEOUT_MS = 60_000;
+/**
+ * Timeout do prune do BuildKit.
+ *
+ * Maior que o dos outros comandos de limpeza de propósito: remover vários GB
+ * de cache numa VPS de 1 vCPU com I/O lento pode passar de 60s. Continua
+ * FINITO - o worker nunca fica preso esperando a limpeza.
+ */
+const BUILD_CACHE_PRUNE_TIMEOUT_MS = 300_000;
 
 /**
  * Quantas imagens VERSINADAS do projeto são mantidas além da atual e da
@@ -219,7 +237,9 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       );
     }
 
-    await this.pruneUnusedBuildArtifacts();
+    // A limpeza de cache/imagens dangling NÃO acontece mais aqui: ela roda no
+    // `finally` do deploy (sucesso OU falha), depois de checar se há outra
+    // operação crítica em andamento. Ver DeployProjectUseCase.cleanupBuildCache.
     return output;
   }
 
@@ -416,30 +436,63 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
     }
   }
 
-  // Cada rebuild (`--build`) deixa pra trás a camada de build cache antiga e,
-  // se o Dockerfile mudou, a imagem <none> anterior com a mesma tag. Nenhum
-  // dos dois é usado pelo container que acabou de subir, então dá pra limpar
-  // sempre, sem risco de derrubar algo em uso (docker nunca remove imagem
-  // referenciada por container rodando, mesmo com -f). Roda depois de CADA
-  // deploy (Korrelo continua reaproveitando o cache de builds recentes,
-  // já que -f não é "-a": só o que virou lixo desde então).
-  private async pruneUnusedBuildArtifacts(): Promise<void> {
-    try {
-      await execFile("docker", ["image", "prune", "-f"], { timeout: PRUNE_TIMEOUT_MS });
-      // Sem --keep-storage, "docker builder prune -f" só remove cache que o
-      // BuildKit já considera 100% sem referência - numa VPS que só faz
-      // deploy sequencial (nunca dois builds em paralelo), a cadeia de
-      // camadas de builds antigos fica presa como "em uso" indefinidamente,
-      // e o cache cresce sem limite (visto em produção: 12GB+ de build cache,
-      // boa parte do disco da VPS). --keep-storage força um teto real,
-      // descartando as entradas mais antigas quando passa disso.
-      // --keep-storage foi renomeado pra --reserved-space em versões mais
-      // novas do Docker (visto em produção: a flag antiga é aceita mas
-      // ignorada com um aviso de "deprecated", sem realmente limitar nada).
-      await execFile("docker", ["builder", "prune", "-f", "--reserved-space", "2GB"], { timeout: PRUNE_TIMEOUT_MS });
-    } catch (error) {
-      this.logger.warn(`Falha ao limpar imagens/cache de build não usados: ${error}`);
+  /**
+   * Cada rebuild (`--build`) deixa pra trás a camada de cache antiga e, se o
+   * Dockerfile mudou, a imagem `<none>` anterior com a mesma tag. Nenhum dos
+   * dois é usado pelo container que acabou de subir.
+   *
+   * Roda no `finally` do deploy (sucesso OU falha) e é o ÚNICO lugar que faz
+   * isso - não é chamada por `promote()`.
+   *
+   * SEGURANÇA:
+   * - `docker image prune -f` remove SÓ camadas sem tag (dangling). Imagens
+   *   com tag `commit-*`, current/previous/candidata e as usadas por container
+   *   NÃO são tocadas;
+   * - `docker builder prune` mexe só no cache do BuildKit, preservando a
+   *   reserva (`BUILD_CACHE_RESERVE`);
+   * - nunca usa `-a`, `--rmi`, `volume prune` ou `system prune`.
+   *
+   * NÃO lança: devolve o resultado de cada comando para quem chama registrar.
+   */
+  async pruneUnusedBuildArtifacts(): Promise<BuildArtifactPruneResult> {
+    const run = async (args: string[], timeoutMs: number): Promise<BuildArtifactPruneOutcome> => {
+      try {
+        const { stdout, stderr } = await execFile("docker", args, { timeout: timeoutMs });
+        return {
+          ok: true,
+          output: combineOutput(stdout, stderr).slice(0, 500) || null,
+          error: null,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          output: execOutputOf(error).slice(0, 500) || null,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+    };
+
+    // Sem --keep-storage, "docker builder prune -f" só remove cache que o
+    // BuildKit já considera 100% sem referência - numa VPS que só faz deploy
+    // sequencial (nunca dois builds em paralelo), a cadeia de camadas antigas
+    // fica presa como "em uso" e o cache cresce sem limite. A reserva força um
+    // teto real. --keep-storage foi renomeado para --reserved-space nas
+    // versões mais novas do Docker (a flag antiga é aceita mas ignorada com
+    // aviso de "deprecated", sem limitar nada).
+    const imagePrune = await run(["image", "prune", "-f"], PRUNE_TIMEOUT_MS);
+    const builderPrune = await run(
+      ["builder", "prune", "-f", "--reserved-space", BUILD_CACHE_RESERVE],
+      BUILD_CACHE_PRUNE_TIMEOUT_MS,
+    );
+
+    if (!imagePrune.ok) {
+      this.logger.warn(`Falha ao limpar imagens dangling: ${imagePrune.error}`);
     }
+    if (!builderPrune.ok) {
+      this.logger.warn(`Falha ao limpar cache de build: ${builderPrune.error}`);
+    }
+
+    return { imagePrune, builderPrune, reservedSpace: BUILD_CACHE_RESERVE };
   }
 
   async teardown(config: TeardownConfig): Promise<void> {

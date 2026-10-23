@@ -52,12 +52,25 @@ class FakeOrchestrator {
   failRollback = false;
   /** Config recebida em deployStaging (para checar env do staging). */
   lastConfig: any = null;
+  /** Quantas vezes a limpeza de cache de build foi chamada. */
+  buildPruneCalls = 0;
+  failBuildPrune = false;
+  buildPruneResult: any = {
+    imagePrune: { ok: true, output: null, error: null },
+    builderPrune: { ok: true, output: null, error: null },
+    reservedSpace: "2GB",
+  };
 
   async deployStaging(config?: any): Promise<string> {
     this.lastConfig = config ?? null;
     this.stagingCalls += 1;
     if (this.failStaging) throw new Error("falha no staging");
     return "staging ok";
+  }
+  async pruneUnusedBuildArtifacts(): Promise<any> {
+    this.buildPruneCalls += 1;
+    if (this.failBuildPrune) throw new Error("docker indisponível");
+    return this.buildPruneResult;
   }
   async promote(): Promise<string> {
     this.promoteCalls += 1;
@@ -157,8 +170,8 @@ class FakeDeployJobRepository {
   async findByProjectAndCommit(): Promise<DeployJob | null> {
     return null;
   }
-  async findAllByStatus(): Promise<DeployJob[]> {
-    return [];
+  async findAllByStatus(status?: string): Promise<DeployJob[]> {
+    return [...this.jobs.values()].filter((job) => !status || job.status === status);
   }
   async findLatestByProject(): Promise<DeployJob | null> {
     return null;
@@ -245,6 +258,8 @@ describe("DeployProjectUseCase (Wave 2)", () => {
   const cloner = new FakeCloner();
   const envVarRepository = new FakeEnvVarRepository();
   const stagingDiagnostics = new FakeStagingDiagnostics();
+  const deployLock = { held: true, isHeldByMe(): boolean { return this.held; } };
+  const selfUpdateState = { running: false, isRunning(): boolean { return this.running; } };
   /** Porta alocada seguinte (a de produção vem antes da do staging). */
   let nextPort = 3200;
 
@@ -290,6 +305,9 @@ describe("DeployProjectUseCase (Wave 2)", () => {
       new ResourcePreflightService(safeHostResourceProvider()),
       // Diagnóstico do staging: fake (nada de Docker nos testes).
       stagingDiagnostics,
+      // Lock do worker e estado do self-update (fakes mutáveis).
+      deployLock as any,
+      selfUpdateState,
     );
   });
 
@@ -312,6 +330,15 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     stagingDiagnostics.fail = false;
     envVarRepository.vars = [];
     orchestrator.lastConfig = null;
+    orchestrator.buildPruneCalls = 0;
+    orchestrator.failBuildPrune = false;
+    orchestrator.buildPruneResult = {
+      imagePrune: { ok: true, output: null, error: null },
+      builderPrune: { ok: true, output: null, error: null },
+      reservedSpace: "2GB",
+    };
+    deployLock.held = true;
+    selfUpdateState.running = false;
 
     projectRepository.project = new ProjectEntity(
       "proj-1",
@@ -664,5 +691,81 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     await useCase.executeJob(makeJob());
 
     expect(orchestrator.lastConfig?.stagingEnvFilePath).toBeNull();
+  });
+
+  // ------------------------------------------ limpeza de cache de build (W1)
+  it("deploy com sucesso limpa o cache de build (uma vez, no finally)", async () => {
+    await useCase.executeJob(makeJob());
+
+    expect(orchestrator.promoteCalls).toBe(1);
+    expect(orchestrator.buildPruneCalls).toBe(1);
+  });
+
+  it("staging malsucedido TAMBÉM limpa o cache de build", async () => {
+    orchestrator.failStaging = true;
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow("falha no staging");
+
+    expect(orchestrator.promoteCalls).toBe(0);
+    expect(orchestrator.buildPruneCalls).toBe(1);
+  });
+
+  it("falha na limpeza NÃO altera o resultado do deploy", async () => {
+    orchestrator.failBuildPrune = true;
+    const job = makeJob();
+
+    await useCase.executeJob(job);
+
+    expect(deployJobRepository.jobs.get(job.id)?.status).toBe("succeeded");
+  });
+
+  it("falha na limpeza não substitui o erro original do staging", async () => {
+    orchestrator.failStaging = true;
+    orchestrator.failBuildPrune = true;
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow("falha no staging");
+  });
+
+  it("limpeza recusada quando outro deploy está em andamento", async () => {
+    const other = DeployJobEntity.create({
+      projectId: "proj-2",
+      commitSha: "ffffffffffff",
+      branch: "main",
+      trigger: "manual",
+    });
+    deployJobRepository.jobs.set(other.id, other.withStatus("running"));
+
+    await useCase.executeJob(makeJob());
+
+    expect(orchestrator.buildPruneCalls).toBe(0);
+  });
+
+  it("limpeza recusada durante self-update do Korrelo", async () => {
+    selfUpdateState.running = true;
+
+    await useCase.executeJob(makeJob());
+
+    expect(orchestrator.buildPruneCalls).toBe(0);
+  });
+
+  it("limpeza recusada quando o lock do worker não é deste processo", async () => {
+    deployLock.held = false;
+
+    await useCase.executeJob(makeJob());
+
+    expect(orchestrator.buildPruneCalls).toBe(0);
+  });
+
+  it("resultado parcial (builder prune falhou) não derruba o deploy", async () => {
+    orchestrator.buildPruneResult = {
+      imagePrune: { ok: true, output: null, error: null },
+      builderPrune: { ok: false, output: null, error: "flag não suportada" },
+      reservedSpace: "2GB",
+    };
+
+    await useCase.executeJob(makeJob());
+
+    expect(orchestrator.buildPruneCalls).toBe(1);
+    expect(projectRepository.project?.lastDeployStatus).toBe("succeeded");
   });
 });

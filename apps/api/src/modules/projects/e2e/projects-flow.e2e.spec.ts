@@ -77,6 +77,14 @@ class FakeContainerOrchestrator {
     this.pruneCalls.push(config);
     return "";
   }
+
+  async pruneUnusedBuildArtifacts(): Promise<any> {
+    return {
+      imagePrune: { ok: true, output: null, error: null },
+      builderPrune: { ok: true, output: null, error: null },
+      reservedSpace: "2GB",
+    };
+  }
 }
 
 /**
