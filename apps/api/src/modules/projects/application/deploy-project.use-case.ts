@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -41,6 +41,12 @@ import {
 import { ensureDockerignore } from "../infrastructure/dockerignore";
 import { DeployLogger } from "../infrastructure/deploy-logger";
 import { ResourcePreflightService } from "../infrastructure/resource-preflight.service";
+import {
+  StagingDiagnosticsCollector,
+  formatStagingDiagnostics,
+  sanitizeDiagnosticText,
+  type StagingDiagnosticsCollectorLike,
+} from "../infrastructure/staging-diagnostics";
 import { DEPLOY_JOB_REPOSITORY, type DeployJobRepository } from "../domain/deploy-job.repository";
 import { DeployJob, type DeployJobStage } from "../domain/deploy-job.entity";
 import { decideStagingHealthTimeout } from "../domain/staging-config";
@@ -113,6 +119,12 @@ export class DeployProjectUseCase {
     @Inject(DEPLOY_JOB_REPOSITORY) private readonly deployJobRepository: DeployJobRepository,
     private readonly deployLogger: DeployLogger,
     private readonly resourcePreflight: ResourcePreflightService,
+    /**
+     * Coletor do diagnóstico do staging (opcional: sem ele, o padrão lê o
+     * Docker). Usado SÓ para observabilidade - nunca altera o deploy.
+     */
+    @Optional()
+    private readonly stagingDiagnostics: StagingDiagnosticsCollectorLike | null = null,
   ) {}
 
   async executeJob(job: DeployJob): Promise<void> {
@@ -143,6 +155,7 @@ export class DeployProjectUseCase {
     let promoted = false;
     let rollbackSucceeded = false;
     let stagingRemoved = false;
+    let stagingCreated = false;
     let candidateImage: string | null = null;
     let previousImage: string | null = null;
 
@@ -338,6 +351,9 @@ export class DeployProjectUseCase {
         const buildStartedAt = Date.now();
         const stagingLog = await this.orchestrator.deployStaging(deployConfig);
         const buildDurationMs = Date.now() - buildStartedAt;
+        // A partir daqui o container de TESTE existe: se algo falhar antes
+        // do cleanup, o estado dele é capturado antes de ser removido.
+        stagingCreated = true;
         await this.deployJobRepository.save(job.withDurations(buildDurationMs, null));
         this.deployLogger.log("staging-start", context, "build concluído", { buildDurationMs });
         deployRecord = await this.deployRecordRepository.save(
@@ -459,6 +475,17 @@ export class DeployProjectUseCase {
           rollbackSucceeded ? "rolled-back" : "failed",
         );
         await this.repository.save(current);
+      }
+
+      // DIAGNÓSTICO DO STAGING (somente observabilidade): se o container de
+      // teste chegou a existir, captura estado + últimos logs ANTES do
+      // cleanup do finally. Best-effort: nunca substitui a causa original
+      // nem impede a remoção do container.
+      if (deployConfig && stagingCreated && !stagingRemoved) {
+        const diagnostics = await this.captureStagingDiagnostics(deployConfig, context);
+        if (diagnostics) {
+          deployRecord = deployRecord.appendLog(diagnostics);
+        }
       }
 
       await this.deployRecordRepository.save(deployRecord.withResult("failed", message));
@@ -671,6 +698,38 @@ export class DeployProjectUseCase {
   ): Promise<void> {
     await this.deployJobRepository.save(job.withStage(stage));
     this.deployLogger.log(stage, context, "etapa iniciada");
+  }
+
+  /**
+   * Captura estado + últimos logs do container de TESTE antes do cleanup.
+   *
+   * SOMENTE OBSERVABILIDADE. Nunca toca na produção (recebe apenas
+   * `config.staging.containerName`), nunca lança e nunca substitui o erro
+   * original do deploy: qualquer falha vira uma linha sanitizada no log.
+   */
+  private async captureStagingDiagnostics(
+    config: DeployConfig,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<string | null> {
+    const containerName = config.staging?.containerName;
+    if (!containerName) return null;
+
+    try {
+      const collector = this.stagingDiagnostics ?? new StagingDiagnosticsCollector();
+      const capture = await collector.collect(containerName);
+      this.deployLogger.warn("staging-health", context, "diagnóstico do staging capturado antes do cleanup", {
+        status: capture.state?.status ?? null,
+        exitCode: capture.state?.exitCode ?? null,
+        oomKilled: capture.state?.oomKilled ?? null,
+        restartCount: capture.state?.restartCount ?? null,
+        logsCaptured: capture.logs !== null,
+      });
+      return formatStagingDiagnostics(capture);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Diagnóstico do staging indisponível: ${sanitizeDiagnosticText(detail)}`);
+      return null;
+    }
   }
 
   private async removeStagingIgnoringErrors(

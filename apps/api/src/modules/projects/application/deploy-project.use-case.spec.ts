@@ -92,6 +92,32 @@ class FakeHealthChecker {
   }
 }
 
+/** Coletor de diagnóstico do staging (não chama Docker nos testes). */
+class FakeStagingDiagnostics {
+  calls: string[] = [];
+  fail = false;
+  capture: any = {
+    containerName: "staging",
+    state: {
+      containerName: "staging",
+      status: "exited",
+      exitCode: 137,
+      oomKilled: true,
+      restartCount: 0,
+      startedAt: "2026-10-22T18:00:00Z",
+      finishedAt: "2026-10-22T18:00:05Z",
+      memoryLimitMb: 600,
+    },
+    logs: "FATAL ERROR: Reached heap limit",
+    errors: [],
+  };
+  async collect(containerName: string): Promise<any> {
+    this.calls.push(containerName);
+    if (this.fail) throw new Error("diagnóstico indisponível");
+    return this.capture;
+  }
+}
+
 class FakeDeployRecordRepository {
   records: any[] = [];
   async findByProjectId(): Promise<any[]> {
@@ -200,6 +226,7 @@ describe("DeployProjectUseCase (Wave 2)", () => {
   const deployRecordRepository = new FakeDeployRecordRepository();
   const deployJobRepository = new FakeDeployJobRepository();
   const cloner = new FakeCloner();
+  const stagingDiagnostics = new FakeStagingDiagnostics();
   /** Porta alocada seguinte (a de produção vem antes da do staging). */
   let nextPort = 3200;
 
@@ -243,6 +270,8 @@ describe("DeployProjectUseCase (Wave 2)", () => {
       // Preflight com métricas de host FIXAS: o deploy de teste não pode
       // depender do load/RAM da máquina que roda o Jest.
       new ResourcePreflightService(safeHostResourceProvider()),
+      // Diagnóstico do staging: fake (nada de Docker nos testes).
+      stagingDiagnostics,
     );
   });
 
@@ -261,6 +290,8 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     healthChecker.results = [];
     deployJobRepository.jobs.clear();
     deployRecordRepository.records = [];
+    stagingDiagnostics.calls = [];
+    stagingDiagnostics.fail = false;
 
     projectRepository.project = new ProjectEntity(
       "proj-1",
@@ -347,6 +378,48 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     expect(orchestrator.removeStagingCalls).toBe(1);
     expect(projectRepository.project?.status).not.toBe("failed");
     expect(projectRepository.project?.lastDeployStatus).toBe("failed");
+  });
+
+  it("health do staging falha: captura estado/logs ANTES do cleanup (só do staging)", async () => {
+    healthChecker.results = [false]; // staging não responde
+    const job = makeJob();
+
+    await expect(useCase.executeJob(job)).rejects.toThrow(/Container de teste subiu mas não respondeu/);
+
+    // Capturou o diagnóstico do container de TESTE, nunca o de produção.
+    expect(stagingDiagnostics.calls).toHaveLength(1);
+    expect(stagingDiagnostics.calls[0]).toContain("-staging");
+    expect(stagingDiagnostics.calls[0]).not.toBe("korrelo-x");
+
+    const lastRecord = deployRecordRepository.records.at(-1);
+    expect(lastRecord.log).toContain("diagnóstico do staging (antes do cleanup)");
+    expect(lastRecord.log).toContain("oomKilled: true");
+    expect(lastRecord.log).toContain("exitCode: 137");
+    expect(lastRecord.log).toContain("FATAL ERROR: Reached heap limit");
+    // O registro continua marcado como falha e o staging foi removido.
+    expect(lastRecord.status).toBe("failed");
+    expect(orchestrator.removeStagingCalls).toBe(1);
+  });
+
+  it("falha ao capturar diagnóstico NÃO substitui a causa original nem impede o cleanup", async () => {
+    healthChecker.results = [false];
+    stagingDiagnostics.fail = true;
+    const job = makeJob();
+
+    await expect(useCase.executeJob(job)).rejects.toThrow(/Container de teste subiu mas não respondeu/);
+    expect(stagingDiagnostics.calls).toHaveLength(1);
+    expect(orchestrator.removeStagingCalls).toBe(1);
+    expect(projectRepository.project?.lastDeployStatus).toBe("failed");
+  });
+
+  it("deploy com sucesso não coleta diagnóstico (staging já foi removido antes)", async () => {
+    healthChecker.results = [true, true];
+    const job = makeJob();
+
+    await useCase.executeJob(job);
+
+    expect(stagingDiagnostics.calls).toEqual([]);
+    expect(orchestrator.removeStagingCalls).toBe(1);
   });
 
   it("falha na promoção: faz ROLLBACK para a imagem anterior", async () => {

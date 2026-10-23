@@ -463,6 +463,8 @@ describe("deploy de projeto - proteção da produção", () => {
         deployJobSelf as any,
         { log: () => undefined, error: () => undefined } as any,
         new ResourcePreflightService(safeHostResourceProvider()),
+        // Diagnóstico do staging: fake (nada de Docker nos testes).
+        { collect: async () => ({ containerName: "staging", state: null, logs: null, errors: [] }) } as any,
       );
 
       return { useCase, orchestrator, healthChecker, project, job, containerState };
