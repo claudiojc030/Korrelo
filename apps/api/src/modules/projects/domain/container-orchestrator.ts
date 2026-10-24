@@ -1,6 +1,35 @@
 export const CONTAINER_ORCHESTRATOR = Symbol("CONTAINER_ORCHESTRATOR");
+/**
+ * Compose ESTÁVEL de produção.
+ *
+ * Só é publicado depois que a versão nova passou no health de produção.
+ * Uma falha de staging nunca escreve aqui (ver DeployProjectUseCase).
+ */
 export const COMPOSE_FILENAME = "docker-compose.korrelo.yml";
+/** Cópia da configuração de produção anterior, guardada antes de publicar a nova. */
+export const COMPOSE_PREVIOUS_FILENAME = "docker-compose.korrelo.previous.yml";
+/** Prefixo dos composes POR JOB (build/staging/promoção isolados). */
+export const COMPOSE_JOB_PREFIX = "docker-compose.korrelo.job-";
 export const ENV_FILENAME = ".env.korrelo";
+
+/**
+ * Nome do compose de um job de deploy.
+ *
+ * Cada tentativa usa o SEU arquivo: uma falha de staging não toca no compose
+ * estável de produção. O jobId passa por um filtro conservador porque vira
+ * nome de arquivo.
+ */
+export function jobComposeFilename(jobId: string): string {
+  const safe = String(jobId || "unknown")
+    .replace(/[^A-Za-z0-9_-]/g, "-")
+    .slice(0, 64);
+  return `${COMPOSE_JOB_PREFIX}${safe}.yml`;
+}
+
+/** true para arquivos de compose por job (não são o compose estável). */
+export function isJobComposeFilename(name: string): boolean {
+  return name.startsWith(COMPOSE_JOB_PREFIX) && name.endsWith(".yml");
+}
 
 export interface DatabaseServiceConfig {
   type: "postgres" | "redis" | "mongodb";
@@ -54,9 +83,22 @@ export interface DeployConfig {
   // --- Wave 2 -------------------------------------------------------
   // Nome da imagem (sem tag) - a tag é a versão (commit).
   imageName?: string;
-  // Tag da imagem candidata (ex.: "commit-abc123def456"). A tag default do
-  // compose é essa; o rollback reusa o mesmo compose com outra tag.
+  // Tag da imagem DESTA operação (staging/promoção) ou, no rollback, a da
+  // imagem anterior. NUNCA é usada como default no compose: o arquivo exige
+  // `${KORRELO_IMAGE_TAG:?}` e o Korrelo passa a variável explicitamente.
   imageTag?: string;
+  /**
+   * Compose usado por ESTA operação (relativo ao projectPath ou absoluto).
+   * Staging/promoção usam o arquivo do job; rollback usa o estável.
+   * Default: COMPOSE_FILENAME (estável).
+   */
+  composeFilePath?: string;
+  /**
+   * Arquivo de ambiente CONTROLADO pelo Korrelo, usado só para interpolação
+   * do compose (`--env-file`). Evita que um `.env` do repositório do projeto
+   * defina `KORRELO_IMAGE_TAG` ou outras variáveis do compose.
+   */
+  composeEnvFilePath?: string;
   // Caminho ABSOLUTO do arquivo de ambiente do projeto. Fica FORA do
   // diretório do projeto de propósito: assim ele nunca entra no contexto de
   // build (e nem numa camada de imagem).
@@ -104,6 +146,21 @@ export interface ProductionAction {
   previousImage?: string | null;
 }
 
+/**
+ * Estado observado do container de PRODUÇÃO (nunca inferido pelo banco).
+ *
+ * - `absent`: o Docker confirmou que o container não existe.
+ * - `known`: container e referência de imagem verificados (o ID resolvido da
+ *   referência bate com o ID da imagem que o container está usando).
+ * - `unverified`: não foi possível COMPROVAR a identidade (Docker indisponível,
+ *   referência solta, `sha256:...`, ID divergente). Nunca tratado como
+ *   "produção intocada".
+ */
+export type ProductionContainerState =
+  | { kind: "absent" }
+  | { kind: "unverified"; containerId: string | null; reason: string }
+  | { kind: "known"; containerId: string; imageReference: string; imageId: string };
+
 export interface ContainerOrchestrator {
   // Builda e sobe SÓ a instância de teste (app_staging no compose), sem tocar
   // no container em produção (app) de jeito nenhum. Retorna stdout+stderr
@@ -115,14 +172,25 @@ export interface ContainerOrchestrator {
   // é trocada.
   promote(config: DeployConfig, action?: ProductionAction): Promise<string>;
   // Rollback: volta a produção para a imagem anterior (que já está no
-  // servidor). NÃO mexe em volume nem em banco.
+  // servidor). NÃO mexe em volume nem em banco. Deve ser chamado com
+  // `config.composeFilePath` apontando para o compose ESTÁVEL (configuração
+  // conhecida como boa) e uma `imageTag` explícita (a tag anterior).
   rollback(config: DeployConfig, previousImage: string, action?: ProductionAction): Promise<string>;
   // Remove a instância de teste (sucesso ou falha, sempre no final).
-  removeStaging(config: { projectPath: string; containerName: string }): Promise<void>;
+  removeStaging(config: { projectPath: string; containerName: string; composeFilePath?: string }): Promise<void>;
   teardown(config: TeardownConfig): Promise<void>;
   // true quando o BuildKit está disponível (cache mounts e sintaxe moderna
   // de Dockerfile só funcionam com ele).
   supportsBuildKit(): Promise<boolean>;
+  // A imagem existe no servidor? Usado como PRÉ-REQUISITO de promoção: sem a
+  // imagem atual em produção não existe alvo confiável de rollback.
+  imageReferenceExists(reference: string): Promise<boolean>;
+  /**
+   * Inspeciona o container de produção para saber QUAL imagem ele realmente
+   * executa. Usado para adoção segura de projetos legados e para detectar se
+   * uma promoção alterou a produção antes de falhar.
+   */
+  inspectProductionContainer(containerName: string): Promise<ProductionContainerState>;
   // Remove imagens DO PROJETO que não estão protegidas. As imagens
   // protegidas (atual, anterior, candidata) nunca são removidas.
   pruneProjectImages(config: { imageName: string; protectedImages: string[] }): Promise<string>;

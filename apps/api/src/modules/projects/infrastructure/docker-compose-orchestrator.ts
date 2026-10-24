@@ -8,6 +8,7 @@ import type {
   ContainerOrchestrator,
   DeployConfig,
   ProductionAction,
+  ProductionContainerState,
   TeardownConfig,
 } from "../domain/container-orchestrator";
 import { COMPOSE_FILENAME } from "../domain/container-orchestrator";
@@ -77,8 +78,13 @@ export function splitImageReference(reference: string): { name: string; tag: str
   if (index <= 0) return null;
   const name = reference.slice(0, index);
   const tag = reference.slice(index + 1);
-  if (!name || !tag || tag.includes("/")) return null;
+  if (!name || !tag || tag.includes("/") || name.startsWith("sha256")) return null;
   return { name, tag };
+}
+
+/** Remove o prefixo `sha256:` para comparar IDs de imagem. */
+function normalizeImageId(id: string): string {
+  return id.trim().replace(/^sha256:/i, "").toLowerCase();
 }
 
 /**
@@ -157,6 +163,9 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
   }
 
   async deployStaging(config: DeployConfig): Promise<string> {
+    // A tag NUNCA vem de default do compose nem de .env: é exigida aqui e
+    // passada explicitamente (env vence .env do projeto e env do Core).
+    const imageTag = this.requireImageTag(config, "staging");
     await this.ensureSharedNetwork();
     try {
       // execFile (não exec/shell): os argumentos vão direto pro processo, sem
@@ -176,10 +185,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       // que JÁ está rodando (mesma rede).
       const build = await this.withLowPriority("docker", [
         "compose",
-        "-f",
-        COMPOSE_FILENAME,
-        "-p",
-        config.containerName,
+        ...this.composeFileArgs(config),
         "up",
         "-d",
         "--build",
@@ -192,6 +198,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
         // dependências + lint/typecheck do projeto.
         cwd: config.projectPath,
         timeout: STAGING_TIMEOUT_MS,
+        env: this.composeEnvironment(imageTag),
       });
       return combineOutput(stdout, stderr);
     } catch (error) {
@@ -204,6 +211,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
 
   async promote(config: DeployConfig, action?: ProductionAction): Promise<string> {
     this.assertProductionAction(action, config, "promote");
+    const imageTag = this.requireImageTag(config, "promoção");
     let output: string;
     try {
       // --no-deps: não mexe no "db" (já está rodando).
@@ -214,10 +222,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       const imageExists = await this.imageExists(config);
       const args = [
         "compose",
-        "-f",
-        COMPOSE_FILENAME,
-        "-p",
-        config.containerName,
+        ...this.composeFileArgs(config),
         "up",
         "-d",
         ...(imageExists ? ["--no-build"] : ["--build"]),
@@ -228,6 +233,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       const { stdout, stderr } = await execFile("docker", args, {
         cwd: config.projectPath,
         timeout: PROMOTE_TIMEOUT_MS,
+        env: this.composeEnvironment(imageTag),
       });
       output = combineOutput(stdout, stderr);
     } catch (error) {
@@ -260,6 +266,17 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
         apiError("ROLLBACK_IMAGE_INVALID", `Imagem anterior inválida: "${previousImage}".`),
       );
     }
+    // O compose do rollback tem o NOME da imagem do projeto. Se o projeto foi
+    // renomeado, a tag antiga aponta para outro repositório e o rollback
+    // silenciosamente não restauraria nada - melhor recusar explicitamente.
+    if (config.imageName && parsed.name !== config.imageName) {
+      throw new InternalServerErrorException(
+        apiError(
+          "ROLLBACK_IMAGE_MISMATCH",
+          `A imagem anterior (${previousImage}) não pertence a este projeto (${config.imageName}) - rollback recusado.`,
+        ),
+      );
+    }
 
     const exists = await this.imageReferenceExists(previousImage);
     if (!exists) {
@@ -276,10 +293,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
         "docker",
         [
           "compose",
-          "-f",
-          COMPOSE_FILENAME,
-          "-p",
-          config.containerName,
+          ...this.composeFileArgs(config),
           "up",
           "-d",
           "--no-build",
@@ -290,10 +304,10 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
         {
           cwd: config.projectPath,
           timeout: PROMOTE_TIMEOUT_MS,
-          // O compose usa ${KORRELO_IMAGE_TAG:-<tag do deploy>} na linha
-          // "image:" - sobrescrevendo a variável, a promoção roda com a
-          // imagem anterior.
-          env: { ...process.env, KORRELO_IMAGE_TAG: parsed.tag },
+          // A tag anterior vai EXPLÍCITA no env (vence .env do projeto e o
+          // default inexistente do compose). O compose usado é o ESTÁVEL,
+          // ou seja, a configuração conhecida como boa.
+          env: this.composeEnvironment(parsed.tag),
         },
       );
       return combineOutput(stdout, stderr);
@@ -303,6 +317,59 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
         apiError("ROLLBACK_FAILED", `Falha ao voltar pra imagem anterior: ${message}\n${execOutputOf(error)}`),
       );
     }
+  }
+
+  /**
+   * Argumentos comuns de arquivo de compose.
+   *
+   * Staging/promoção usam o compose DO JOB; rollback usa o ESTÁVEL. Quando o
+   * caller fornece um env-file controlado, ele SUBSTITUI o `.env` do
+   * repositório do projeto na interpolação (defesa extra contra a tag ser
+   * sobrescrita por um arquivo do projeto).
+   */
+  private composeFileArgs(config: DeployConfig): string[] {
+    return [
+      "-f",
+      config.composeFilePath || COMPOSE_FILENAME,
+      ...(config.composeEnvFilePath ? ["--env-file", config.composeEnvFilePath] : []),
+      "-p",
+      config.containerName,
+    ];
+  }
+
+  /**
+   * Tag obrigatória para qualquer operação que sobe container.
+   *
+   * Sem isso a operação é RECUSADA antes de qualquer comando no Docker (não
+   * existe "usa a última que estava no arquivo").
+   */
+  private requireImageTag(config: DeployConfig, kind: string): string {
+    const tag = (config.imageTag ?? "").trim();
+    if (!tag) {
+      throw new InternalServerErrorException(
+        apiError(
+          "COMPOSE_IMAGE_TAG_REQUIRED",
+          `Operação de ${kind} recusada: KORRELO_IMAGE_TAG não foi definida pelo Korrelo.`,
+        ),
+      );
+    }
+    if (!/^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/.test(tag)) {
+      throw new InternalServerErrorException(
+        apiError("COMPOSE_IMAGE_TAG_INVALID", `Tag de imagem inválida: "${tag}".`),
+      );
+    }
+    return tag;
+  }
+
+  /**
+   * Env do processo `docker compose`.
+   *
+   * `KORRELO_IMAGE_TAG` é SEMPRE sobrescrita aqui: nem o env do Core nem o
+   * `.env` do projeto escolhem a imagem. O resto do env é herdado porque o
+   * Docker precisa de DOCKER_HOST/PATH.
+   */
+  private composeEnvironment(imageTag: string): NodeJS.ProcessEnv {
+    return { ...process.env, KORRELO_IMAGE_TAG: imageTag };
   }
 
   /**
@@ -352,10 +419,19 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
     }
   }
 
-  async removeStaging(config: { projectPath: string; containerName: string }): Promise<void> {
+  async removeStaging(config: { projectPath: string; containerName: string; composeFilePath?: string }): Promise<void> {
     await execFile(
       "docker",
-      ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "rm", "-fs", "app_staging"],
+      [
+        "compose",
+        "-f",
+        config.composeFilePath || COMPOSE_FILENAME,
+        "-p",
+        config.containerName,
+        "rm",
+        "-fs",
+        "app_staging",
+      ],
       { cwd: config.projectPath, timeout: REMOVE_STAGING_TIMEOUT_MS },
     );
   }
@@ -427,13 +503,90 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
     return this.imageReferenceExists(`${config.imageName}:${config.imageTag}`);
   }
 
-  private async imageReferenceExists(reference: string): Promise<boolean> {
+  /** A referência (tag) existe no servidor? Pré-requisito de promoção/rollback. */
+  async imageReferenceExists(reference: string): Promise<boolean> {
     try {
       await execFile("docker", ["image", "inspect", reference], { timeout: 20_000 });
       return true;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Inspeciona o container de produção e COMPROVA qual imagem ele executa.
+   *
+   * Regras de segurança:
+   *  - container inexistente -> `absent` (é o único caso em que tratamos como
+   *    "não há produção a preservar");
+   *  - qualquer falha do Docker, referência sem tag, `sha256:...` ou ID que
+   *    não bate -> `unverified`. Quem chama NUNCA deve assumir que a produção
+   *    ficou intacta nesse estado.
+   */
+  async inspectProductionContainer(containerName: string): Promise<ProductionContainerState> {
+    if (!containerName) {
+      return { kind: "unverified", containerId: null, reason: "nome do container de produção vazio" };
+    }
+
+    let raw: string;
+    try {
+      const { stdout } = await execFile(
+        "docker",
+        ["inspect", "--format", "{{.Id}}|{{.Image}}|{{.Config.Image}}", containerName],
+        { timeout: 20_000 },
+      );
+      raw = stdout.trim();
+    } catch (error) {
+      const output = execOutputOf(error);
+      if (/no such (object|container)/i.test(output)) return { kind: "absent" };
+      return {
+        kind: "unverified",
+        containerId: null,
+        reason: output || (error instanceof Error ? error.message : String(error)),
+      };
+    }
+
+    const [containerId, containerImageId, reference] = raw.split("|");
+    if (!containerId || !containerImageId || !reference) {
+      return {
+        kind: "unverified",
+        containerId: containerId || null,
+        reason: "inspeção do container retornou dados incompletos",
+      };
+    }
+    if (!splitImageReference(reference)) {
+      return {
+        kind: "unverified",
+        containerId,
+        reason: `referência "${reference}" não é repositório:tag`,
+      };
+    }
+
+    let resolvedId: string;
+    try {
+      const { stdout } = await execFile(
+        "docker",
+        ["image", "inspect", "--format", "{{.Id}}", reference],
+        { timeout: 20_000 },
+      );
+      resolvedId = stdout.trim();
+    } catch (error) {
+      return {
+        kind: "unverified",
+        containerId,
+        reason: `referência "${reference}" não pôde ser verificada (${execOutputOf(error) || "imagem ausente"})`,
+      };
+    }
+
+    if (normalizeImageId(resolvedId) !== normalizeImageId(containerImageId)) {
+      return {
+        kind: "unverified",
+        containerId,
+        reason: `referência "${reference}" não corresponde ao ID da imagem em execução`,
+      };
+    }
+
+    return { kind: "known", containerId, imageReference: reference, imageId: containerImageId };
   }
 
   /**

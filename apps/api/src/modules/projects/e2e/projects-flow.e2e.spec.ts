@@ -58,7 +58,6 @@ class FakeContainerOrchestrator {
   async removeStaging(config: { projectPath: string; containerName: string }): Promise<void> {
     this.removeStagingCalls.push(config);
   }
-
   async teardown(config: { projectPath: string; containerName: string }): Promise<void> {
     this.teardownCalls.push(config);
   }
@@ -71,6 +70,14 @@ class FakeContainerOrchestrator {
 
   async supportsBuildKit(): Promise<boolean> {
     return false;
+  }
+
+  async imageReferenceExists(): Promise<boolean> {
+    return true;
+  }
+
+  async inspectProductionContainer(): Promise<{ kind: "absent" }> {
+    return { kind: "absent" };
   }
 
   async pruneProjectImages(config: { imageName: string; protectedImages: string[] }): Promise<string> {

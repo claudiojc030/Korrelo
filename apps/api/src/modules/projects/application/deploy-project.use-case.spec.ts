@@ -19,6 +19,8 @@ import type { DeployJob } from "../domain/deploy-job.entity";
 class FakeProjectRepository {
   project: Project | null = null;
   saved: Project[] = [];
+  /** Simula falha de persistência da troca de imagens (P1-2). */
+  failNextImageSave = false;
   async findAll(): Promise<Project[]> {
     return this.project ? [this.project] : [];
   }
@@ -32,6 +34,14 @@ class FakeProjectRepository {
     return this.project ? [this.project] : [];
   }
   async save(project: Project): Promise<Project> {
+    if (
+      this.failNextImageSave &&
+      this.project &&
+      project.currentImage !== this.project.currentImage
+    ) {
+      this.failNextImageSave = false;
+      throw new Error("SQLITE_BUSY: banco indisponível (simulado)");
+    }
     this.project = project;
     this.saved.push(project);
     return project;
@@ -44,14 +54,25 @@ class FakeProjectRepository {
 class FakeOrchestrator {
   stagingCalls = 0;
   promoteCalls = 0;
-  rollbackCalls: { previousImage: string }[] = [];
+  rollbackCalls: { previousImage: string; config?: any }[] = [];
   removeStagingCalls = 0;
+  removeStagingConfigs: any[] = [];
+  promoteConfigs: any[] = [];
   pruneCalls: { protectedImages: string[] }[] = [];
   failStaging = false;
   failPromote = false;
   failRollback = false;
+  /** Resultado de `docker image inspect` para o pré-requisito de promoção. */
+  currentImageExists = true;
+  checkedImages: string[] = [];
+  /** Estados de produção devolvidos em sequência (fila); default = ausente. */
+  productionStates: any[] = [];
+  defaultProductionState: any = { kind: "absent" };
+  inspectCalls: string[] = [];
   /** Config recebida em deployStaging (para checar env do staging). */
   lastConfig: any = null;
+  /** Conteúdo do env-file de tag lido durante o staging (se existir). */
+  lastComposeEnvContent: string | null = null;
   /** Quantas vezes a limpeza de cache de build foi chamada. */
   buildPruneCalls = 0;
   failBuildPrune = false;
@@ -63,6 +84,14 @@ class FakeOrchestrator {
 
   async deployStaging(config?: any): Promise<string> {
     this.lastConfig = config ?? null;
+    this.lastComposeEnvContent = null;
+    if (config?.composeEnvFilePath) {
+      try {
+        this.lastComposeEnvContent = fs.readFileSync(config.composeEnvFilePath, "utf-8");
+      } catch {
+        this.lastComposeEnvContent = null;
+      }
+    }
     this.stagingCalls += 1;
     if (this.failStaging) throw new Error("falha no staging");
     return "staging ok";
@@ -72,18 +101,30 @@ class FakeOrchestrator {
     if (this.failBuildPrune) throw new Error("docker indisponível");
     return this.buildPruneResult;
   }
-  async promote(): Promise<string> {
+  async promote(config?: any): Promise<string> {
     this.promoteCalls += 1;
+    this.promoteConfigs.push(config ?? null);
     if (this.failPromote) throw new Error("falha no promote");
     return "promote ok";
   }
-  async rollback(_config: unknown, previousImage: string): Promise<string> {
-    this.rollbackCalls.push({ previousImage });
+  async rollback(config: unknown, previousImage: string): Promise<string> {
+    this.rollbackCalls.push({ previousImage, config });
     if (this.failRollback) throw new Error("falha no rollback");
     return "rollback ok";
   }
-  async removeStaging(): Promise<void> {
+  async removeStaging(config?: any): Promise<void> {
     this.removeStagingCalls += 1;
+    this.removeStagingConfigs.push(config ?? null);
+  }
+  async imageReferenceExists(reference: string): Promise<boolean> {
+    this.checkedImages.push(reference);
+    return this.currentImageExists;
+  }
+  async inspectProductionContainer(containerName: string): Promise<any> {
+    this.inspectCalls.push(containerName);
+    return this.productionStates.length > 0
+      ? this.productionStates.shift()
+      : this.defaultProductionState;
   }
   async teardown(): Promise<void> {}
   async supportsBuildKit(): Promise<boolean> {
@@ -320,9 +361,16 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     orchestrator.promoteCalls = 0;
     orchestrator.rollbackCalls = [];
     orchestrator.removeStagingCalls = 0;
+    orchestrator.removeStagingConfigs = [];
+    orchestrator.promoteConfigs = [];
     orchestrator.failStaging = false;
     orchestrator.failPromote = false;
     orchestrator.failRollback = false;
+    orchestrator.currentImageExists = true;
+    orchestrator.checkedImages = [];
+    orchestrator.productionStates = [];
+    orchestrator.defaultProductionState = { kind: "absent" };
+    orchestrator.inspectCalls = [];
     healthChecker.results = [];
     deployJobRepository.jobs.clear();
     deployRecordRepository.records = [];
@@ -332,6 +380,7 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     orchestrator.lastConfig = null;
     orchestrator.buildPruneCalls = 0;
     orchestrator.failBuildPrune = false;
+    projectRepository.failNextImageSave = false;
     orchestrator.buildPruneResult = {
       imagePrune: { ok: true, output: null, error: null },
       builderPrune: { ok: true, output: null, error: null },
@@ -493,9 +542,10 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     const jobFinal = deployJobRepository.jobs.get(job.id);
     expect(jobFinal?.rollbackAttempted).toBe(true);
     expect(jobFinal?.rollbackSucceeded).toBe(false);
-    // Aqui a produçãoreally ficou sem resposta: o runtime é marcado como falho.
+    // Aqui a produção ficou sem resposta e o rollback falhou: runtime falho +
+    // marcador persistido que bloqueia novos deploys até reconciliação.
     expect(projectRepository.project?.status).toBe("failed");
-    expect(projectRepository.project?.lastDeployStatus).toBe("failed");
+    expect(projectRepository.project?.lastDeployStatus).toBe("indeterminate");
   });
 
   it("o arquivo de ambiente do projeto fica FORA do diretório do projeto", async () => {
@@ -767,5 +817,379 @@ describe("DeployProjectUseCase (Wave 2)", () => {
 
     expect(orchestrator.buildPruneCalls).toBe(1);
     expect(projectRepository.project?.lastDeployStatus).toBe("succeeded");
+  });
+
+  // ------------------------------- compose estável x compose do job (W3)
+  const projectDir = () => path.join(tempWorkspaceDir, "proj-1");
+  const stableComposePath = () => path.join(projectDir(), "docker-compose.korrelo.yml");
+  const previousComposePath = () => path.join(projectDir(), "docker-compose.korrelo.previous.yml");
+
+  function seedStableCompose(content: string): void {
+    fs.mkdirSync(projectDir(), { recursive: true });
+    fs.writeFileSync(stableComposePath(), content, "utf-8");
+    if (fs.existsSync(previousComposePath())) fs.unlinkSync(previousComposePath());
+  }
+
+  function jobComposeFiles(): string[] {
+    if (!fs.existsSync(projectDir())) return [];
+    return fs.readdirSync(projectDir()).filter((name) => name.startsWith("docker-compose.korrelo.job-"));
+  }
+
+  it("staging REPROVADO não altera o compose estável de produção", async () => {
+    const sentinel = "# compose aprovado da versão em produção\n";
+    seedStableCompose(sentinel);
+    orchestrator.failStaging = true;
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow("falha no staging");
+
+    expect(fs.readFileSync(stableComposePath(), "utf-8")).toBe(sentinel);
+    expect(fs.existsSync(previousComposePath())).toBe(false);
+    // O compose do job é temporário e some no finally.
+    expect(jobComposeFiles()).toEqual([]);
+  });
+
+  it("health do staging reprovado também preserva o compose estável", async () => {
+    const sentinel = "# compose aprovado (health reprovado)\n";
+    seedStableCompose(sentinel);
+    healthChecker.results = [false];
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/não respondeu/);
+
+    expect(fs.readFileSync(stableComposePath(), "utf-8")).toBe(sentinel);
+    expect(jobComposeFiles()).toEqual([]);
+  });
+
+  it("promoção bem-sucedida publica o compose estável e arquiva o anterior", async () => {
+    const sentinel = "# compose anterior aprovado\n";
+    seedStableCompose(sentinel);
+    const job = makeJob();
+
+    await useCase.executeJob(job);
+
+    const stable = fs.readFileSync(stableComposePath(), "utf-8");
+    // A tag é variável obrigatória: nenhuma candidata vira default.
+    expect(stable).toContain("${KORRELO_IMAGE_TAG:?");
+    expect(stable).not.toContain(":-commit-");
+    expect(stable).not.toContain(`commit-${"aaaaaaabbbbb"}`);
+    // Configuração anterior preservada para recuperação.
+    expect(fs.readFileSync(previousComposePath(), "utf-8")).toBe(sentinel);
+    expect(jobComposeFiles()).toEqual([]);
+  });
+
+  it("staging e promoção usam o compose DO JOB; rollback usa o ESTÁVEL", async () => {
+    seedStableCompose("# estável\n");
+    orchestrator.failStaging = true;
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow();
+    expect(orchestrator.lastConfig?.composeFilePath).toMatch(/^docker-compose\.korrelo\.job-.*\.yml$/);
+
+    orchestrator.failStaging = false;
+    healthChecker.results = [true, false];
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow();
+
+    expect(orchestrator.promoteConfigs[0]?.composeFilePath).toMatch(/^docker-compose\.korrelo\.job-/);
+    expect(orchestrator.rollbackCalls[0]?.config?.composeFilePath).toBe("docker-compose.korrelo.yml");
+  });
+
+  it("a tag vai explícita no env-file do job e o arquivo é removido no fim", async () => {
+    await useCase.executeJob(makeJob());
+
+    expect(orchestrator.lastConfig?.imageTag).toMatch(/^commit-aaaaaaabbbbb/);
+    expect(orchestrator.lastComposeEnvContent).toBe(`KORRELO_IMAGE_TAG=${orchestrator.lastConfig?.imageTag}\n`);
+    const envPath = orchestrator.lastConfig?.composeEnvFilePath;
+    expect(typeof envPath).toBe("string");
+    expect(fs.existsSync(envPath)).toBe(false);
+  });
+
+  it("promoção é BLOQUEADA quando a imagem atual não está mais no servidor", async () => {
+    const sentinel = "# estável\n";
+    seedStableCompose(sentinel);
+    orchestrator.currentImageExists = false;
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/não está mais no servidor/);
+
+    expect(orchestrator.promoteCalls).toBe(0);
+    expect(orchestrator.checkedImages).toContain("korrelo-x:commit-antiga");
+    expect(fs.readFileSync(stableComposePath(), "utf-8")).toBe(sentinel);
+  });
+
+  it("P1-3: legado com currentImage nulo ADOTA a imagem real do container", async () => {
+    const current = projectRepository.project as any;
+    projectRepository.project = current
+      .withDeployment("korrelo-x", 3200)
+      .withImages(null, null)
+      .withRuntimeObservation({
+        productionMemoryLimitMb: 1757,
+        runtimeSnapshot: null,
+        grandfathered: true,
+        grandfatheredAt: new Date(),
+        runtimeDriftDetected: false,
+        runtimeDriftDetails: null,
+      });
+    const state = {
+      kind: "known",
+      containerId: "container-real-1",
+      imageReference: "korrelo-meu-projeto-proj-1:commit-real123456",
+      imageId: "sha256:aaaabbbb",
+    };
+    // 1ª inspeção: gate/adoção. 2ª: estado antes da promoção.
+    orchestrator.productionStates = [state, state];
+
+    await useCase.executeJob(makeJob());
+
+    expect(orchestrator.promoteCalls).toBe(1);
+    expect(projectRepository.project?.previousImage).toBe("korrelo-meu-projeto-proj-1:commit-real123456");
+    expect(projectRepository.project?.currentImage).toContain("commit-aaaaaaabbbbb");
+    // A adoção compara IDs: a referência veio do container, não de "latest".
+    expect(orchestrator.inspectCalls[0]).toBe("korrelo-x");
+  });
+
+  it("P1-3: adoção recusada quando a identidade da imagem não é comprovável", async () => {
+    const current = projectRepository.project as any;
+    projectRepository.project = current
+      .withDeployment("korrelo-x", 3200)
+      .withImages(null, null)
+      .withRuntimeObservation({
+        productionMemoryLimitMb: 1757,
+        runtimeSnapshot: null,
+        grandfathered: true,
+        grandfatheredAt: new Date(),
+        runtimeDriftDetected: false,
+        runtimeDriftDetails: null,
+      });
+    orchestrator.defaultProductionState = {
+      kind: "unverified",
+      containerId: null,
+      reason: "Docker indisponível (simulado)",
+    };
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/COMPROVAR/);
+    expect(orchestrator.promoteCalls).toBe(0);
+  });
+
+  it("P1-3: adoção recusada para tag 'latest'", async () => {
+    const current = projectRepository.project as any;
+    projectRepository.project = current
+      .withDeployment("korrelo-x", 3200)
+      .withImages(null, null)
+      .withRuntimeObservation({
+        productionMemoryLimitMb: 1757,
+        runtimeSnapshot: null,
+        grandfathered: true,
+        grandfatheredAt: new Date(),
+        runtimeDriftDetected: false,
+        runtimeDriftDetails: null,
+      });
+    orchestrator.defaultProductionState = {
+      kind: "known",
+      containerId: "c1",
+      imageReference: "korrelo-x:latest",
+      imageId: "sha256:aa",
+    };
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/Adoção recusada/);
+    expect(orchestrator.promoteCalls).toBe(0);
+  });
+
+  it("P1-1: promoção falha ANTES de alterar produção -> NENHUM rollback", async () => {
+    orchestrator.failPromote = true;
+    const same = {
+      kind: "known",
+      containerId: "c1",
+      imageReference: "korrelo-x:commit-antiga",
+      imageId: "sha256:img1",
+    };
+    // antes da promoção + depois da falha: mesmo container/imagem.
+    orchestrator.productionStates = [same, same];
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/antes de alterar a produção/);
+
+    expect(orchestrator.rollbackCalls).toHaveLength(0);
+    expect(projectRepository.project?.status).not.toBe("failed");
+    expect(projectRepository.project?.lastDeployStatus).toBe("failed");
+  });
+
+  it("P1-1: promoção falha DEPOIS de alterar produção -> rollback com imagem boa", async () => {
+    orchestrator.failPromote = true;
+    const before = {
+      kind: "known",
+      containerId: "c1",
+      imageReference: "korrelo-x:commit-antiga",
+      imageId: "sha256:img1",
+    };
+    const after = {
+      kind: "known",
+      containerId: "c2",
+      imageReference: "korrelo-x:commit-aaaaaaabbbbb",
+      imageId: "sha256:img2",
+    };
+    orchestrator.productionStates = [before, after];
+    const job = makeJob();
+
+    await expect(useCase.executeJob(job)).rejects.toThrow(/Rollback executado/);
+
+    expect(orchestrator.rollbackCalls).toHaveLength(1);
+    expect(orchestrator.rollbackCalls[0].previousImage).toBe("korrelo-x:commit-antiga");
+    expect(projectRepository.project?.status).not.toBe("failed");
+    expect(deployJobRepository.jobs.get(job.id)?.rollbackAttempted).toBe(true);
+    expect(deployJobRepository.jobs.get(job.id)?.rollbackSucceeded).toBe(true);
+  });
+
+  it("P1-1: estado ambíguo (não verificável) também tenta rollback", async () => {
+    orchestrator.failPromote = true;
+    const before = {
+      kind: "known",
+      containerId: "c1",
+      imageReference: "korrelo-x:commit-antiga",
+      imageId: "sha256:img1",
+    };
+    const after = { kind: "unverified", containerId: null, reason: "docker timeout" };
+    orchestrator.productionStates = [before, after];
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/Rollback executado/);
+    expect(orchestrator.rollbackCalls).toHaveLength(1);
+  });
+
+  it("P1-1: promoção alterou produção, rollback falha -> ESTADO INDETERMINADO", async () => {
+    orchestrator.failPromote = true;
+    orchestrator.failRollback = true;
+    const before = {
+      kind: "known",
+      containerId: "c1",
+      imageReference: "korrelo-x:commit-antiga",
+      imageId: "sha256:img1",
+    };
+    const after = {
+      kind: "known",
+      containerId: "c2",
+      imageReference: "korrelo-x:commit-aaaaaaabbbbb",
+      imageId: "sha256:img2",
+    };
+    orchestrator.productionStates = [before, after];
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/INDETERMINADO/);
+    expect(orchestrator.rollbackCalls).toHaveLength(1);
+    expect(projectRepository.project?.status).toBe("failed");
+    // Marcador persistido (sobrevive a restart e bloqueia novos deploys).
+    expect(projectRepository.project?.lastDeployStatus).toBe("indeterminate");
+  });
+
+  it("projeto em estado INDETERMINADO não inicia nem staging", async () => {
+    const current = projectRepository.project as any;
+    projectRepository.project = current.withLastDeployStatus("indeterminate");
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/INDETERMINADO/);
+    expect(orchestrator.stagingCalls).toBe(0);
+    expect(orchestrator.promoteCalls).toBe(0);
+  });
+
+  it("P1-1: produção alterada sem imagem anterior -> INDETERMINADO, sem rollback", async () => {
+    const current = projectRepository.project as any;
+    projectRepository.project = current.withImages(null, null);
+    orchestrator.failPromote = true;
+    orchestrator.productionStates = [
+      { kind: "absent" },
+      {
+        kind: "known",
+        containerId: "c1",
+        imageReference: "korrelo-x:commit-aaaaaaabbbbb",
+        imageId: "sha256:img",
+      },
+    ];
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/INDETERMINADO/);
+    expect(orchestrator.rollbackCalls).toHaveLength(0);
+    expect(projectRepository.project?.status).toBe("failed");
+  });
+
+  it("P1-2: falha ao persistir currentImage reverte a produção", async () => {
+    projectRepository.failNextImageSave = true;
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/não pôde ser registrada/);
+
+    expect(orchestrator.rollbackCalls).toHaveLength(1);
+    expect(orchestrator.rollbackCalls[0].previousImage).toBe("korrelo-x:commit-antiga");
+    // Banco continua na imagem antiga e a produção foi revertida.
+    expect(projectRepository.project?.currentImage).toBe("korrelo-x:commit-antiga");
+    expect(projectRepository.project?.status).not.toBe("failed");
+  });
+
+  it("P1-2: falha ao publicar o compose estável -> INDETERMINADO (produção/banco coerentes)", async () => {
+    // Diretório com o nome do compose estável: o rename atômico falha.
+    fs.rmSync(stableComposePath(), { recursive: true, force: true });
+    fs.mkdirSync(stableComposePath(), { recursive: true });
+    try {
+      await expect(useCase.executeJob(makeJob())).rejects.toThrow(/INDETERMINADO/);
+      // Produção e banco foram atualizados; não há rollback destrutivo.
+      expect(orchestrator.rollbackCalls).toHaveLength(0);
+      expect(projectRepository.project?.currentImage).toContain("commit-aaaaaaabbbbb");
+      // O compose do job é PRESERVADO para recuperação manual.
+      expect(jobComposeFiles().length).toBeGreaterThan(0);
+      // Marcador persistido bloqueia novos deploys do projeto.
+      expect(projectRepository.project?.lastDeployStatus).toBe("indeterminate");
+      expect(projectRepository.project?.status).not.toBe("failed");
+    } finally {
+      fs.rmSync(stableComposePath(), { recursive: true, force: true });
+      fs.mkdirSync(projectDir(), { recursive: true });
+    }
+  });
+
+  it("compose legado com default de commit é saneado mesmo se o staging falhar", async () => {
+    const legacyCompose = [
+      "services:",
+      "  app:",
+      "    image: korrelo-x:${KORRELO_IMAGE_TAG:-commit-e1c69794d5f2}",
+      "    container_name: korrelo-x",
+      "",
+    ].join("\n");
+    seedStableCompose(legacyCompose);
+    orchestrator.failStaging = true;
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow("falha no staging");
+
+    const stable = fs.readFileSync(stableComposePath(), "utf-8");
+    // Nenhuma tag candidata pode continuar como default...
+    expect(stable).not.toContain(":-commit-");
+    expect(stable).not.toContain("commit-e1c69794d5f2");
+    // ...e a variável passa a ser obrigatória.
+    expect(stable).toContain("${KORRELO_IMAGE_TAG:?");
+    // O restante da configuração é preservado.
+    expect(stable).toContain("container_name: korrelo-x");
+  });
+
+  it("P1-2: falha ao preservar o compose anterior NÃO sobrescreve o estável", async () => {
+    const sentinel = "# única configuração de recuperação\n";
+    seedStableCompose(sentinel);
+    // `.previous` vira diretório: o backup atômico falha antes do rename.
+    fs.rmSync(previousComposePath(), { recursive: true, force: true });
+    fs.mkdirSync(previousComposePath(), { recursive: true });
+    try {
+      await expect(useCase.executeJob(makeJob())).rejects.toThrow(/INDETERMINADO/);
+      // O compose estável (recuperação) continua EXATAMENTE como estava.
+      expect(fs.readFileSync(stableComposePath(), "utf-8")).toBe(sentinel);
+      expect(projectRepository.project?.lastDeployStatus).toBe("indeterminate");
+    } finally {
+      fs.rmSync(previousComposePath(), { recursive: true, force: true });
+    }
+  });
+
+  it("arquivos de compose (estável/anterior) usam modo 0600 em POSIX", async () => {
+    if (process.platform === "win32") return;
+    seedStableCompose("# anterior\n");
+    await useCase.executeJob(makeJob());
+
+    expect(fs.statSync(stableComposePath()).mode & 0o777).toBe(0o600);
+    expect(fs.statSync(previousComposePath()).mode & 0o777).toBe(0o600);
+  });
+
+  it("staging-only não publica compose estável (só valida)", async () => {
+    const sentinel = "# estável de produção\n";
+    seedStableCompose(sentinel);
+    const job = makeStagingJob();
+
+    await useCase.executeJob(job);
+
+    expect(orchestrator.promoteCalls).toBe(0);
+    expect(fs.readFileSync(stableComposePath(), "utf-8")).toBe(sentinel);
+    expect(jobComposeFiles()).toEqual([]);
   });
 });

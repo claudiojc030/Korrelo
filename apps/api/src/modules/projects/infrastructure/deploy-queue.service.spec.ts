@@ -124,8 +124,8 @@ class FakeProjectRepository {
   async findAll(): Promise<any[]> {
     return this.projects;
   }
-  async findById(): Promise<any | null> {
-    return null;
+  async findById(projectId: string): Promise<any | null> {
+    return this.projects.find((project) => project.id === projectId) ?? null;
   }
   async findByCustomDomain(): Promise<any | null> {
     return null;
@@ -155,15 +155,47 @@ describe("DeployQueueService (fila global)", () => {
     fs.rmSync(lockDir, { recursive: true, force: true });
   });
 
-  function buildQueue(repo: InMemoryDeployJobRepository, preflight: FakePreflight, deploy: FakeDeployProject) {
+  function buildQueue(
+    repo: InMemoryDeployJobRepository,
+    preflight: FakePreflight,
+    deploy: FakeDeployProject,
+    projectRepo: FakeProjectRepository = new FakeProjectRepository(),
+  ) {
     return new DeployQueueService(
       repo,
-      new FakeProjectRepository() as unknown as ProjectRepository,
+      projectRepo as unknown as ProjectRepository,
       new WorkerLock(),
       preflight as unknown as ResourcePreflightService,
       deploy as unknown as DeployProjectUseCase,
     );
   }
+
+  it("estado INDETERMINADO bloqueia deploy do MESMO projeto (não de outros)", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const preflight = new FakePreflight();
+    const deploy = new FakeDeployProject();
+    const projectRepo = new FakeProjectRepository();
+    projectRepo.projects = [
+      { id: "p-indeterminate", name: "Quebrado", lastDeployStatus: "indeterminate" },
+      { id: "p-saudavel", name: "Saudável", lastDeployStatus: "succeeded" },
+    ];
+    const queue = buildQueue(repo, preflight, deploy, projectRepo);
+
+    await expect(
+      queue.enqueue({ projectId: "p-indeterminate", commitSha: "abc123", branch: "main", trigger: "manual" }),
+    ).rejects.toThrow(/INDETERMINADO/);
+    // Nenhum job criado para o projeto bloqueado.
+    expect(await repo.findOpenByProject("p-indeterminate")).toBeNull();
+
+    // Outro projeto continua podendo enfileirar.
+    const other = await queue.enqueue({
+      projectId: "p-saudavel",
+      commitSha: "def456",
+      branch: "main",
+      trigger: "manual",
+    });
+    expect(other.created).toBe(true);
+  });
 
   it("dois projetos pedindo deploy ao mesmo tempo: só UM build começa", async () => {
     const repo = new InMemoryDeployJobRepository();

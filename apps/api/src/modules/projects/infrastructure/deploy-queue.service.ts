@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, OnApplicationShutdown, OnModuleInit } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Logger, OnApplicationShutdown, OnModuleInit } from "@nestjs/common";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -265,6 +265,16 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
    *   rodar, porque no agendamento ainda não sabemos qual commit é).
    */
   async enqueue(params: EnqueueParams): Promise<EnqueueResult> {
+    // ESTADO INDETERMINADO: nenhum deploy (auto, webhook ou manual) do MESMO
+    // projeto pode começar até reconciliação segura. Outros projetos seguem.
+    const project = await this.projectRepository.findById(params.projectId);
+    if (project?.lastDeployStatus === "indeterminate") {
+      throw new ConflictException(
+        `O projeto "${project.name}" está em ESTADO INDETERMINADO (último deploy deixou produção/compose/banco sem coerência comprovada). ` +
+          "Nenhum novo deploy é permitido até a reconciliação explícita (POST /projects/:id/reconcile).",
+      );
+    }
+
     const open = await this.jobRepository.findOpenByProject(params.projectId);
     if (open) {
       const sameCommit = params.commitSha !== null && open.commitSha === params.commitSha;

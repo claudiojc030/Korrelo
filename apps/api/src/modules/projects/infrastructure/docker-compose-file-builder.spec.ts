@@ -23,9 +23,16 @@ function baseConfig(overrides: Partial<DeployConfig> = {}): DeployConfig {
 describe("DockerComposeFileBuilder (Wave 2)", () => {
   const builder = new DockerComposeFileBuilder();
 
-  it("imagem versionada por commit, com a tag padrão do deploy", () => {
+  it("a tag vem SEMPRE do Korrelo (sem default de commit no compose)", () => {
     const compose = builder.build(baseConfig(), "Node.js");
-    expect(compose).toContain("image: korrelo-app-1234abcd:${KORRELO_IMAGE_TAG:-commit-abc123def456}");
+    // Variável obrigatória: compose sem KORRELO_IMAGE_TAG falha antes de
+    // tocar em container (em vez de usar a tag de um deploy que falhou).
+    expect(compose).toContain(
+      "image: korrelo-app-1234abcd:${KORRELO_IMAGE_TAG:?KORRELO_IMAGE_TAG obrigatoria (definida pelo Korrelo)}",
+    );
+    // Nenhuma tag candidata embutida como default.
+    expect(compose).not.toContain(":-commit-");
+    expect(compose).not.toContain("commit-abc123def456");
   });
 
   it("staging é efêmero: sem restart e com a label de temporário", () => {

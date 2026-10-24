@@ -429,6 +429,8 @@ describe("deploy de projeto - proteção da produção", () => {
         removeStaging: async () => {
           orchestrator.calls.push("removeStaging");
         },
+        imageReferenceExists: async () => true,
+        inspectProductionContainer: async () => ({ kind: "absent" }),
         pruneProjectImages: async () => false,
         pruneUnusedBuildArtifacts: async () => ({
           imagePrune: { ok: true, output: null, error: null },
@@ -813,6 +815,23 @@ describe("deploy de projeto - proteção da produção", () => {
       // E a promoção também (recreate só do app).
       const promoteBlock = source.slice(source.indexOf("async promote("), source.indexOf("async rollback("));
       expect(promoteBlock).toContain('"--no-deps"');
+    });
+
+    it("G2) NENHUM serviço de startup executa Compose ou deploy", () => {
+      const startupFiles = [
+        "staging-cleanup.service.ts",
+        "runtime-reconciliation.service.ts",
+        "deploy-recovery.service.ts",
+      ];
+      for (const file of startupFiles) {
+        const source = fs.readFileSync(
+          path.resolve(__dirname, "..", "infrastructure", file),
+          "utf-8",
+        );
+        expect(source).not.toContain("docker compose");
+        expect(source).not.toContain("COMPOSE_FILENAME");
+        expect(source).not.toContain("executeJob");
+      }
     });
 
     it("H) o dry-run_avisa explicitamente quando o staging compartilha o banco", async () => {

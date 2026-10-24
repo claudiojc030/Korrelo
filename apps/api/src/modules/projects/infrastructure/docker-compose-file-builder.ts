@@ -110,11 +110,16 @@ export class DockerComposeFileBuilder {
     const envFilePath = config.envFilePath ?? ENV_FILENAME;
 
     const imageName = config.imageName;
-    const imageTag = config.imageTag;
-    // A tag default do compose é a do deploy atual; o ROLLBACK reusa o
-    // mesmo arquivo com KORRELO_IMAGE_TAG apontando pra imagem anterior.
+    // A tag do compose é OBRIGATÓRIA e vem sempre do Korrelo no momento da
+    // operação (`KORRELO_IMAGE_TAG` no env + `--env-file` controlado).
+    //
+    // NUNCA embutir a tag candidata como default: um deploy reprovado deixava
+    // `commit-<sha>` de um staging que falhou como padrão do arquivo, e
+    // qualquer `docker compose up` fora do fluxo subia uma versão que nunca
+    // foi aprovada. Com `${VAR:?}`, um compose sem a variável falha ALTO e
+    // antes de tocar em container.
     const imageLine = imageName
-      ? `    image: ${imageName}:\${KORRELO_IMAGE_TAG:-${imageTag ?? "latest"}}`
+      ? `    image: ${imageName}:\${KORRELO_IMAGE_TAG:?KORRELO_IMAGE_TAG obrigatoria (definida pelo Korrelo)}`
       : null;
 
     const labels = [

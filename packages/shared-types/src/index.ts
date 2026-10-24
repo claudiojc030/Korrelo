@@ -12,7 +12,9 @@ export type LastDeployStatus =
   | "failed"
   | "rolled-back"
   | "canceled"
-  | "interrupted";
+  | "interrupted"
+  /** Produção pode ter ficado incoerente: exige reconciliação antes de novo deploy. */
+  | "indeterminate";
 
 export interface Project {
   id: string;

@@ -14,6 +14,7 @@ import { CreateProjectUseCase } from "./application/create-project.use-case";
 import { DetectProjectStackUseCase } from "./application/detect-project-stack.use-case";
 import { ImportProjectUseCase } from "./application/import-project.use-case";
 import { DeployProjectUseCase } from "./application/deploy-project.use-case";
+import { ReconcileProjectStateUseCase } from "./application/reconcile-project-state.use-case";
 import {
   CONTAINER_INSPECTOR,
   PreviewProjectDeployUseCase,
@@ -151,6 +152,7 @@ import { CompatibilityDryRunService } from "./infrastructure/compatibility-dry-r
     DetectProjectStackUseCase,
     ImportProjectUseCase,
     DeployProjectUseCase,
+    ReconcileProjectStateUseCase,
     PreviewProjectDeployUseCase,
     DeleteProjectUseCase,
     ListEnvVarsUseCase,

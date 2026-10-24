@@ -6,6 +6,7 @@ import { apiError } from "../../../infrastructure/api-error";
 // Nunca ficam navegáveis/editáveis por aqui, mesmo que o usuário peça o
 // caminho exato.
 const BLOCKED_SEGMENTS = [".git", ".env.korrelo", "docker-compose.korrelo.yml"];
+const BLOCKED_PREFIXES = ["docker-compose.korrelo."];
 
 // Resolve um caminho relativo pedido pelo cliente contra a raiz do workspace
 // do projeto, garantindo que o resultado nunca escapa dessa raiz (proteção
@@ -20,7 +21,13 @@ export function resolveSafeProjectPath(workspaceRoot: string, relativePath: stri
   }
 
   const segments = normalizedRelative.split(/[\\/]/);
-  if (segments.some((segment) => BLOCKED_SEGMENTS.includes(segment))) {
+  if (
+    segments.some(
+      (segment) =>
+        BLOCKED_SEGMENTS.includes(segment) ||
+        BLOCKED_PREFIXES.some((prefix) => segment.startsWith(prefix)),
+    )
+  ) {
     throw new BadRequestException(apiError("FILE_PATH_BLOCKED", "Esse arquivo não pode ser acessado por aqui."));
   }
 

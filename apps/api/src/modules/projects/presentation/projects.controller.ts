@@ -48,6 +48,7 @@ import { StartMongoImportDto } from "./start-mongo-import.dto";
 import { UpdateProjectSettingsDto } from "./update-project-settings.dto";
 import { AttachDomainDto } from "./attach-domain.dto";
 import { DeployQueueService } from "../infrastructure/deploy-queue.service";
+import { ReconcileProjectStateUseCase } from "../application/reconcile-project-state.use-case";
 
 @Controller("projects")
 export class ProjectsController {
@@ -89,6 +90,7 @@ export class ProjectsController {
     private readonly downloadProjectBackup: DownloadProjectBackupUseCase,
     private readonly startDatabaseRestore: StartDatabaseRestoreUseCase,
     private readonly getDatabaseRestoreStatus: GetDatabaseRestoreStatusUseCase,
+    private readonly reconcileProjectState: ReconcileProjectStateUseCase,
   ) {}
 
   @Get()
@@ -301,6 +303,18 @@ export class ProjectsController {
   @Get(":id/deploys")
   getDeploys(@Param("id") id: string, @Query("offset") offset?: string) {
     return this.listDeployRecords.execute(id, offset ? Number(offset) : 0);
+  }
+
+  /**
+   * RECONCILIAÇÃO de projeto em ESTADO INDETERMINADO.
+   *
+   * Confere o container real (nada de Compose/reinício) e só então libera
+   * novos deploys. Recusa quando a identidade da imagem não é comprovável.
+   */
+  @Post(":id/reconcile")
+  @HttpCode(200)
+  reconcile(@Param("id") id: string) {
+    return this.reconcileProjectState.execute(id);
   }
 
   /**

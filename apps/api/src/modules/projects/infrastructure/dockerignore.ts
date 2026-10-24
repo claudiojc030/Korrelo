@@ -17,6 +17,12 @@ import * as path from "node:path";
 export const REQUIRED_DOCKERIGNORE_ENTRIES = [
   ".env.korrelo",
   "docker-compose.korrelo.yml",
+  // Composes POR JOB e a cópia da configuração anterior (nunca entram no
+  // contexto de build; carregam porta/senha de banco em texto puro).
+  "docker-compose.korrelo.*.yml",
+  // Arquivo temporário usado no rename atômico do compose estável.
+  ".docker-compose.korrelo.yml.tmp",
+  "docker-compose.korrelo.previous.yml.tmp",
   ".env",
   ".env.*",
 ];

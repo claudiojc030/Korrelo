@@ -10,8 +10,12 @@ import { DOCKERFILE_GENERATOR, type DockerfileGenerator } from "../domain/docker
 import {
   CONTAINER_ORCHESTRATOR,
   COMPOSE_FILENAME,
+  COMPOSE_PREVIOUS_FILENAME,
+  isJobComposeFilename,
+  jobComposeFilename,
   type ContainerOrchestrator,
   type DeployConfig,
+  type ProductionContainerState,
 } from "../domain/container-orchestrator";
 import { HEALTH_CHECKER, type HealthChecker } from "../domain/health-checker";
 import { ENV_VAR_REPOSITORY, type EnvVarRepository } from "../domain/env-var.repository";
@@ -81,6 +85,8 @@ class DeployFailure extends Error {
   constructor(
     message: string,
     readonly productionAffected: boolean,
+    /** true quando a coerência produção/compose/banco não é comprovada. */
+    readonly indeterminate: boolean = false,
   ) {
     super(message);
     this.name = "DeployFailure";
@@ -165,6 +171,15 @@ export class DeployProjectUseCase {
     if (!project) {
       throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${job.projectId} não encontrado`));
     }
+    // Defesa em profundidade: mesmo um job já enfileirado (antes do estado
+    // indeterminado) não pode rodar. Retry/resume também passam por aqui.
+    if (project.lastDeployStatus === "indeterminate") {
+      throw new DeployFailure(
+        `O projeto "${project.name}" está em ESTADO INDETERMINADO. Nenhum deploy pode rodar até a reconciliação ` +
+          "(POST /projects/:id/reconcile). Nada foi alterado nesta tentativa.",
+        false,
+      );
+    }
     if (!project.detectedStack) {
       throw new BadRequestException(
         apiError(
@@ -185,6 +200,13 @@ export class DeployProjectUseCase {
     let stagingCreated = false;
     let candidateImage: string | null = null;
     let previousImage: string | null = null;
+    /**
+     * Quando o estado fica indeterminado, o compose DO JOB é preservado para
+     * recuperação manual (não é apagado no finally).
+     */
+    let preserveJobCompose = false;
+    /** true quando alguma tentativa de rollback foi feita (mesmo que falhou). */
+    let rollbackAttempted = false;
 
     try {
       // ------------------------------------------------------------------
@@ -293,6 +315,12 @@ export class DeployProjectUseCase {
       const hostPort = project.assignedPort ?? (await this.portAllocator.allocate(stack.recommendedPort ?? 3000));
       const stagingHostPort = await this.portAllocator.allocate(hostPort + 1);
 
+      // Compose POR JOB + env-file controlado: a tag deste deploy nunca é
+      // embutida no compose estável e nem no .env do projeto.
+      const jobComposeFile = jobComposeFilename(job.id);
+      const jobComposeEnvFile = `.compose.${jobComposeFile.replace(/[^A-Za-z0-9_.-]/g, "-")}.env`;
+      const jobComposeEnvPath = path.join(path.dirname(envFiles.envFilePath), jobComposeEnvFile);
+
       const allManagedDatabases = await this.managedDatabaseRepository.findAllByProjectId(project.id);
       const managedContainerDatabases = allManagedDatabases.filter((db) => db.type !== "custom");
       // O budget de banco é TOTAL por projeto e dividido entre os bancos
@@ -321,6 +349,8 @@ export class DeployProjectUseCase {
         })),
         imageName,
         imageTag,
+        composeFilePath: jobComposeFile,
+        composeEnvFilePath: jobComposeEnvPath,
         envFilePath: envFiles.envFilePath,
         stagingEnvFilePath: envFiles.stagingEnvFilePath,
         projectId: project.id,
@@ -346,7 +376,21 @@ export class DeployProjectUseCase {
       }
 
       const composeContent = this.composeFileBuilder.build(deployConfig, stack.language);
-      await fs.writeFile(path.join(projectPath, COMPOSE_FILENAME), composeContent, "utf-8");
+      // Um compose por job: se o staging falhar, o compose ESTÁVEL de
+      // produção nem é tocado. Antes, o arquivo único era sobrescrito antes
+      // da validação e ficava apontando para a tag candidata reprovada.
+      await this.prepareJobComposeFile(projectPath, jobComposeFile, composeContent);
+      await fs.writeFile(
+        jobComposeEnvPath,
+        `KORRELO_IMAGE_TAG=${imageTag}\n`,
+        { encoding: "utf-8", mode: 0o600 },
+      );
+      if (!stagingOnly) {
+        // Compose estável de versões antigas pode ter `:-commit-<sha>` embutido
+        // (formato legado). Saneia SÓ esse default inseguro: a configuração
+        // em si não muda e nenhum container é tocado.
+        await this.sanitizeLegacyStableCompose(projectPath, context);
+      }
 
       // ------------------------------------------------------------------
       // 5. staging: builda e sobe a instância de teste
@@ -426,18 +470,62 @@ export class DeployProjectUseCase {
       // container de produção não é reiniciado.
       // ------------------------------------------------------------------
       if (!stagingOnly) {
-        await this.setStage(job, "promote", context);
-        const promoteLog = await this.orchestrator.promote(deployConfig, {
-          deployJobId: job.id,
-          projectId: project.id,
-          containerName: deployConfig.containerName,
-          kind: "promote",
-          previousImage,
-        });
-        promoted = true;
-        deployRecord = await this.deployRecordRepository.save(
-          deployRecord.appendLog(`--- promote ---\n${promoteLog}`),
+        // PRÉ-REQUISITO DE RECUPERAÇÃO + ADOÇÃO SEGURA (P1-3).
+        // O alvo de rollback é SEMPRE comprovado: currentImage existente ou a
+        // imagem que o container real executa (adotada). Nada é inventado.
+        const recoveryTarget = await this.resolvePromotionRecoveryTarget(project, deployConfig, context);
+        if (recoveryTarget !== project.currentImage) {
+          previousImage = recoveryTarget;
+          job = job.withImageInfo({ previousImage, candidateImage, imageTag });
+          await this.deployJobRepository.save(job);
+        }
+
+        // Estado ANTES da promoção: usado para decidir se uma falha do comando
+        // realmente chegou a alterar a produção (P1-1).
+        const beforePromotion = await this.orchestrator.inspectProductionContainer(
+          deployConfig.containerName,
         );
+
+        await this.setStage(job, "promote", context);
+        // A partir daqui a produção PODE ser alterada mesmo que o comando
+        // retorne erro: nunca assumir que o container ficou intacto.
+        promoted = true;
+        let promoteLog: string;
+        try {
+          promoteLog = await this.orchestrator.promote(deployConfig, {
+            deployJobId: job.id,
+            projectId: project.id,
+            containerName: deployConfig.containerName,
+            kind: "promote",
+            previousImage,
+          });
+        } catch (error) {
+          const disposition = await this.classifyPromotionFailure(
+            error,
+            beforePromotion,
+            deployConfig,
+            previousImage,
+            job,
+            context,
+          );
+          rollbackSucceeded = disposition.rollbackSucceeded;
+          rollbackAttempted = rollbackAttempted || disposition.rollbackAttempted;
+          throw disposition.failure;
+        }
+
+        // Log do promote é bookkeeping: não pode transformar um deploy bom em
+        // falha nem impedir o health check.
+        try {
+          deployRecord = await this.deployRecordRepository.save(
+            deployRecord.appendLog(`--- promote ---\n${promoteLog}`),
+          );
+        } catch (error) {
+          this.deployLogger.warn(
+            "promote",
+            context,
+            `não foi possível registrar o log da promoção: ${(error as Error).message}`,
+          );
+        }
 
         await this.setStage(job, "production-health", context);
         const productionHealthy = await this.healthChecker.waitUntilHealthy(
@@ -447,7 +535,12 @@ export class DeployProjectUseCase {
 
         if (!productionHealthy) {
           await this.setStage(job, "rollback", context);
-          rollbackSucceeded = await this.rollbackIfPossible(deployConfig, previousImage, context);
+          rollbackAttempted = true;
+          rollbackSucceeded = await this.rollbackIfPossible(
+            await this.rollbackDeployConfig(deployConfig, context),
+            previousImage,
+            context,
+          );
           await this.deployJobRepository.save(job.withRollback(true, rollbackSucceeded));
           throw new DeployFailure(
             rollbackSucceeded
@@ -455,6 +548,81 @@ export class DeployProjectUseCase {
               : `A versão nova não respondeu em produção e o ROLLBACK FALHOU. Ação manual necessária.`,
             !rollbackSucceeded,
           );
+        }
+
+        const deployed = project
+          .withDeployment(deployConfig.containerName, deployConfig.hostPort)
+          .withImages(candidateImage, previousImage)
+          .withLastDeployStatus("succeeded")
+          // O projeto saiu do estado "adotado": ele passou por um deploy com a
+          // política nova, então o limite efetivo passa a valer como estado
+          // atual (e a reconciliação vai confirmar no próximo boot).
+          .withRuntimeObservation({
+            productionMemoryLimitMb: deployConfig.memoryLimitMb,
+            runtimeSnapshot: updateSnapshotMemoryLimit(project.runtimeSnapshot, deployConfig.memoryLimitMb),
+            grandfathered: false,
+            grandfatheredAt: project.grandfatheredAt,
+            runtimeDriftDetected: false,
+            runtimeDriftDetails: null,
+          });
+
+        // (1) BANCO antes do compose estável: se a persistência falhar, a
+        // produção nova é revertida usando o compose AINDA antigo. Assim
+        // banco, produção e compose voltam juntos à versão anterior.
+        try {
+          await this.repository.save(deployed);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.deployLogger.error("complete", context, `falha ao registrar a nova versão no banco: ${message}`);
+          await this.setStage(job, "rollback", context);
+          rollbackAttempted = true;
+          rollbackSucceeded = await this.rollbackIfPossible(
+            await this.rollbackDeployConfig(deployConfig, context),
+            previousImage,
+            context,
+          );
+          await this.deployJobRepository.save(job.withRollback(true, rollbackSucceeded));
+          throw new DeployFailure(
+            rollbackSucceeded
+              ? `O container subiu, mas a imagem não pôde ser registrada no banco. Rollback executado: produção, banco e compose permanecem na versão anterior.`
+              : `O container subiu, o banco NÃO foi atualizado e o ROLLBACK FALHOU. ` +
+                `ESTADO INDETERMINADO: não inicie outro deploy sem verificar o container e o banco manualmente.`,
+            !rollbackSucceeded,
+          );
+        }
+
+        // (2) COMPOSE ESTÁVEL depois do banco, com UMA nova tentativa. Se
+        // ainda falhar, NÃO derruba a produção recém-validada: registra estado
+        // indeterminado e exige intervenção (o compose anterior está em
+        // `.previous` e no arquivo estável atual).
+        try {
+          await this.publishStableCompose(projectPath, jobComposeFile, context);
+        } catch (firstError) {
+          const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
+          this.deployLogger.warn(
+            "complete",
+            context,
+            `falha ao publicar o compose estável (${firstMessage}); tentando mais uma vez`,
+          );
+          try {
+            await this.publishStableCompose(projectPath, jobComposeFile, context);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            preserveJobCompose = true;
+            this.deployLogger.error(
+              "complete",
+              context,
+              `ESTADO INDETERMINADO: compose estável NÃO publicado (${message})`,
+            );
+            throw new DeployFailure(
+              `O container e o banco foram atualizados, mas o compose estável não pôde ser publicado (${message}). ` +
+                `ESTADO INDETERMINADO: a produção roda a versão nova e o compose estável continua sendo o anterior. ` +
+                `O compose desta tentativa foi PRESERVADO em ${jobComposeFile} para recuperação manual. ` +
+                `Não inicie outro deploy antes de conferir.`,
+              false,
+              true,
+            );
+          }
         }
       } else {
         this.deployLogger.log(
@@ -468,11 +636,10 @@ export class DeployProjectUseCase {
       // ------------------------------------------------------------------
       // 8. sucesso
       // ------------------------------------------------------------------
-      // O container de teste é removido ANTES de declarar o deploy
-      // concluído: "sucesso" então significa que nada ficou pendente
-      // (nem container de teste, nem build rodando).
+      // Limpeza do container de teste é best-effort: uma falha aqui não pode
+      // marcar como "failed" uma produção já validada/coerente.
       await this.setStage(job, "cleanup", context);
-      await this.removeStaging(deployConfig, context);
+      await this.removeStagingIgnoringErrors(deployConfig, context);
       stagingRemoved = true;
 
       await this.setStage(job, "complete", context);
@@ -488,24 +655,17 @@ export class DeployProjectUseCase {
         return;
       }
 
-      const deployed = project
-        .withDeployment(deployConfig.containerName, deployConfig.hostPort)
-        .withImages(candidateImage, previousImage)
-        .withLastDeployStatus("succeeded")
-        // O projeto saiu do estado "adotado": ele passou por um deploy com a
-        // política nova, então o limite efetivo passa a valer como estado
-        // atual (e a reconciliação vai confirmar no próximo boot).
-        .withRuntimeObservation({
-          productionMemoryLimitMb: deployConfig.memoryLimitMb,
-          runtimeSnapshot: updateSnapshotMemoryLimit(project.runtimeSnapshot, deployConfig.memoryLimitMb),
-          grandfathered: false,
-          grandfatheredAt: project.grandfatheredAt,
-          runtimeDriftDetected: false,
-          runtimeDriftDetails: null,
-        });
-      await this.repository.save(deployed);
-      await this.deployRecordRepository.save(deployRecord.withResult("success", null));
-      await this.deployJobRepository.save(job.withStatus("succeeded"));
+      // Bookkeeping não derruba nem "desmarca" um deploy já coerente.
+      try {
+        await this.deployRecordRepository.save(deployRecord.withResult("success", null));
+        await this.deployJobRepository.save(job.withStatus("succeeded"));
+      } catch (error) {
+        this.deployLogger.warn(
+          "complete",
+          context,
+          `deploy concluído, mas o histórico não pôde ser registrado: ${(error as Error).message}`,
+        );
+      }
       this.deployLogger.log("complete", context, "deploy concluído", { image: candidateImage });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -523,10 +683,22 @@ export class DeployProjectUseCase {
           if (productionAffected) {
             current = current.withFailedDeployment();
           }
-          current = current.withLastDeployStatus(
-            rollbackSucceeded ? "rolled-back" : "failed",
-          );
+          // INDETERMINADO é persistido no banco: sobrevive a restart do Core e
+          // bloqueia novos deploys do MESMO projeto até reconciliação segura.
+          const nextDeployStatus = rollbackSucceeded
+            ? "rolled-back"
+            : productionAffected || (error instanceof DeployFailure && error.indeterminate)
+              ? "indeterminate"
+              : "failed";
+          current = current.withLastDeployStatus(nextDeployStatus);
           await this.repository.save(current);
+          if (nextDeployStatus === "indeterminate") {
+            this.deployLogger.error(
+              "complete",
+              context,
+              "ESTADO INDETERMINADO persistido: novos deploys deste projeto exigem reconciliação",
+            );
+          }
         }
       }
 
@@ -580,6 +752,13 @@ export class DeployProjectUseCase {
       // ou falha), com checagem de concorrência feita AGORA. Nunca altera o
       // resultado original do job (método trata os próprios erros).
       await this.cleanupBuildCache(job, context);
+
+      // Compose/env POR JOB são temporários; o estável e o `.previous` ficam.
+      // Em estado INDETERMINADO o compose do job é PRESERVADO para recuperação.
+      if (deployConfig) {
+        const preserve = preserveJobCompose || (promoted && rollbackAttempted && !rollbackSucceeded);
+        await this.cleanupJobComposeArtifacts(deployConfig, context, preserve);
+      }
     }
   }
 
@@ -929,6 +1108,368 @@ export class DeployProjectUseCase {
     this.deployLogger.log("cleanup", context, "container de teste removido");
   }
 
+  /**
+   * Config usada no ROLLBACK: compose ESTÁVEL (configuração conhecida como
+   * boa) + tag anterior explícita. Staging/promoção usam o compose do job.
+   * Se o estável não existir (projeto nunca promovido por este fluxo), cai
+   * para o compose do job - a imagem anterior continua explícita.
+   */
+  private async rollbackDeployConfig(
+    config: DeployConfig,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<DeployConfig> {
+    if (await fileExists(path.join(config.projectPath, COMPOSE_FILENAME))) {
+      return { ...config, composeFilePath: COMPOSE_FILENAME, composeEnvFilePath: undefined };
+    }
+    this.deployLogger.warn(
+      "rollback",
+      context,
+      "compose estável ausente; rollback usará o compose do job (configuração atual)",
+    );
+    return config;
+  }
+
+  /**
+   * Alvo de rollback CONFIÁVEL antes de tocar na produção (P1-3).
+   *
+   * 1. `currentImage` registrado: exige que a imagem exista no servidor.
+   * 2. `currentImage` nulo + container de produção: ADOTA a imagem que o
+   *    container realmente executa, mas só se a identidade for comprovável
+   *    (referência `repo:tag` do próprio projeto, tag != latest, ID da
+   *    referência == ID da imagem do container). A adoção grava apenas o que
+   *    foi observado; `previousImage` não é inventado.
+   * 3. Sem container (primeiro deploy): não há o que recuperar.
+   *
+   * Qualquer dúvida BLOQUEIA a promoção com procedimento explícito. Nada aqui
+   * roda no boot: só dentro de um job de deploy.
+   */
+  private async resolvePromotionRecoveryTarget(
+    project: Project,
+    config: DeployConfig,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<string | null> {
+    if (project.currentImage) {
+      const available = await this.orchestrator.imageReferenceExists(project.currentImage);
+      if (!available) {
+        throw new DeployFailure(
+          `A imagem atualmente em produção (${project.currentImage}) não está mais no servidor. ` +
+            "Promoção bloqueada: sem ela não existe rollback confiável. A produção NÃO foi tocada.",
+          false,
+        );
+      }
+      if (!(await fileExists(path.join(config.projectPath, COMPOSE_FILENAME)))) {
+        this.deployLogger.warn(
+          "promote",
+          context,
+          "compose estável ausente; o rollback (se necessário) usará a configuração atual",
+        );
+      }
+      return project.currentImage;
+    }
+
+    if (!project.containerName) return null;
+
+    const state = await this.orchestrator.inspectProductionContainer(project.containerName);
+    if (state.kind === "absent") {
+      this.deployLogger.warn(
+        "promote",
+        context,
+        `container de produção "${project.containerName}" não existe; tratando como primeiro deploy`,
+      );
+      return null;
+    }
+    if (state.kind === "unverified") {
+      throw new DeployFailure(
+        `Não foi possível COMPROVAR qual imagem o container de produção ("${project.containerName}") executa: ${state.reason}. ` +
+          "Promoção bloqueada para não perder a única referência de rollback. " +
+          `Recuperação: rode "docker inspect --format '{{.Config.Image}}' ${project.containerName}" e ` +
+          `"docker image inspect <referência>", confirme que a tag pertence ao projeto e registre-a antes de promover.`,
+        false,
+      );
+    }
+
+    const parsed = parseImageReference(state.imageReference);
+    if (!parsed || !config.imageName || parsed.name !== config.imageName || parsed.tag === "latest") {
+      throw new DeployFailure(
+        `Adoção recusada: a imagem em execução ("${state.imageReference}") não é uma tag versionada do projeto ` +
+          `("${config.imageName ?? "desconhecido"}"). Promoção bloqueada. ` +
+          `Recuperação: publique uma versão com tag \`commit-<sha>\` (deploy completo) ou ajuste o nome do projeto/imagem ` +
+          "manualmente, com intervenção autorizada.",
+        false,
+      );
+    }
+
+    const adopted = project.withImages(state.imageReference, project.previousImage);
+    await this.repository.save(adopted);
+    this.deployLogger.log("promote", context, "imagem de produção adotada a partir do container real", {
+      image: state.imageReference,
+      containerId: state.containerId,
+      imageId: state.imageId,
+    });
+    return state.imageReference;
+  }
+
+  /**
+   * Diz se a produção MUDOU entre duas observações.
+   *
+   * `null` = indeterminado (não foi possível comparar). Conservadoramente,
+   * indeterminado é tratado como "pode ter mudado".
+   */
+  private productionChanged(
+    before: ProductionContainerState,
+    after: ProductionContainerState,
+  ): boolean | null {
+    if (before.kind === "absent" && after.kind === "absent") return false;
+    if (after.kind === "absent") return true;
+    if (before.kind === "unverified" || after.kind === "unverified") return null;
+    if (before.kind === "absent") return true;
+    return (
+      before.containerId !== after.containerId ||
+      normalizeImageId(before.imageId) !== normalizeImageId(after.imageId)
+    );
+  }
+
+  /**
+   * Classifica uma falha do `promote()` (P1-1).
+   *
+   * O Docker pode recriar o container e ainda assim o comando falhar. Regras:
+   *  - produção comprovadamente inalterada -> NÃO faz rollback;
+   *  - produção alterada ou indeterminada -> tenta rollback com compose +
+   *    imagem anteriores;
+   *  - sem alvo de rollback ou rollback falhando -> ESTADO INDETERMINADO.
+   */
+  private async classifyPromotionFailure(
+    error: unknown,
+    before: ProductionContainerState,
+    config: DeployConfig,
+    previousImage: string | null,
+    job: DeployJob,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<{ failure: DeployFailure; rollbackSucceeded: boolean; rollbackAttempted: boolean }> {
+    const message = error instanceof Error ? error.message : String(error);
+    const after = await this.orchestrator.inspectProductionContainer(config.containerName);
+    const changed = this.productionChanged(before, after);
+
+    if (changed === false) {
+      this.deployLogger.warn(
+        "promote",
+        context,
+        `promoção falhou ANTES de alterar a produção: ${message}`,
+      );
+      return {
+        failure: new DeployFailure(
+          `A promoção falhou antes de alterar a produção: ${message}. A versão em produção NÃO foi tocada.`,
+          false,
+        ),
+        rollbackSucceeded: false,
+        rollbackAttempted: false,
+      };
+    }
+
+    const ambiguous = changed === null;
+    this.deployLogger.error(
+      "promote",
+      context,
+      ambiguous
+        ? `promoção falhou em estado AMBÍGUO (produção pode ter sido alterada): ${message}`
+        : `promoção falhou DEPOIS de alterar a produção: ${message}`,
+    );
+
+    if (!previousImage) {
+      await this.deployJobRepository.save(job.withRollback(false, false));
+      return {
+        failure: new DeployFailure(
+          `A promoção falhou em estado ${ambiguous ? "AMBÍGUO" : "ALTERADO"} e NÃO há imagem anterior registrada para rollback. ` +
+            `ESTADO INDETERMINADO: verifique o container antes de qualquer nova operação. Detalhe: ${message}`,
+          true,
+        ),
+        rollbackSucceeded: false,
+        rollbackAttempted: false,
+      };
+    }
+
+    await this.setStage(job, "rollback", context);
+    const ok = await this.rollbackIfPossible(
+      await this.rollbackDeployConfig(config, context),
+      previousImage,
+      context,
+    );
+    await this.deployJobRepository.save(job.withRollback(true, ok));
+
+    if (ok) {
+      this.deployLogger.log(
+        "rollback",
+        context,
+        "rollback executado após falha ambígua de promoção",
+        { previousImage },
+      );
+    } else {
+      this.deployLogger.error(
+        "rollback",
+        context,
+        "ROLLBACK FALHOU após falha ambígua de promoção",
+        { previousImage },
+      );
+    }
+
+    return {
+      failure: new DeployFailure(
+        ok
+          ? `A promoção falhou depois de possivelmente alterar a produção. Rollback executado: a versão anterior está no ar. (${message})`
+          : `A promoção falhou em estado ${ambiguous ? "AMBÍGUO" : "ALTERADO"} e o ROLLBACK FALHOU. ` +
+            `ESTADO INDETERMINADO: não inicie outro deploy sem intervenção manual. (${message})`,
+        !ok,
+      ),
+      rollbackSucceeded: ok,
+      rollbackAttempted: true,
+    };
+  }
+
+  /**
+   * Escreve o compose DO JOB (não o estável) e remove restos de tentativas
+   * anteriores. Nada aqui toca em `COMPOSE_FILENAME`.
+   */
+  private async prepareJobComposeFile(
+    projectPath: string,
+    jobComposeFile: string,
+    content: string,
+  ): Promise<void> {
+    // Resto de uma publicação interrompida no meio do rename atômico.
+    for (const tempName of [
+      `.${COMPOSE_FILENAME}.tmp`,
+      `${COMPOSE_PREVIOUS_FILENAME}.tmp`,
+    ]) {
+      try {
+        await fs.unlink(path.join(projectPath, tempName));
+      } catch {
+        // Não existia.
+      }
+    }
+    try {
+      const entries = await fs.readdir(projectPath);
+      for (const entry of entries) {
+        if (isJobComposeFilename(entry)) {
+          try {
+            await fs.unlink(path.join(projectPath, entry));
+          } catch {
+            // Resto ilegível não impede o deploy.
+          }
+        }
+      }
+    } catch {
+      // Workspace sem diretório legível: a escrita abaixo falha com erro claro.
+    }
+    await fs.writeFile(path.join(projectPath, jobComposeFile), content, { encoding: "utf-8", mode: 0o600 });
+    await applyPrivateMode(path.join(projectPath, jobComposeFile));
+  }
+
+  /**
+   * Saneia o default legado do compose estável.
+   *
+   * Versões antigas gravavam `image: nome:${KORRELO_IMAGE_TAG:-commit-<sha>}`.
+   * Se o deploy daquele commit falhou, o arquivo ficava apontando para uma
+   * imagem nunca aprovada. Aqui o default é removido (vira variável
+   * obrigatória), sem mudar nenhum outro campo e sem tocar em container.
+   */
+  private async sanitizeLegacyStableCompose(
+    projectPath: string,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<void> {
+    const stablePath = path.join(projectPath, COMPOSE_FILENAME);
+    let content: string;
+    try {
+      content = await fs.readFile(stablePath, "utf-8");
+    } catch {
+      return; // ainda não existe compose estável (primeiro deploy)
+    }
+    const legacyDefault = /\$\{KORRELO_IMAGE_TAG:-[^}]+\}/g;
+    if (!legacyDefault.test(content)) return;
+
+    const sanitized = content.replace(
+      legacyDefault,
+      "${KORRELO_IMAGE_TAG:?KORRELO_IMAGE_TAG obrigatoria (definida pelo Korrelo)}",
+    );
+    const tempPath = path.join(projectPath, `.${COMPOSE_FILENAME}.tmp`);
+    await fs.writeFile(tempPath, sanitized, { encoding: "utf-8", mode: 0o600 });
+    await fs.rename(tempPath, stablePath);
+    await applyPrivateMode(stablePath);
+    this.deployLogger.log("fetching", context, "compose estável legado saneado (tag obrigatória)");
+  }
+
+  /**
+   * Publica o compose do job como compose ESTÁVEL, de forma atômica.
+   *
+   * Chamado SOMENTE depois do health de produção. Antes disso o estável é a
+   * configuração da versão que está no ar (é o que o rollback usa).
+   */
+  private async publishStableCompose(
+    projectPath: string,
+    jobComposeFile: string,
+    _context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<void> {
+    const stablePath = path.join(projectPath, COMPOSE_FILENAME);
+    const previousPath = path.join(projectPath, COMPOSE_PREVIOUS_FILENAME);
+    const tempPath = path.join(projectPath, `.${COMPOSE_FILENAME}.tmp`);
+    const previousTempPath = `${previousPath}.tmp`;
+
+    if (await fileExists(stablePath)) {
+      // O compose anterior é a ÚNICA configuração de recuperação além do
+      // arquivo estável. Se o backup falhar, NÃO sobrescrevemos o estável:
+      // aborta a publicação e mantém a versão antiga recuperável.
+      try {
+        await fs.copyFile(stablePath, previousTempPath);
+        await applyPrivateMode(previousTempPath);
+        await fs.rename(previousTempPath, previousPath);
+        await applyPrivateMode(previousPath);
+      } catch (error) {
+        try {
+          await fs.unlink(previousTempPath);
+        } catch {
+          // Nada a limpar.
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `não foi possível preservar o compose anterior (${message}); publicação do compose estável abortada`,
+        );
+      }
+    }
+
+    await fs.copyFile(path.join(projectPath, jobComposeFile), tempPath);
+    await fs.rename(tempPath, stablePath);
+    await applyPrivateMode(stablePath);
+  }
+
+  /** Apaga o compose/env do job; estável e `.previous` são preservados. */
+  private async cleanupJobComposeArtifacts(
+    config: DeployConfig,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+    preserve = false,
+  ): Promise<void> {
+    if (preserve) {
+      this.deployLogger.warn(
+        "cleanup",
+        context,
+        `estado indeterminado: compose do job preservado (${config.composeFilePath ?? COMPOSE_FILENAME})`,
+      );
+      return;
+    }
+    const composeFile = config.composeFilePath;
+    if (composeFile && isJobComposeFilename(path.basename(composeFile))) {
+      try {
+        await fs.unlink(path.resolve(config.projectPath, composeFile));
+      } catch {
+        this.deployLogger.warn("cleanup", context, "compose do job já não existia");
+      }
+    }
+    if (config.composeEnvFilePath) {
+      try {
+        await fs.unlink(config.composeEnvFilePath);
+      } catch {
+        // Arquivo já removido: nada a fazer.
+      }
+    }
+  }
+
   private async resolveGithubAccessToken(): Promise<string | undefined> {
     const installation = await this.githubInstallationRepository.findLatest();
     if (!installation) return undefined;
@@ -945,6 +1486,30 @@ async function fileExists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** Aplica 0600 (só o dono lê/escreve) sem falhar o deploy por FS exótico. */
+async function applyPrivateMode(filePath: string): Promise<void> {
+  try {
+    await fs.chmod(filePath, 0o600);
+  } catch {
+    // best effort: alguns filesystems (ex.: volumes) não suportam chmod
+  }
+}
+
+/** "repo:tag" -> { name, tag }; null para IDs/digests/referências inválidas. */
+function parseImageReference(reference: string): { name: string; tag: string } | null {
+  const index = reference.lastIndexOf(":");
+  if (index <= 0) return null;
+  const name = reference.slice(0, index);
+  const tag = reference.slice(index + 1);
+  if (!name || !tag || tag.includes("/") || name.startsWith("sha256")) return null;
+  return { name, tag };
+}
+
+/** Normaliza IDs de imagem (com/sem prefixo `sha256:`) para comparação. */
+function normalizeImageId(id: string): string {
+  return id.trim().replace(/^sha256:/i, "").toLowerCase();
 }
 
 function clampInt(value: number | undefined, fallback: number, min: number, max: number): number {

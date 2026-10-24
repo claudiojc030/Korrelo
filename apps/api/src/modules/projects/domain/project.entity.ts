@@ -11,7 +11,16 @@ export type DomainSslStatus = "none" | "pending" | "active" | "failed";
  * tratado como "falha do projeto", o cron, o backup e o terminal param de
  * funcionar numa aplicação que está no ar.
  */
-export type LastDeployStatus = "queued" | "running" | "succeeded" | "failed" | "rolled-back" | "canceled" | "interrupted";
+export type LastDeployStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "rolled-back"
+  | "canceled"
+  | "interrupted"
+  /** Produção pode ter ficado incoerente: exige reconciliação antes de novo deploy. */
+  | "indeterminate";
 
 export class Project {
   constructor(
