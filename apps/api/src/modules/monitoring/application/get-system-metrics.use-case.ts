@@ -43,6 +43,24 @@ const FAILURE_THRESHOLD = envInt("SYSTEM_METRICS_FAILURE_THRESHOLD", 3);
 const BACKOFF_BASE_MS = envInt("SYSTEM_METRICS_BACKOFF_BASE_MS", 5_000);
 /** Teto do backoff. */
 const BACKOFF_MAX_MS = envInt("SYSTEM_METRICS_BACKOFF_MAX_MS", 60_000);
+/**
+ * Watchdog de uma coleta.
+ *
+ * Os comandos internos têm timeout de 4-6s; 20s dá folga de sobra. Se a
+ * coleta passar disso (Docker travado, promise que não assenta), ela é
+ * ABANDONADA: a falha entra no circuito e a leitura anterior é devolvida como
+ * `stale`. Sem isso, o `inFlight` e o sinalizador do scheduler ficavam presos
+ * para sempre.
+ */
+const COLLECT_TIMEOUT_MS = envInt("SYSTEM_METRICS_COLLECT_TIMEOUT_MS", 20_000);
+
+/** Coleta que estourou o watchdog (não é erro do Docker em si). */
+class CollectTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`coleta de métricas excedeu ${timeoutMs}ms`);
+    this.name = "CollectTimeoutError";
+  }
+}
 
 interface CacheEntry {
   value: SystemMetrics;
@@ -56,6 +74,13 @@ export class GetSystemMetricsUseCase {
   private cached: CacheEntry | null = null;
   private lastGood: SystemMetrics | null = null;
   private inFlight: Promise<SystemMetrics> | null = null;
+  /**
+   * Coleta FÍSICA (a chamada ao collector) que pode ter sido abandonada pelo
+   * watchdog e continuar viva. Enquanto ela não assentar, NÃO abrimos outra
+   * operação no Docker - senão um Docker travado viraria uma pilha de
+   * processos `docker stats` a cada minuto.
+   */
+  private pendingCollect: Promise<SystemMetrics> | null = null;
 
   private consecutiveFailures = 0;
   private nextAttemptAt = 0;
@@ -105,6 +130,8 @@ export class GetSystemMetricsUseCase {
     nextAttemptAt: number;
     hasCachedValue: boolean;
     collecting: boolean;
+    /** true quando a coleta física anterior ainda não terminou (abandonada pelo watchdog). */
+    physicalCollectPending: boolean;
   } {
     return {
       consecutiveFailures: this.consecutiveFailures,
@@ -112,12 +139,33 @@ export class GetSystemMetricsUseCase {
       nextAttemptAt: this.nextAttemptAt,
       hasCachedValue: this.lastGood !== null,
       collecting: this.inFlight !== null,
+      physicalCollectPending: this.pendingCollect !== null,
     };
   }
 
   private async collectOnce(): Promise<SystemMetrics> {
+    // Coleta física anterior ainda pendurada (o watchdog já devolveu stale,
+    // mas o Docker não terminou): NÃO dispara outra.
+    if (this.pendingCollect) {
+      this.registerFailure("coleta_anterior_pendente");
+      return this.staleOrDegraded();
+    }
+
+    const collect = this.collector.collect();
+    this.pendingCollect = collect;
+    // Libera a referência quando a coleta REALMENTE terminar (mesmo que já
+    // tenha sido abandonada pelo watchdog). Nunca fica para sempre: o
+    // command-runner garante que os comandos internos assentam.
+    void collect
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.pendingCollect === collect) {
+          this.pendingCollect = null;
+        }
+      });
+
     try {
-      const metrics = await this.collector.collect();
+      const metrics = await this.withTimeout(collect);
 
       if (metrics.dockerReachable === false) {
         // O Docker não respondeu (timeout/erro). A coleta de CPU/memória pode
@@ -131,11 +179,34 @@ export class GetSystemMetricsUseCase {
       this.cached = { value: metrics, expiresAt: Date.now() + CACHE_TTL_MS };
       return metrics;
     } catch (error) {
-      this.registerFailure("coleta_lancou_excecao");
+      // Timeout do watchdog e exceção do collector entram no MESMO circuito.
+      // O resultado tardio da coleta abandonada é ignorado (só o vencedor do
+      // race chega aqui), então ele nunca sobrescreve `cached`/`lastGood`.
+      const reason = error instanceof CollectTimeoutError ? "coleta_travada" : "coleta_lancou_excecao";
+      this.registerFailure(reason);
       const message = error instanceof Error ? error.message : String(error);
-      this.logger.warn(`[metrics] falha ao coletar métricas: ${message}`);
+      this.logger.warn(`[metrics] falha ao coletar métricas (${reason}): ${message}`);
       return this.staleOrDegraded();
     }
+  }
+
+  /**
+   * Corre a coleta com um teto de tempo.
+   *
+   * `Promise.race` garante que o chamador (dashboard OU scheduler) nunca espera
+   * mais que COLLECT_TIMEOUT_MS. A promise abandonada continua com seus
+   * handlers anexados (nada de unhandled rejection) e é descartada quando
+   * resolver.
+   */
+  private withTimeout(promise: Promise<SystemMetrics>): Promise<SystemMetrics> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new CollectTimeoutError(COLLECT_TIMEOUT_MS)), COLLECT_TIMEOUT_MS);
+      timer.unref?.();
+    });
+    return Promise.race([promise, timeout]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
   }
 
   private registerSuccess(): void {

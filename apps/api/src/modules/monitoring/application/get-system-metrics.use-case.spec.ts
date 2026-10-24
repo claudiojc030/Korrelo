@@ -29,11 +29,13 @@ function buildMetrics(overrides: Partial<SystemMetrics> = {}): SystemMetrics {
   };
 }
 
-type CollectorBehavior = "ok" | "throws" | "dockerDown";
+type CollectorBehavior = "ok" | "throws" | "dockerDown" | "hang" | "late" | "lateReject";
 
 class FakeCollector {
   calls = 0;
   behavior: CollectorBehavior = "ok";
+  private lateResolve: ((metrics: SystemMetrics) => void) | null = null;
+  private lateReject: ((error: Error) => void) | null = null;
 
   async collect(): Promise<SystemMetrics> {
     this.calls += 1;
@@ -43,7 +45,35 @@ class FakeCollector {
     if (this.behavior === "dockerDown") {
       return buildMetrics({ dockerReachable: false, containers: [] });
     }
+    if (this.behavior === "hang") {
+      // Promise que NUNCA assenta: simula o Docker/promise travada.
+      return new Promise<SystemMetrics>(() => undefined);
+    }
+    if (this.behavior === "late") {
+      // Resolve só quando o teste mandar (resultado tardio).
+      return new Promise<SystemMetrics>((resolve) => {
+        this.lateResolve = resolve;
+      });
+    }
+    if (this.behavior === "lateReject") {
+      // Rejeita só depois do watchdog (rejeição abandonada).
+      return new Promise<SystemMetrics>((_resolve, reject) => {
+        this.lateReject = reject;
+      });
+    }
     return buildMetrics();
+  }
+
+  /** Libera uma coleta "late" pendente. */
+  resolveLate(metrics: SystemMetrics): void {
+    this.lateResolve?.(metrics);
+    this.lateResolve = null;
+  }
+
+  /** Rejeita uma coleta pendente depois do watchdog. */
+  rejectLate(error: Error): void {
+    this.lateReject?.(error);
+    this.lateReject = null;
   }
 }
 
@@ -52,6 +82,7 @@ const ENV_KEYS = [
   "SYSTEM_METRICS_FAILURE_THRESHOLD",
   "SYSTEM_METRICS_BACKOFF_BASE_MS",
   "SYSTEM_METRICS_BACKOFF_MAX_MS",
+  "SYSTEM_METRICS_COLLECT_TIMEOUT_MS",
 ];
 
 function loadUseCase(env: Record<string, string>) {
@@ -214,5 +245,124 @@ describe("GetSystemMetricsUseCase", () => {
     expect(metrics.stale).toBe(true);
     expect(useCase.getStatus().consecutiveFailures).toBe(1);
     restore();
+  });
+
+  // ------------------------------------------------ watchdog (travamento)
+  describe("watchdog de coleta", () => {
+    it("coleta que NUNCA resolve: devolve stale e libera o inFlight", async () => {
+      const { GetSystemMetricsUseCase, restore } = loadUseCase({
+        SYSTEM_METRICS_COLLECT_TIMEOUT_MS: "30",
+        SYSTEM_METRICS_BACKOFF_BASE_MS: "1",
+        SYSTEM_METRICS_CACHE_TTL_MS: "1",
+      });
+      try {
+        const collector = new FakeCollector();
+        collector.behavior = "hang";
+        const useCase = new GetSystemMetricsUseCase(collector);
+
+        const start = Date.now();
+        const metrics = await useCase.execute();
+
+        expect(metrics.stale).toBe(true);
+        expect(metrics.available).toBe(false);
+        // Não ficou pendurado: o watchdog cortou perto do limite.
+        expect(Date.now() - start).toBeLessThan(2_000);
+        expect(useCase.getStatus().collecting).toBe(false);
+        expect(useCase.getStatus().consecutiveFailures).toBe(1);
+        expect(collector.calls).toBe(1);
+      } finally {
+        restore();
+      }
+    });
+
+    it("NÃO abre outra coleta enquanto a anterior está fisicamente pendurada", async () => {
+      const { GetSystemMetricsUseCase, restore } = loadUseCase({
+        SYSTEM_METRICS_COLLECT_TIMEOUT_MS: "20",
+        SYSTEM_METRICS_FAILURE_THRESHOLD: "3",
+        SYSTEM_METRICS_BACKOFF_BASE_MS: "1",
+        SYSTEM_METRICS_CACHE_TTL_MS: "1",
+      });
+      try {
+        const collector = new FakeCollector();
+        collector.behavior = "hang";
+        const useCase = new GetSystemMetricsUseCase(collector);
+
+        for (let attempt = 0; attempt < 4; attempt++) {
+          const metrics = await useCase.execute();
+          expect(metrics.stale).toBe(true);
+          await sleep(5);
+        }
+
+        // A operação física continua viva: nenhuma nova operação Docker.
+        expect(collector.calls).toBe(1);
+        expect(useCase.getStatus().physicalCollectPending).toBe(true);
+        // As tentativas frustradas alimentam o circuito.
+        expect(useCase.getStatus().circuitOpen).toBe(true);
+      } finally {
+        restore();
+      }
+    });
+
+    it("resultado tardio de coleta abandonada NÃO sobrescreve o cache", async () => {
+      const { GetSystemMetricsUseCase, restore } = loadUseCase({
+        SYSTEM_METRICS_COLLECT_TIMEOUT_MS: "20",
+        SYSTEM_METRICS_BACKOFF_BASE_MS: "1",
+        SYSTEM_METRICS_CACHE_TTL_MS: "1",
+      });
+      try {
+        const collector = new FakeCollector();
+        collector.behavior = "late";
+        const useCase = new GetSystemMetricsUseCase(collector);
+
+        const first = await useCase.execute();
+        expect(first.available).toBe(false);
+        expect(useCase.getStatus().hasCachedValue).toBe(false);
+
+        // A coleta abandonada termina DEPOIS do watchdog.
+        collector.resolveLate(buildMetrics({ cpuPercent: 99 }));
+        await sleep(20);
+
+        // Nada entrou no cache: o valor tardio foi descartado.
+        expect(useCase.getStatus().hasCachedValue).toBe(false);
+        expect(useCase.getStatus().physicalCollectPending).toBe(false);
+
+        // E o serviço se recupera normalmente na coleta seguinte.
+        collector.behavior = "ok";
+        const recovered = await useCase.execute();
+        expect(recovered.cpuPercent).toBe(21);
+        expect(recovered.stale).not.toBe(true);
+      } finally {
+        restore();
+      }
+    });
+
+    it("rejeição tardia da coleta abandonada NÃO gera unhandledRejection", async () => {
+      const unhandled: unknown[] = [];
+      const onUnhandled = (reason: unknown) => unhandled.push(reason);
+      process.on("unhandledRejection", onUnhandled);
+
+      const { GetSystemMetricsUseCase, restore } = loadUseCase({
+        SYSTEM_METRICS_COLLECT_TIMEOUT_MS: "20",
+        SYSTEM_METRICS_BACKOFF_BASE_MS: "1",
+        SYSTEM_METRICS_CACHE_TTL_MS: "1",
+      });
+      try {
+        const collector = new FakeCollector();
+        collector.behavior = "lateReject";
+        const useCase = new GetSystemMetricsUseCase(collector);
+
+        const metrics = await useCase.execute();
+        expect(metrics.stale).toBe(true);
+
+        // A coleta abandonada rejeita DEPOIS que o watchdog já respondeu.
+        collector.rejectLate(new Error("docker caiu depois do timeout"));
+        await sleep(30);
+
+        expect(unhandled).toEqual([]);
+      } finally {
+        process.off("unhandledRejection", onUnhandled);
+        restore();
+      }
+    });
   });
 });
