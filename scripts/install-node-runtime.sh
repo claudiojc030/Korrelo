@@ -79,11 +79,17 @@ else
   sudo chown -R root:root "$STAGING"
 
   # Verifica o binário ANTES de publicar qualquer coisa.
-  if ! "$STAGING/$EXTRACTED/bin/node" --version | grep -qx "v${VERSION}"; then
+  #
+  # ATENÇÃO: o staging é criado por `sudo mktemp -d` e fica root:root 0700 de
+  # propósito (isolamento durante a extração). O usuário que roda este script
+  # não consegue ATRAVESSAR esse diretório: executar o binário direto daqui
+  # falha com "Permission denied". Por isso a validação roda sob sudo - o
+  # diretório NÃO é aberto para todos.
+  if ! sudo "$STAGING/$EXTRACTED/bin/node" --version | grep -qx "v${VERSION}"; then
     echo "ERRO: o binário extraído não respondeu com v${VERSION}. Symlink NÃO alterado." >&2
     exit 1
   fi
-  if [[ ! -x "$STAGING/$EXTRACTED/bin/npm" ]]; then
+  if ! sudo test -x "$STAGING/$EXTRACTED/bin/npm"; then
     echo "ERRO: npm não encontrado no runtime extraído. Symlink NÃO alterado." >&2
     exit 1
   fi
