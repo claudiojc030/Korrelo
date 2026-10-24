@@ -268,7 +268,7 @@ development mode, just to try out the interface before deciding to host it
 on a VPS.
 
 **Prerequisites:**
-- [Node.js 20+](https://nodejs.org)
+- [Node.js 22.23.4+](https://nodejs.org) (patched line; 20 is EOL). 24.22.1+ and 26.12.1+ are also accepted.
 - Git
 - Docker Desktop (optional, only needed if you want to test a real project
   deploy; just browsing Korrelo's interface doesn't require it)

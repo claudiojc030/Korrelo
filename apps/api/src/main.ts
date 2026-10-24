@@ -6,6 +6,7 @@ import helmet from "helmet";
 import * as express from "express";
 import { AppModule } from "./app.module";
 import { ensureRequiredSecrets } from "./infrastructure/ensure-required-secrets";
+import { rejectUnsupportedContentEncoding } from "./infrastructure/request-encoding";
 
 ensureRequiredSecrets();
 
@@ -28,6 +29,10 @@ async function bootstrap() {
   app.getHttpAdapter().getInstance().set("trust proxy", 1);
   app.use(helmet());
   app.use(cookieParser());
+  // ANTES dos parsers: corpo com Content-Encoding não suportado (inclui
+  // `br`) é recusado sem ser descomprimido. Defesa adicional contra
+  // CVE-2026-111497 no decoder Brotli do Node.js.
+  app.use(rejectUnsupportedContentEncoding);
   app.use(
     express.json({
       verify: (req: express.Request & { rawBody?: Buffer }, _res, buf) => {

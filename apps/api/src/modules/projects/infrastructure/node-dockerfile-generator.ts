@@ -7,7 +7,20 @@ import type {
 } from "../domain/dockerfile-generator";
 import { ENV_FILENAME, COMPOSE_FILENAME } from "../domain/container-orchestrator";
 
-const NODE_BASE_IMAGE = "node:20-alpine";
+/**
+ * Imagem base dos projetos Node.
+ *
+ * FIXA na primeira versão corrigida do ciclo de outubro/2026 (CVE-2026-111497,
+ * decoder Brotli). Pinar a versão deixa o build reprodutível e evita que um
+ * `apk`/patch inesperado mude o runtime silenciosamente; ao subir para uma
+ * versão corrigida mais nova, atualize esta constante e reconstrua os projetos
+ * DE FORMA CONTROLADA (staging antes da produção).
+ *
+ * IMPORTANTE: trocar isto NÃO reinicia nem reconstrói nada sozinho. Containers
+ * em execução continuam na versão antiga até o próximo deploy; o grandfathering
+ * de memória segue igual.
+ */
+export const NODE_BASE_IMAGE = "node:22.23.4-alpine";
 
 /**
  * Comando de instalação de dependências de PRODUÇÃO (sem devDependencies).
@@ -42,8 +55,7 @@ function prodInstallCommand(packageManager: string | null): string {
  * - "npm ci" é usado quando existe package-lock.json (install reprodutível).
  *
  * NOTA: o node_modules NUNCA é copiado entre plataformas diferentes - todos
- * os estágios usam a mesma imagem base (node:20-alpine), então é a mesma
- * plataforma.
+ * os estágios usam a mesma imagem base, então é a mesma plataforma.
  */
 @Injectable()
 export class NodeDockerfileGenerator implements DockerfileGenerator {
@@ -105,10 +117,10 @@ export class NodeDockerfileGenerator implements DockerfileGenerator {
       `FROM ${NODE_BASE_IMAGE} AS runner`,
       "WORKDIR /app",
       "ENV NODE_ENV=production",
-      // node:20-alpine só traz a libssl que o próprio Node usa internamente, não
-      // o binário "openssl" de linha de comando - apps que chamam openssl via
-      // shell (comum em assinatura de certificado digital, ex.: NFC-e) falham
-      // com "Could not find openssl on your system" sem isso.
+      // A imagem base (node:22-alpine) só traz a libssl que o próprio Node usa
+      // internamente, não o binário "openssl" de linha de comando - apps que
+      // chamam openssl via shell (comum em assinatura de certificado digital,
+      // ex.: NFC-e) falham com "Could not find openssl on your system" sem isso.
       "RUN apk add --no-cache openssl",
       `ENV PORT=${port}`,
       "COPY --from=builder /app ./",

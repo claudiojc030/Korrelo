@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { apiError } from "../../../infrastructure/api-error";
+import { KORRELO_CERTBOT_HELPER } from "../../../infrastructure/privileged-helpers";
 import type { DomainProvisioner } from "../domain/domain-provisioner";
 
 const execFile = promisify(execFileCallback);
@@ -68,20 +69,11 @@ export class NginxCertbotDomainProvisioner implements DomainProvisioner {
     }
 
     try {
-      // --nginx edita esse mesmo server block pra adicionar o 443 + redirect
-      // automaticamente depois de emitir o certificado, já cobrindo TODOS os
-      // domínios passados (--expand reaproveita/expande o certificado
-      // existente em vez de criar um separado quando o conjunto de domínios
-      // muda, ex.: adicionar www depois). Sem e-mail (o Korrelo não coleta um
-      // de verdade do administrador): --register-unsafely-without-email é a
-      // forma suportada de pular isso, diferente de inventar um endereço
-      // fake tipo "admin@localhost", que o Let's Encrypt passou a rejeitar.
-      const domainArgs = domains.flatMap((domain) => ["-d", domain]);
-      await execFile(
-        "sudo",
-        ["certbot", "--nginx", ...domainArgs, "--expand", "--register-unsafely-without-email", "--agree-tos", "--redirect", "-n"],
-        { timeout: 2 * 60 * 1000 },
-      );
+      // O helper privilegiado recebe SÓ os domínios: as flags do certbot
+      // (--nginx, --expand, --agree-tos, --redirect, -n) são fixas dentro
+      // dele. Antes, `sudo certbot *` no sudoers permitia --deploy-hook
+      // (comando arbitrário como root).
+      await execFile("sudo", [KORRELO_CERTBOT_HELPER, ...domains], { timeout: 2 * 60 * 1000 });
     } catch (error) {
       await this.removeSiteFile(primaryDomain);
       await this.reloadNginxIgnoringErrors();

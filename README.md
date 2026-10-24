@@ -715,7 +715,7 @@ desenvolvimento, só pra conhecer a interface antes de decidir hospedar numa
 VPS.
 
 **Pré-requisitos:**
-- [Node.js 20+](https://nodejs.org)
+- [Node.js 22.23.4+](https://nodejs.org) (linha corrigida; a 20 está EOL). Aceitas também 24.22.1+ e 26.12.1+.
 - Git
 - Docker Desktop (opcional, só necessário se você quiser testar o deploy de
   um projeto de verdade; pra só navegar pela interface do Korrelo não

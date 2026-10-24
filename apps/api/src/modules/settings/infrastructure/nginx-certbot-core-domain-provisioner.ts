@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { promisify } from "node:util";
 import { apiError } from "../../../infrastructure/api-error";
+import { KORRELO_CERTBOT_HELPER } from "../../../infrastructure/privileged-helpers";
 import type { CoreDomainProvisioner } from "../domain/core-domain-provisioner";
 
 const execFile = promisify(execFileCallback);
@@ -72,14 +73,9 @@ export class NginxCertbotCoreDomainProvisioner implements CoreDomainProvisioner 
     }
 
     try {
-      // Sem e-mail: --register-unsafely-without-email é a forma suportada de
-      // pular isso (o Let's Encrypt passou a rejeitar e-mails fake tipo
-      // "admin@localhost").
-      await execFile(
-        "sudo",
-        ["certbot", "--nginx", "-d", domain, "--register-unsafely-without-email", "--agree-tos", "--redirect", "-n"],
-        { timeout: 2 * 60 * 1000 },
-      );
+      // Flags fixas dentro do helper privilegiado; aqui só vai o domínio.
+      // Sem e-mail: o helper usa --register-unsafely-without-email.
+      await execFile("sudo", [KORRELO_CERTBOT_HELPER, domain], { timeout: 2 * 60 * 1000 });
     } catch (error) {
       await this.removeSiteFile(domain);
       await this.reloadNginxIgnoringErrors();

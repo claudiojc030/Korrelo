@@ -6,6 +6,9 @@
     "apps/*",
     "packages/*"
   ],
+  "engines": {
+    "node": ">=22.23.4 <23 || >=24.22.1 <25 || >=26.12.1 <27"
+  },
   "scripts": {
     "dev:api": "npm run start:dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
@@ -13,6 +16,7 @@
     "build": "npm run build --workspace=packages/shared-types && npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "check:runtime": "bash scripts/check-runtime.sh",
     "docker:dev": "docker compose -f docker/docker-compose.dev.yml up -d"
   },
   "devDependencies": {

@@ -2,6 +2,7 @@ import { Injectable, InternalServerErrorException } from "@nestjs/common";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
 import { apiError } from "../../../infrastructure/api-error";
+import { KORRELO_SERVICE_HELPER } from "../../../infrastructure/privileged-helpers";
 import type { OsServiceController, ServiceState } from "../domain/os-service-controller";
 
 const execFile = promisify(execFileCallback);
@@ -20,7 +21,9 @@ export class SystemctlServiceController implements OsServiceController {
   async setEnabled(unitName: string, enabled: boolean): Promise<void> {
     const action = enabled ? "enable" : "disable";
     try {
-      await execFile("sudo", ["systemctl", action, "--now", unitName], { timeout: 15_000 });
+      // Helper restrito: valida a ação e a unit contra a lista fechada do
+      // catálogo. `sudo systemctl enable --now *` não existe mais.
+      await execFile("sudo", [KORRELO_SERVICE_HELPER, action, unitName], { timeout: 15_000 });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       throw new InternalServerErrorException(

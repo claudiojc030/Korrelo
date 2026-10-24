@@ -43,12 +43,15 @@ else
   echo "Swap já existe ou RAM > 8GB, pulando."
 fi
 
-log "Instalando Node.js 20"
+log "Instalando Node.js 22 (LTS, linha corrigida >= 22.23.4)"
+# Numa VPS que JÁ tem o Korrelo rodando, NÃO troque o Node global por aqui:
+# use scripts/install-node-runtime.sh (instala lado a lado, preserva o runtime
+# antigo pra rollback) e siga docs/security/node22-migration.md.
 if ! command -v node &> /dev/null; then
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
   sudo apt-get install -y nodejs
 else
-  echo "Node já instalado: $(node -v)"
+  echo "Node já instalado: $(node -v) (o Korrelo exige >= 22.23.4; veja docs/security/node22-migration.md)"
 fi
 
 # node-pty (terminal com PTY de verdade) não tem prebuild pra toda plataforma
@@ -123,29 +126,69 @@ else
   echo "nginx.conf já inclui korrelo-sites, pulando."
 fi
 
-log "Configurando sudo restrito (nginx, certbot, enable/disable de serviço)"
-# O Core roda como usuário sem privilégio de propósito. Essas linhas são a
-# ÚNICA elevação que ele ganha: recarregar o nginx, rodar o certbot (domínio
-# de projeto), e ligar/desligar serviços do SO (aba "Serviços do sistema" no
-# Korrelo). O certbot precisa de argumentos livres (*) porque cada emissão
-# passa domínio/e-mail diferentes; "enable/disable --now *" também aceita
-# qualquer nome de serviço no sudoers. Quem realmente restringe QUAL serviço
-# pode ser tocado é a lista fechada em
-# apps/api/src/modules/system-services/domain/service-catalog.ts, não esta
-# regra (ela só garante que a AÇÃO fica limitada a enable/disable).
-SYSTEMCTL_BIN=$(command -v systemctl)
+log "Instalando helpers privilegiados restritos"
+# Regra antiga: `NOPASSWD: certbot *` e `systemctl enable --now *`. O curinga
+# permitia `sudo certbot --deploy-hook '<comando>'` (código arbitrário como
+# root) e habilitar/desabilitar QUALQUER unit. Agora só estes dois helpers
+# (com validação interna e lista fechada) são executáveis com sudo.
+#
+# IMPORTANTE: o sudoers só muda quando ESTE script é executado manualmente.
+# O self-update e o deploy de projetos nunca rodam setup-vps.sh.
+HELPERS_DIR=/usr/local/sbin
+sudo install -m 0755 -o root -g root scripts/lib/korrelo-certbot.sh "${HELPERS_DIR}/korrelo-certbot"
+sudo install -m 0755 -o root -g root scripts/lib/korrelo-service.sh "${HELPERS_DIR}/korrelo-service"
 CERTBOT_BIN=$(command -v certbot)
+SYSTEMCTL_BIN=$(command -v systemctl)
+# Pina os binários reais dentro dos helpers instalados (o resto do script é
+# imutável e roda como root).
+sudo sed -i "s#^CERTBOT_BIN=.*#CERTBOT_BIN=\"${CERTBOT_BIN}\"#" "${HELPERS_DIR}/korrelo-certbot"
+sudo sed -i "s#^SYSTEMCTL_BIN=.*#SYSTEMCTL_BIN=\"${SYSTEMCTL_BIN}\"#" "${HELPERS_DIR}/korrelo-service"
+
+log "Configurando sudo restrito (reload do nginx + helpers)"
+# A regra é preparada num arquivo temporário, VALIDADA com visudo, instalada
+# na MESMA pasta (rename atômico) e validada de novo como árvore completa.
+# A regra anterior é preservada em um backup (nome com ponto: o includedir
+# do sudo ignora arquivos com "." no nome).
+SUDOERS_TARGET=/etc/sudoers.d/korrelo
+SUDOERS_STAGING=/etc/sudoers.d/.korrelo.new
+SUDOERS_BACKUP=""
 SUDOERS_TMP=$(mktemp)
-echo "$USER ALL=(root) NOPASSWD: ${SYSTEMCTL_BIN} reload nginx, ${CERTBOT_BIN} *, ${SYSTEMCTL_BIN} enable --now *, ${SYSTEMCTL_BIN} disable --now *" > "$SUDOERS_TMP"
-if sudo visudo -c -f "$SUDOERS_TMP" > /dev/null 2>&1; then
-  sudo install -m 440 -o root -g root "$SUDOERS_TMP" /etc/sudoers.d/korrelo
-  echo "Regra criada em /etc/sudoers.d/korrelo."
-else
+printf '%s ALL=(root) NOPASSWD: %s reload nginx, %s, %s\n' \
+  "$USER" "${SYSTEMCTL_BIN}" "${HELPERS_DIR}/korrelo-certbot" "${HELPERS_DIR}/korrelo-service" \
+  > "$SUDOERS_TMP"
+if ! sudo visudo -c -f "$SUDOERS_TMP" > /dev/null 2>&1; then
   echo "Regra de sudoers gerada é inválida, abortando sem tocar em /etc/sudoers.d." >&2
   rm -f "$SUDOERS_TMP"
   exit 1
 fi
+
+if sudo test -f "$SUDOERS_TARGET"; then
+  SUDOERS_BACKUP="${SUDOERS_TARGET}.bak.$(date +%Y%m%d%H%M%S)"
+  sudo cp -p "$SUDOERS_TARGET" "$SUDOERS_BACKUP"
+  echo "Backup da regra anterior: ${SUDOERS_BACKUP}"
+fi
+
+sudo install -m 0440 -o root -g root "$SUDOERS_TMP" "$SUDOERS_STAGING"
 rm -f "$SUDOERS_TMP"
+if ! sudo visudo -c -f "$SUDOERS_STAGING" > /dev/null 2>&1; then
+  sudo rm -f "$SUDOERS_STAGING"
+  echo "Regra inválida no destino, abortando sem alterar ${SUDOERS_TARGET}." >&2
+  exit 1
+fi
+sudo mv -f "$SUDOERS_STAGING" "$SUDOERS_TARGET"
+
+# Valida a árvore INTEIRA; se algo quebrar, restaura o backup.
+if ! sudo visudo -c > /dev/null 2>&1; then
+  if [ -n "$SUDOERS_BACKUP" ]; then
+    sudo cp -p "$SUDOERS_BACKUP" "$SUDOERS_TARGET"
+    echo "ERRO: sudoers inválido após instalar - regra anterior restaurada de ${SUDOERS_BACKUP}." >&2
+  else
+    sudo rm -f "$SUDOERS_TARGET"
+    echo "ERRO: sudoers inválido após instalar - arquivo novo removido (não havia regra anterior)." >&2
+  fi
+  exit 1
+fi
+echo "Regra criada em ${SUDOERS_TARGET} (sem curingas)."
 
 log "Instalando dependências do monorepo"
 npm install
@@ -286,7 +329,7 @@ UNNECESSARY_SERVICES=(avahi-daemon cups cups-browsed ModemManager bluetooth)
 DISABLED_SERVICES=()
 for svc in "${UNNECESSARY_SERVICES[@]}"; do
   if systemctl list-unit-files "${svc}.service" 2>/dev/null | grep -q "${svc}.service"; then
-    sudo systemctl disable --now "${svc}" > /dev/null 2>&1 || true
+    sudo /usr/local/sbin/korrelo-service disable "${svc}" > /dev/null 2>&1 || true
     DISABLED_SERVICES+=("$svc")
   fi
 done
@@ -453,7 +496,7 @@ NGINXCONF
   log "Emitindo certificado TLS do Korrelo (Let's Encrypt)"
   # --nginx edita o server block acima pra 443 + redirect automaticamente.
   # certbot já instala o timer de renovação automática (systemd), não precisa de cron.
-  sudo certbot --nginx -d "$DOMAIN" -m "$LETSENCRYPT_EMAIL" --agree-tos --redirect -n
+  sudo /usr/local/sbin/korrelo-certbot --email "$LETSENCRYPT_EMAIL" "$DOMAIN"
 
   log "Pronto! Acesse https://${DOMAIN} pra criar a conta de admin."
 else
