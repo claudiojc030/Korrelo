@@ -5,9 +5,8 @@ import { ReconcileProjectStateUseCase } from "./reconcile-project-state.use-case
 /**
  * RECONCILIAÇÃO EXPLÍCITA (Etapa 1.1).
  *
- * Um projeto em estado INDETERMINADO só volta a aceitar deploys quando o
- * container real comprova a imagem. Nada aqui executa Compose, reinicia
- * container ou publica arquivos.
+ * Um projeto em estado INDETERMINADO só volta a aceitar deploys quando
+ * container, imagem e READINESS são comprovados. Nada aqui executa Compose.
  */
 class FakeProjectRepository {
   saved: Project[] = [];
@@ -31,6 +30,15 @@ class FakeOrchestrator {
   }
 }
 
+class FakeHealthChecker {
+  healthy = true;
+  calls: { port: number; timeoutMs: number; options?: unknown }[] = [];
+  async waitUntilHealthy(port: number, timeoutMs: number, options?: unknown): Promise<boolean> {
+    this.calls.push({ port, timeoutMs, options });
+    return this.healthy;
+  }
+}
+
 function indeterminateProject(): Project {
   return Project.create("Mesatta", "https://github.com/exemplo/mesatta.git")
     .withDeployment("korrelo-mesatta-8452004c", 39999)
@@ -39,12 +47,18 @@ function indeterminateProject(): Project {
 }
 
 describe("ReconcileProjectStateUseCase", () => {
-  function build(project: Project, state: ProductionContainerState) {
+  function build(project: Project, state: ProductionContainerState, healthy = true) {
     const repo = new FakeProjectRepository(project);
     const orchestrator = new FakeOrchestrator();
     orchestrator.state = state;
-    const useCase = new ReconcileProjectStateUseCase(repo as any, orchestrator as any);
-    return { repo, orchestrator, useCase };
+    const health = new FakeHealthChecker();
+    health.healthy = healthy;
+    const useCase = new ReconcileProjectStateUseCase(
+      repo as any,
+      orchestrator as any,
+      health as any,
+    );
+    return { repo, orchestrator, health, useCase };
   }
 
   it("recusa reconciliar projeto que NÃO está indeterminado", async () => {
@@ -75,25 +89,56 @@ describe("ReconcileProjectStateUseCase", () => {
     const result = await useCase.execute(project.id);
 
     expect(result.lastDeployStatus).toBe("failed");
-    // Não inventa imagem quando não há container.
     expect(result.currentImage).toBe("korrelo-mesatta-8452004c:commit-af66af14684e");
   });
 
-  it("container comprovado: adota a imagem real e libera novos deploys", async () => {
+  it("container comprovado + readiness OK: adota a imagem e libera novos deploys", async () => {
     const project = indeterminateProject();
     const state: ProductionContainerState = {
       kind: "known",
       containerId: "c1",
       imageReference: "korrelo-mesatta-8452004c:commit-real123456",
       imageId: "sha256:abc",
+      running: true,
     };
-    const { useCase } = build(project, state);
+    const { useCase, health } = build(project, state);
 
     const result = await useCase.execute(project.id);
 
     expect(result.lastDeployStatus).toBe("failed");
     expect(result.currentImage).toBe("korrelo-mesatta-8452004c:commit-real123456");
     expect(result.status).toBe("running");
+    expect(health.calls).toHaveLength(1);
+  });
+
+  it("readiness reprovado: NÃO libera o estado indeterminado", async () => {
+    const project = indeterminateProject();
+    const state: ProductionContainerState = {
+      kind: "known",
+      containerId: "c1",
+      imageReference: "korrelo-mesatta-8452004c:commit-real123456",
+      imageId: "sha256:abc",
+      running: true,
+    };
+    const { useCase, repo } = build(project, state, false);
+
+    await expect(useCase.execute(project.id)).rejects.toThrow(/readiness/i);
+    expect(repo.saved).toHaveLength(0);
+    expect(project.lastDeployStatus).toBe("indeterminate");
+  });
+
+  it("container parado: mantém estado indeterminado", async () => {
+    const project = indeterminateProject();
+    const { useCase, repo } = build(project, {
+      kind: "known",
+      containerId: "c1",
+      imageReference: "korrelo-mesatta-8452004c:commit-real123456",
+      imageId: "sha256:abc",
+      running: false,
+    });
+
+    await expect(useCase.execute(project.id)).rejects.toThrow(/não está em execução/);
+    expect(repo.saved).toHaveLength(0);
   });
 
   it("recusa tag 'latest' (não é referência versionada)", async () => {
@@ -103,6 +148,7 @@ describe("ReconcileProjectStateUseCase", () => {
       containerId: "c1",
       imageReference: "korrelo-mesatta-8452004c:latest",
       imageId: "sha256:abc",
+      running: true,
     });
 
     await expect(useCase.execute(project.id)).rejects.toThrow(/não é uma tag versionada/);

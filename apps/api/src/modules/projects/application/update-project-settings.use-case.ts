@@ -34,6 +34,10 @@ export interface UpdateProjectSettingsInput {
     timeoutSeconds?: number;
     retries?: number;
     startPeriodSeconds?: number;
+    /** Readiness do DEPLOY (ex.: "/health/ready"); exige HTTP 2xx. */
+    deployPath?: string;
+    /** Timeout de saúde da produção/rollback (10..300s). */
+    deployTimeoutSeconds?: number;
   } | null;
   /**
    * Limite de memória do container de TESTE (staging) deste projeto, em MB.
@@ -201,7 +205,7 @@ export class UpdateProjectSettingsUseCase {
  * generoso) em vez de aceitos como vieram.
  */
 function normalizeHealthcheck(input: NonNullable<UpdateProjectSettingsInput["healthcheck"]>) {
-  return {
+  const normalized: Record<string, unknown> = {
     enabled: input.enabled === true,
     path: (input.path ?? "/").startsWith("/") ? (input.path ?? "/") : `/${input.path ?? ""}`,
     intervalSeconds: clamp(input.intervalSeconds, 30, 5, 300),
@@ -209,6 +213,15 @@ function normalizeHealthcheck(input: NonNullable<UpdateProjectSettingsInput["hea
     retries: clamp(input.retries, 3, 1, 10),
     startPeriodSeconds: clamp(input.startPeriodSeconds, 120, 0, 600),
   };
+  // Contrato de saúde do DEPLOY (opcional). Sem ele, comportamento histórico.
+  if (typeof input.deployPath === "string" && input.deployPath.trim().length > 0) {
+    const path = input.deployPath.trim();
+    normalized.deployPath = path.startsWith("/") ? path : `/${path}`;
+  }
+  if (input.deployTimeoutSeconds !== undefined) {
+    normalized.deployTimeoutSeconds = clamp(input.deployTimeoutSeconds, 30, 10, 300);
+  }
+  return normalized;
 }
 
 function clamp(value: number | undefined, fallback: number, min: number, max: number): number {

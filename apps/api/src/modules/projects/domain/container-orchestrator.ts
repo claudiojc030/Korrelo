@@ -8,6 +8,11 @@ export const CONTAINER_ORCHESTRATOR = Symbol("CONTAINER_ORCHESTRATOR");
 export const COMPOSE_FILENAME = "docker-compose.korrelo.yml";
 /** Cópia da configuração de produção anterior, guardada antes de publicar a nova. */
 export const COMPOSE_PREVIOUS_FILENAME = "docker-compose.korrelo.previous.yml";
+/**
+ * Snapshot da configuração VIVA no início do deploy, usado pelo rollback.
+ * É escrito antes de qualquer promoção e nunca contém a versão candidata.
+ */
+export const COMPOSE_ROLLBACK_FILENAME = "docker-compose.korrelo.rollback.yml";
 /** Prefixo dos composes POR JOB (build/staging/promoção isolados). */
 export const COMPOSE_JOB_PREFIX = "docker-compose.korrelo.job-";
 export const ENV_FILENAME = ".env.korrelo";
@@ -111,6 +116,14 @@ export interface DeployConfig {
   commitSha?: string | null;
   // Healthcheck Docker opcional (só quando o projeto configura).
   healthcheck?: HealthcheckConfig | null;
+  /**
+   * Contrato de saúde do DEPLOY (staging, produção e rollback). Quando
+   * `healthCheckPath` é definido, somente HTTP 2xx aprova a etapa.
+   */
+  healthCheckPath?: string | null;
+  healthCheckRequire2xx?: boolean;
+  /** Timeout de saúde da produção/rollback (default histórico: 30s). */
+  healthTimeoutMs?: number;
   // Teto de swap do container. null = não emitir (comportamento padrão do
   // Docker: o container pode usar swap até 2x o mem_limit).
   memswapLimitMb?: number | null;
@@ -124,6 +137,9 @@ export interface TeardownConfig {
   // de propósito, pra não apagar o volume do banco numa tentativa que pode ser
   // corrigida e reimplantada em seguida.
   removeVolumes?: boolean;
+  /** Tag usada apenas para interpolar o compose no `down` (nunca apaga imagem). */
+  imageTag?: string;
+  composeEnvFilePath?: string;
 }
 
 /**
@@ -159,7 +175,7 @@ export interface ProductionAction {
 export type ProductionContainerState =
   | { kind: "absent" }
   | { kind: "unverified"; containerId: string | null; reason: string }
-  | { kind: "known"; containerId: string; imageReference: string; imageId: string };
+  | { kind: "known"; containerId: string; imageReference: string; imageId: string; running: boolean };
 
 export interface ContainerOrchestrator {
   // Builda e sobe SÓ a instância de teste (app_staging no compose), sem tocar

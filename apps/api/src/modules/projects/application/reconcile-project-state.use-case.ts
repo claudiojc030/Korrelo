@@ -1,8 +1,10 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { apiError } from "../../../infrastructure/api-error";
 import { CONTAINER_ORCHESTRATOR, type ContainerOrchestrator } from "../domain/container-orchestrator";
+import { HEALTH_CHECKER, type HealthChecker } from "../domain/health-checker";
 import type { Project } from "../domain/project.entity";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
+import { parseDeployHealthConfig } from "../infrastructure/deploy-health-config";
 
 /**
  * RECONCILIAÇÃO EXPLÍCITA de um projeto em ESTADO INDETERMINADO.
@@ -24,6 +26,7 @@ export class ReconcileProjectStateUseCase {
   constructor(
     @Inject(PROJECT_REPOSITORY) private readonly repository: ProjectRepository,
     @Inject(CONTAINER_ORCHESTRATOR) private readonly orchestrator: ContainerOrchestrator,
+    @Inject(HEALTH_CHECKER) private readonly healthChecker: HealthChecker,
   ) {}
 
   async execute(projectId: string): Promise<Project> {
@@ -61,6 +64,16 @@ export class ReconcileProjectStateUseCase {
       return this.repository.save(project.withLastDeployStatus("failed"));
     }
 
+    if (state.kind === "known" && !state.running) {
+      throw new ConflictException(
+        apiError(
+          "PROJECT_RECONCILE_NOT_RUNNING",
+          `O container de produção ("${project.containerName}") não está em execução. ` +
+            "O estado permanece INDETERMINADO; nada foi alterado.",
+        ),
+      );
+    }
+
     // Só aceita referência versionada do próprio projeto, como no gate de
     // promoção; nada de "latest" nem tag de outro repositório.
     const parsed = parseImageReference(state.imageReference);
@@ -70,6 +83,34 @@ export class ReconcileProjectStateUseCase {
           "PROJECT_RECONCILE_REFERENCE",
           `A imagem em execução ("${state.imageReference}") não é uma tag versionada (commit-*). ` +
             "Nada foi alterado; publique uma versão tagueada antes de reconciliar.",
+        ),
+      );
+    }
+
+    // READINESS: sem porta ou sem resposta no contrato configurado, o estado
+    // continua indeterminado (não liberamos deploy no escuro).
+    const deployHealth = parseDeployHealthConfig(project.healthcheckConfig);
+    if (project.assignedPort === null) {
+      throw new ConflictException(
+        apiError(
+          "PROJECT_RECONCILE_NO_PORT",
+          "O projeto não tem porta de produção registrada; não é possível validar readiness. Nada foi alterado.",
+        ),
+      );
+    }
+    const healthy = await this.healthChecker.waitUntilHealthy(
+      project.assignedPort,
+      deployHealth.timeoutMs,
+      deployHealth.options,
+    );
+    if (!healthy) {
+      throw new ConflictException(
+        apiError(
+          "PROJECT_RECONCILE_UNHEALTHY",
+          `A imagem do container foi comprovada, mas o readiness${
+            deployHealth.path ? ` (HTTP 2xx em ${deployHealth.path})` : ""
+          } não respondeu em ${Math.round(deployHealth.timeoutMs / 1000)}s. ` +
+            "O estado permanece INDETERMINADO; nada foi alterado.",
         ),
       );
     }

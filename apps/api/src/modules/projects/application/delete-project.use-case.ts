@@ -24,7 +24,13 @@ export class DeleteProjectUseCase {
 
     if (project.containerName) {
       try {
-        await this.orchestrator.teardown({ projectPath, containerName: project.containerName, removeVolumes: true });
+        await this.orchestrator.teardown({
+          projectPath,
+          containerName: project.containerName,
+          removeVolumes: true,
+          // Tag só para interpolar o compose no `down` (não apaga imagem).
+          imageTag: project.currentImage?.split(":").pop() ?? "unused",
+        });
       } catch (error) {
         this.logger.warn(`Falha ao remover container ${project.containerName} durante delete: ${error}`);
       }

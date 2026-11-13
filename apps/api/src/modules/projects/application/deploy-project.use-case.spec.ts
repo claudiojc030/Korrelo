@@ -142,9 +142,12 @@ class FakeHealthChecker {
   timeouts: number[] = [];
   /** Porta de cada chamada, na ordem em que foram feitas. */
   ports: number[] = [];
-  async waitUntilHealthy(port?: number, timeoutMs?: number): Promise<boolean> {
+  /** Opções (path/require2xx) de cada chamada. */
+  options: any[] = [];
+  async waitUntilHealthy(port?: number, timeoutMs?: number, options?: any): Promise<boolean> {
     this.ports.push(port as number);
     this.timeouts.push(timeoutMs as number);
+    this.options.push(options ?? null);
     return this.results.length > 0 ? (this.results.shift() as boolean) : true;
   }
 }
@@ -372,6 +375,9 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     orchestrator.defaultProductionState = { kind: "absent" };
     orchestrator.inspectCalls = [];
     healthChecker.results = [];
+    healthChecker.options = [];
+    healthChecker.timeouts = [];
+    healthChecker.ports = [];
     deployJobRepository.jobs.clear();
     deployRecordRepository.records = [];
     stagingDiagnostics.calls = [];
@@ -887,7 +893,9 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     await expect(useCase.executeJob(makeJob())).rejects.toThrow();
 
     expect(orchestrator.promoteConfigs[0]?.composeFilePath).toMatch(/^docker-compose\.korrelo\.job-/);
-    expect(orchestrator.rollbackCalls[0]?.config?.composeFilePath).toBe("docker-compose.korrelo.yml");
+    expect(orchestrator.rollbackCalls[0]?.config?.composeFilePath).toBe(
+      "docker-compose.korrelo.rollback.yml",
+    );
   });
 
   it("a tag vai explícita no env-file do job e o arquivo é removido no fim", async () => {
@@ -1179,6 +1187,57 @@ describe("DeployProjectUseCase (Wave 2)", () => {
 
     expect(fs.statSync(stableComposePath()).mode & 0o777).toBe(0o600);
     expect(fs.statSync(previousComposePath()).mode & 0o777).toBe(0o600);
+  });
+
+  it("readiness configurado vale para staging, produção e rollback com timeout de 120s", async () => {
+    const current = projectRepository.project as any;
+    projectRepository.project = current.withHealthcheckConfig(
+      JSON.stringify({
+        enabled: false,
+        path: "/",
+        deployPath: "/health/ready",
+        deployTimeoutSeconds: 120,
+      }),
+    );
+    // staging ok, produção falha, rollback ok.
+    healthChecker.results = [true, false, true];
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/Rollback executado/);
+
+    expect(healthChecker.options[0]).toMatchObject({ path: "/health/ready", require2xx: true });
+    expect(healthChecker.options[1]).toMatchObject({ path: "/health/ready", require2xx: true });
+    expect(healthChecker.options[2]).toMatchObject({ path: "/health/ready", require2xx: true });
+    // Staging mantém o próprio timeout; produção e rollback usam 120s.
+    expect(healthChecker.timeouts[1]).toBe(120_000);
+    expect(healthChecker.timeouts[2]).toBe(120_000);
+  });
+
+  it("projeto sem readiness mantém o contrato antigo (qualquer resposta em /)", async () => {
+    await useCase.executeJob(makeJob());
+
+    expect(healthChecker.options[0]).toMatchObject({ require2xx: false });
+    expect(healthChecker.options[0]?.path).toBeUndefined();
+    expect(healthChecker.timeouts[1]).toBe(30_000);
+  });
+
+  it("rollback restaurou a imagem mas a saúde expirou: conservador e mensagem separada", async () => {
+    healthChecker.results = [true, false, false];
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow(/FOI RESTAURADA/);
+
+    expect(orchestrator.rollbackCalls).toHaveLength(1);
+    expect(projectRepository.project?.lastDeployStatus).toBe("indeterminate");
+  });
+
+  it("compose de rollback é preservado antes da promoção", async () => {
+    const sentinel = "# configuração viva em produção\n";
+    seedStableCompose(sentinel);
+    orchestrator.failStaging = true;
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow("falha no staging");
+
+    const snapshot = path.join(projectDir(), "docker-compose.korrelo.rollback.yml");
+    expect(fs.readFileSync(snapshot, "utf-8")).toBe(sentinel);
   });
 
   it("staging-only não publica compose estável (só valida)", async () => {

@@ -419,20 +419,34 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
     }
   }
 
-  async removeStaging(config: { projectPath: string; containerName: string; composeFilePath?: string }): Promise<void> {
+  async removeStaging(config: {
+    projectPath: string;
+    containerName: string;
+    composeFilePath?: string;
+    /** Tag obrigatória para a interpolação do compose (${KORRELO_IMAGE_TAG:?}). */
+    imageTag?: string;
+    composeEnvFilePath?: string;
+  }): Promise<void> {
     await execFile(
       "docker",
       [
         "compose",
         "-f",
         config.composeFilePath || COMPOSE_FILENAME,
+        ...(config.composeEnvFilePath ? ["--env-file", config.composeEnvFilePath] : []),
         "-p",
         config.containerName,
         "rm",
         "-fs",
         "app_staging",
       ],
-      { cwd: config.projectPath, timeout: REMOVE_STAGING_TIMEOUT_MS },
+      {
+        cwd: config.projectPath,
+        timeout: REMOVE_STAGING_TIMEOUT_MS,
+        // Sem isso o compose falha na interpolação da tag obrigatória do
+        // incidente Mesatta (cleanup perdia KORRELO_IMAGE_TAG).
+        env: this.composeEnvironment(config.imageTag ?? "unused"),
+      },
     );
   }
 
@@ -532,7 +546,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
     try {
       const { stdout } = await execFile(
         "docker",
-        ["inspect", "--format", "{{.Id}}|{{.Image}}|{{.Config.Image}}", containerName],
+        ["inspect", "--format", "{{.Id}}|{{.Image}}|{{.Config.Image}}|{{.State.Running}}", containerName],
         { timeout: 20_000 },
       );
       raw = stdout.trim();
@@ -546,7 +560,7 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       };
     }
 
-    const [containerId, containerImageId, reference] = raw.split("|");
+    const [containerId, containerImageId, reference, runningRaw] = raw.split("|");
     if (!containerId || !containerImageId || !reference) {
       return {
         kind: "unverified",
@@ -586,7 +600,13 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
       };
     }
 
-    return { kind: "known", containerId, imageReference: reference, imageId: containerImageId };
+    return {
+      kind: "known",
+      containerId,
+      imageReference: reference,
+      imageId: containerImageId,
+      running: String(runningRaw).trim().toLowerCase() === "true",
+    };
   }
 
   /**
@@ -649,13 +669,27 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
   }
 
   async teardown(config: TeardownConfig): Promise<void> {
-    const args = ["compose", "-f", COMPOSE_FILENAME, "-p", config.containerName, "down", "--remove-orphans"];
+    const args = [
+      "compose",
+      "-f",
+      COMPOSE_FILENAME,
+      ...(config.composeEnvFilePath ? ["--env-file", config.composeEnvFilePath] : []),
+      "-p",
+      config.containerName,
+      "down",
+      "--remove-orphans",
+    ];
     if (config.removeVolumes) {
       // -v apaga o volume do banco (dado do projeto); --rmi local só remove a
       // imagem buildada pra ESTE projeto (não mexe em imagens baixadas como
       // postgres/redis/mongo, que podem ser reaproveitadas por outros).
       args.push("-v", "--rmi", "local");
     }
-    await execFile("docker", args, { cwd: config.projectPath, timeout: PRUNE_TIMEOUT_MS });
+    await execFile("docker", args, {
+      cwd: config.projectPath,
+      timeout: PRUNE_TIMEOUT_MS,
+      // `down` também interpola o compose: a tag obrigatória precisa existir.
+      env: this.composeEnvironment(config.imageTag ?? "unused"),
+    });
   }
 }

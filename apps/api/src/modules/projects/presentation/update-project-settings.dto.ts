@@ -23,6 +23,10 @@ export class UpdateProjectSettingsDto {
     timeoutSeconds?: number;
     retries?: number;
     startPeriodSeconds?: number;
+    /** Readiness do DEPLOY (ex.: "/health/ready"); exige HTTP 2xx. */
+    deployPath?: string;
+    /** Timeout de saúde da produção/rollback (10..300s). */
+    deployTimeoutSeconds?: number;
   };
   /**
    * Limite de memória do container de TESTE (staging) deste projeto, em MB.

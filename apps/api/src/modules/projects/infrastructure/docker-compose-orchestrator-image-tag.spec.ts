@@ -163,16 +163,32 @@ describe("imagem e compose nas operações do Compose", () => {
     expect(calls.some((call) => call.args[0] === "compose")).toBe(false);
   });
 
-  it("remoção do staging usa o compose do job", async () => {
+  it("remoção do staging usa o compose do job e envia a tag obrigatória", async () => {
     await new DockerComposeOrchestrator().removeStaging({
       projectPath: "/tmp/proj",
       containerName: "korrelo-mesatta-8452004c",
       composeFilePath: jobFile,
+      imageTag: "commit-aaaaaaabbbbb",
+      composeEnvFilePath: "/tmp/secrets/.compose.job-1.env",
     });
 
     const rm = calls.find((call) => call.args[0] === "compose" && call.args.includes("rm"));
     expect(rm?.args).toContain(jobFile);
     expect(rm?.args).toContain("app_staging");
+    expect(rm?.args).toContain("--env-file");
+    // Incidente: sem esta variável o compose falha na interpolação do `rm`.
+    expect(rm?.env?.KORRELO_IMAGE_TAG).toBe("commit-aaaaaaabbbbb");
+  });
+
+  it("teardown também interpola a tag obrigatória", async () => {
+    await new DockerComposeOrchestrator().teardown({
+      projectPath: "/tmp/proj",
+      containerName: "korrelo-mesatta-8452004c",
+      imageTag: "commit-anterior",
+    });
+
+    const down = calls.find((call) => call.args[0] === "compose" && call.args.includes("down"));
+    expect(down?.env?.KORRELO_IMAGE_TAG).toBe("commit-anterior");
   });
 });
 
@@ -200,7 +216,7 @@ describe("inspectProductionContainer", () => {
   it("container verificado: referência repo:tag e ID idêntico", async () => {
     mockDocker((args) => {
       if (args[0] === "image") return { stdout: "sha256:bbb\n" };
-      return { stdout: "cid123|sha256:bbb|korrelo-x:commit-abc\n" };
+      return { stdout: "cid123|sha256:bbb|korrelo-x:commit-abc|true\n" };
     });
 
     const state = await orchestrator.inspectProductionContainer("korrelo-x");
@@ -209,6 +225,7 @@ describe("inspectProductionContainer", () => {
       containerId: "cid123",
       imageReference: "korrelo-x:commit-abc",
       imageId: "sha256:bbb",
+      running: true,
     });
   });
 

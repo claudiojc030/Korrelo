@@ -11,13 +11,14 @@ import {
   CONTAINER_ORCHESTRATOR,
   COMPOSE_FILENAME,
   COMPOSE_PREVIOUS_FILENAME,
+  COMPOSE_ROLLBACK_FILENAME,
   isJobComposeFilename,
   jobComposeFilename,
   type ContainerOrchestrator,
   type DeployConfig,
   type ProductionContainerState,
 } from "../domain/container-orchestrator";
-import { HEALTH_CHECKER, type HealthChecker } from "../domain/health-checker";
+import { HEALTH_CHECKER, type HealthChecker, type HealthCheckOptions } from "../domain/health-checker";
 import { ENV_VAR_REPOSITORY, type EnvVarRepository } from "../domain/env-var.repository";
 import {
   MANAGED_DATABASE_REPOSITORY,
@@ -46,6 +47,7 @@ import {
 import { ensureDockerignore } from "../infrastructure/dockerignore";
 import { DeployLogger } from "../infrastructure/deploy-logger";
 import { ResourcePreflightService } from "../infrastructure/resource-preflight.service";
+import { parseDeployHealthConfig } from "../infrastructure/deploy-health-config";
 import { WorkerLock } from "../infrastructure/worker-lock";
 import {
   defaultSelfUpdateState,
@@ -81,6 +83,17 @@ const HEALTH_CHECK_TIMEOUT_MS = 30_000;
 const DEFAULT_STAGING_HEALTH_TIMEOUT_SECONDS = HEALTH_CHECK_TIMEOUT_MS / 1000;
 
 /** Erro de deploy com a informação de se a produção foi afetada. */
+/**
+ * Resultado do rollback separando ORQUESTRAÇÃO de SAÚDE.
+ * `restored` = compose executou e recriou o container com a imagem anterior.
+ * `healthy`  = a versão restaurada respondeu ao contrato de saúde.
+ */
+interface RollbackOutcome {
+  attempted: boolean;
+  restored: boolean;
+  healthy: boolean;
+}
+
 class DeployFailure extends Error {
   constructor(
     message: string,
@@ -284,6 +297,7 @@ export class DeployProjectUseCase {
       // ------------------------------------------------------------------
       // 3. imagem versionada por commit
       // ------------------------------------------------------------------
+      const deployHealth = parseDeployHealthConfig(project.healthcheckConfig);
       const imageName = sanitizeContainerName(project.id, project.name);
       const imageTag = `commit-${prepared.sha.slice(0, 12)}`;
       candidateImage = `${imageName}:${imageTag}`;
@@ -357,6 +371,9 @@ export class DeployProjectUseCase {
         deployJobId: job.id,
         commitSha: prepared.sha,
         healthcheck: this.parseHealthcheckConfig(project),
+        healthCheckPath: deployHealth.path,
+        healthCheckRequire2xx: deployHealth.require2xx,
+        healthTimeoutMs: deployHealth.timeoutMs,
         memswapLimitMb: this.parseMemswapLimitMb(),
       };
 
@@ -390,6 +407,9 @@ export class DeployProjectUseCase {
         // (formato legado). Saneia SÓ esse default inseguro: a configuração
         // em si não muda e nenhum container é tocado.
         await this.sanitizeLegacyStableCompose(projectPath, context);
+        // Preserva a configuração VIVA (comprovadamente em produção) antes de
+        // qualquer promoção. O rollback usa este snapshot, nunca a candidata.
+        await this.snapshotStableCompose(projectPath, context);
       }
 
       // ------------------------------------------------------------------
@@ -448,10 +468,11 @@ export class DeployProjectUseCase {
         const stagingHealthy = await this.healthChecker.waitUntilHealthy(
           deployConfig.staging.hostPort,
           stagingHealthTimeout.seconds * 1000,
+          this.healthCheckOptions(deployConfig),
         );
         if (!stagingHealthy) {
           throw new DeployFailure(
-            `Container de teste subiu mas não respondeu em ${stagingHealthTimeout.seconds}s. A versão em produção não foi tocada.`,
+            `Container de teste subiu mas não respondeu${this.healthContractLabel(deployConfig)} em ${stagingHealthTimeout.seconds}s. A versão em produção não foi tocada.`,
             false,
           );
         }
@@ -530,22 +551,28 @@ export class DeployProjectUseCase {
         await this.setStage(job, "production-health", context);
         const productionHealthy = await this.healthChecker.waitUntilHealthy(
           deployConfig.hostPort,
-          HEALTH_CHECK_TIMEOUT_MS,
+          this.productionHealthTimeoutMs(deployConfig),
+          this.healthCheckOptions(deployConfig),
         );
 
         if (!productionHealthy) {
           await this.setStage(job, "rollback", context);
-          rollbackAttempted = true;
-          rollbackSucceeded = await this.rollbackIfPossible(
+          const outcome = await this.rollbackIfPossible(
             await this.rollbackDeployConfig(deployConfig, context),
             previousImage,
             context,
           );
+          rollbackAttempted = rollbackAttempted || outcome.attempted;
+          rollbackSucceeded = outcome.restored && outcome.healthy;
           await this.deployJobRepository.save(job.withRollback(true, rollbackSucceeded));
           throw new DeployFailure(
             rollbackSucceeded
               ? `A versão nova não respondeu em produção. Rollback executado: a versão anterior está no ar de novo.`
-              : `A versão nova não respondeu em produção e o ROLLBACK FALHOU. Ação manual necessária.`,
+              : outcome.restored
+                ? `A versão nova não respondeu em produção${this.healthContractLabel(deployConfig)} em ${this.rollbackTimeoutSeconds(deployConfig)}s. ` +
+                  `A imagem anterior FOI RESTAURADA, mas a saúde dela não foi confirmada. ` +
+                  `ESTADO INDETERMINADO: não inicie outro deploy sem validar o serviço ou reconciliar.`
+                : `A versão nova não respondeu em produção e o ROLLBACK FALHOU. Ação manual necessária.`,
             !rollbackSucceeded,
           );
         }
@@ -575,18 +602,22 @@ export class DeployProjectUseCase {
           const message = error instanceof Error ? error.message : String(error);
           this.deployLogger.error("complete", context, `falha ao registrar a nova versão no banco: ${message}`);
           await this.setStage(job, "rollback", context);
-          rollbackAttempted = true;
-          rollbackSucceeded = await this.rollbackIfPossible(
+          const outcome = await this.rollbackIfPossible(
             await this.rollbackDeployConfig(deployConfig, context),
             previousImage,
             context,
           );
+          rollbackAttempted = rollbackAttempted || outcome.attempted;
+          rollbackSucceeded = outcome.restored && outcome.healthy;
           await this.deployJobRepository.save(job.withRollback(true, rollbackSucceeded));
           throw new DeployFailure(
             rollbackSucceeded
               ? `O container subiu, mas a imagem não pôde ser registrada no banco. Rollback executado: produção, banco e compose permanecem na versão anterior.`
-              : `O container subiu, o banco NÃO foi atualizado e o ROLLBACK FALHOU. ` +
-                `ESTADO INDETERMINADO: não inicie outro deploy sem verificar o container e o banco manualmente.`,
+              : outcome.restored
+                ? `O container subiu, o banco NÃO foi atualizado e a imagem anterior foi restaurada, mas a saúde dela não foi confirmada. ` +
+                  `ESTADO INDETERMINADO: não inicie outro deploy sem validar o serviço ou reconciliar.`
+                : `O container subiu, o banco NÃO foi atualizado e o ROLLBACK FALHOU. ` +
+                  `ESTADO INDETERMINADO: não inicie outro deploy sem verificar o container e o banco manualmente.`,
             !rollbackSucceeded,
           );
         }
@@ -835,18 +866,39 @@ export class DeployProjectUseCase {
    * deploy tiver um migration incompatível, o rollback de aplicação pode
    * não ser suficiente (e isso é registrado no log).
    */
+  /** Timeout (ms) efetivo da produção/rollback deste projeto. */
+  private productionHealthTimeoutMs(config: DeployConfig): number {
+    return config.healthTimeoutMs ?? HEALTH_CHECK_TIMEOUT_MS;
+  }
+
+  private rollbackTimeoutSeconds(config: DeployConfig): number {
+    return Math.round(this.productionHealthTimeoutMs(config) / 1000);
+  }
+
+  /** Contrato de saúde do projeto (readiness 2xx quando configurado). */
+  private healthCheckOptions(config: DeployConfig): HealthCheckOptions {
+    if (config.healthCheckPath) {
+      return { path: config.healthCheckPath, require2xx: true };
+    }
+    return { require2xx: config.healthCheckRequire2xx === true };
+  }
+
+  private healthContractLabel(config: DeployConfig): string {
+    return config.healthCheckPath ? ` (HTTP 2xx em ${config.healthCheckPath})` : "";
+  }
+
   private async rollbackIfPossible(
     config: DeployConfig,
     previousImage: string | null,
     context: { deployJobId: string; projectId: string; commitSha: string | null },
-  ): Promise<boolean> {
+  ): Promise<RollbackOutcome> {
     if (!previousImage) {
       this.deployLogger.warn(
         "rollback",
         context,
         "sem imagem anterior registrada - rollback não é possível (deploy de primeira versão)",
       );
-      return false;
+      return { attempted: false, restored: false, healthy: false };
     }
 
     try {
@@ -857,18 +909,28 @@ export class DeployProjectUseCase {
         kind: "rollback",
         previousImage,
       });
+      // O compose executou: a imagem anterior FOI restaurada. A saúde é uma
+      // validação SEPARADA e pode falhar por timeout sem desfazer a restauração.
       this.deployLogger.log("rollback", context, "imagem anterior restaurada", { previousImage });
       if (log) {
         this.logger.debug(log);
       }
-      const healthy = await this.healthChecker.waitUntilHealthy(config.hostPort, HEALTH_CHECK_TIMEOUT_MS);
+      const healthy = await this.healthChecker.waitUntilHealthy(
+        config.hostPort,
+        config.healthTimeoutMs ?? HEALTH_CHECK_TIMEOUT_MS,
+        this.healthCheckOptions(config),
+      );
       if (!healthy) {
-        this.deployLogger.error("rollback", context, "a versão anterior também não respondeu");
+        this.deployLogger.error(
+          "rollback",
+          context,
+          `imagem anterior restaurada, mas a saúde${this.healthContractLabel(config)} não foi confirmada em ${this.rollbackTimeoutSeconds(config)}s`,
+        );
       }
-      return healthy;
+      return { attempted: true, restored: true, healthy };
     } catch (error) {
       this.deployLogger.error("rollback", context, `falha no rollback: ${(error as Error).message}`);
-      return false;
+      return { attempted: true, restored: false, healthy: false };
     }
   }
 
@@ -1118,13 +1180,19 @@ export class DeployProjectUseCase {
     config: DeployConfig,
     context: { deployJobId: string; projectId: string; commitSha: string | null },
   ): Promise<DeployConfig> {
+    // 1) snapshot da configuração VIVA no início do deploy (nunca a candidata)
+    if (await fileExists(path.join(config.projectPath, COMPOSE_ROLLBACK_FILENAME))) {
+      return { ...config, composeFilePath: COMPOSE_ROLLBACK_FILENAME, composeEnvFilePath: undefined };
+    }
+    // 2) compose estável (última promoção validada)
     if (await fileExists(path.join(config.projectPath, COMPOSE_FILENAME))) {
       return { ...config, composeFilePath: COMPOSE_FILENAME, composeEnvFilePath: undefined };
     }
+    // 3) fallback: compose do próprio job (configuração atual, não comprovada)
     this.deployLogger.warn(
       "rollback",
       context,
-      "compose estável ausente; rollback usará o compose do job (configuração atual)",
+      "sem snapshot/estável; rollback usará o compose do job (configuração atual)",
     );
     return config;
   }
@@ -1289,18 +1357,26 @@ export class DeployProjectUseCase {
     }
 
     await this.setStage(job, "rollback", context);
-    const ok = await this.rollbackIfPossible(
+    const outcome = await this.rollbackIfPossible(
       await this.rollbackDeployConfig(config, context),
       previousImage,
       context,
     );
+    const ok = outcome.restored && outcome.healthy;
     await this.deployJobRepository.save(job.withRollback(true, ok));
 
     if (ok) {
       this.deployLogger.log(
         "rollback",
         context,
-        "rollback executado após falha ambígua de promoção",
+        "rollback executado e validado após falha ambígua de promoção",
+        { previousImage },
+      );
+    } else if (outcome.restored) {
+      this.deployLogger.error(
+        "rollback",
+        context,
+        "imagem anterior restaurada após falha ambígua, mas a saúde não foi confirmada",
         { previousImage },
       );
     } else {
@@ -1316,12 +1392,15 @@ export class DeployProjectUseCase {
       failure: new DeployFailure(
         ok
           ? `A promoção falhou depois de possivelmente alterar a produção. Rollback executado: a versão anterior está no ar. (${message})`
-          : `A promoção falhou em estado ${ambiguous ? "AMBÍGUO" : "ALTERADO"} e o ROLLBACK FALHOU. ` +
-            `ESTADO INDETERMINADO: não inicie outro deploy sem intervenção manual. (${message})`,
+          : outcome.restored
+            ? `A promoção falhou em estado ${ambiguous ? "AMBÍGUO" : "ALTERADO"} e a imagem anterior FOI RESTAURADA, ` +
+              `mas a saúde dela não foi confirmada. ESTADO INDETERMINADO: não inicie outro deploy sem validar o serviço. (${message})`
+            : `A promoção falhou em estado ${ambiguous ? "AMBÍGUO" : "ALTERADO"} e o ROLLBACK FALHOU. ` +
+              `ESTADO INDETERMINADO: não inicie outro deploy sem intervenção manual. (${message})`,
         !ok,
       ),
       rollbackSucceeded: ok,
-      rollbackAttempted: true,
+      rollbackAttempted: outcome.attempted,
     };
   }
 
@@ -1394,6 +1473,50 @@ export class DeployProjectUseCase {
     await fs.rename(tempPath, stablePath);
     await applyPrivateMode(stablePath);
     this.deployLogger.log("fetching", context, "compose estável legado saneado (tag obrigatória)");
+  }
+
+  /**
+   * Preserva a configuração de produção viva para o rollback DESTE deploy.
+   *
+   * É copiada antes do staging/promoção. Uma falha aqui não autoriza seguir
+   * sem registro: o rollback ainda tem o estável como fallback, mas o log
+   * deixa claro que o snapshot não foi criado.
+   */
+  private async snapshotStableCompose(
+    projectPath: string,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<void> {
+    const stablePath = path.join(projectPath, COMPOSE_FILENAME);
+    if (!(await fileExists(stablePath))) {
+      this.deployLogger.warn(
+        "fetching",
+        context,
+        "compose estável ausente no início do deploy; rollback dependerá do compose do job",
+      );
+      return;
+    }
+    const snapshotPath = path.join(projectPath, COMPOSE_ROLLBACK_FILENAME);
+    const tempPath = `${snapshotPath}.tmp`;
+    try {
+      await fs.copyFile(stablePath, tempPath);
+      await applyPrivateMode(tempPath);
+      await fs.rename(tempPath, snapshotPath);
+      await applyPrivateMode(snapshotPath);
+      this.deployLogger.log("fetching", context, "configuração de produção preservada para rollback", {
+        file: COMPOSE_ROLLBACK_FILENAME,
+      });
+    } catch (error) {
+      try {
+        await fs.unlink(tempPath);
+      } catch {
+        // Nada a limpar.
+      }
+      this.deployLogger.warn(
+        "fetching",
+        context,
+        `não foi possível preservar o snapshot de rollback: ${(error as Error).message}`,
+      );
+    }
   }
 
   /**
