@@ -6,6 +6,12 @@ import { Loader2 } from "lucide-react";
 import type { Project } from "@korrelo/shared-types";
 import { apiFetch } from "../../../../../lib/api-client";
 import { useTranslation } from "../../../../../lib/i18n/locale-provider";
+import { patchProjectSettings } from "../../../../../lib/project-settings-api";
+import {
+  buildHealthcheckPayload,
+  readHealthcheckConfig,
+  type HealthcheckConfig,
+} from "../../../../../lib/healthcheck-config";
 
 function FeatureToggleRow({
   title,
@@ -64,6 +70,10 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
     retries: 3,
     startPeriodSeconds: 120,
   });
+  const [healthcheckBase, setHealthcheckBase] = useState<HealthcheckConfig | null>(null);
+  const [deployPathInput, setDeployPathInput] = useState("");
+  const [deployTimeoutInput, setDeployTimeoutInput] = useState("");
+  const [feedback, setFeedback] = useState<{ kind: "ok" | "error"; message: string } | null>(null);
 
   function load() {
     apiFetch(`/projects/${params.projectId}`)
@@ -79,21 +89,21 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
             p.stagingHealthTimeoutSeconds ? String(p.stagingHealthTimeoutSeconds) : "",
           );
           // Healthcheck (Wave 2): o projeto guarda a configuração em JSON.
-          try {
-            const parsed = p.healthcheckConfig ? JSON.parse(p.healthcheckConfig) : null;
-            setHealthcheckEnabled(parsed?.enabled === true);
-            setHealthcheckPath(parsed?.path ?? "/");
-            if (parsed) {
-              setHealthcheckValues({
-                intervalSeconds: parsed.intervalSeconds ?? 30,
-                timeoutSeconds: parsed.timeoutSeconds ?? 5,
-                retries: parsed.retries ?? 3,
-                startPeriodSeconds: parsed.startPeriodSeconds ?? 120,
-              });
-            }
-          } catch {
-            setHealthcheckEnabled(false);
-            setHealthcheckPath("/");
+          const parsed = readHealthcheckConfig(p.healthcheckConfig);
+          setHealthcheckBase(parsed);
+          setHealthcheckEnabled(parsed?.enabled === true);
+          setHealthcheckPath(parsed?.path ?? "/");
+          setDeployPathInput(parsed?.deployPath ?? "");
+          setDeployTimeoutInput(
+            parsed?.deployTimeoutSeconds !== undefined ? String(parsed.deployTimeoutSeconds) : "",
+          );
+          if (parsed) {
+            setHealthcheckValues({
+              intervalSeconds: parsed.intervalSeconds,
+              timeoutSeconds: parsed.timeoutSeconds,
+              retries: parsed.retries,
+              startPeriodSeconds: parsed.startPeriodSeconds,
+            });
           }
         }
       })
@@ -115,28 +125,54 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
     memoryLimitMb?: number | null;
     stagingMemoryLimitMb?: number | null;
     stagingHealthTimeoutSeconds?: number | null;
-    healthcheck?: {
-      enabled?: boolean;
-      path?: string;
-      intervalSeconds?: number;
-      timeoutSeconds?: number;
-      retries?: number;
-      startPeriodSeconds?: number;
-    };
-  }) {
-    if (!project) return;
+    healthcheck?: Record<string, unknown>;
+  }): Promise<boolean> {
+    if (!project) return false;
     setSaving(true);
-    setProject({ ...project, ...patch });
+    setFeedback(null);
     try {
-      await apiFetch(`/projects/${params.projectId}/settings`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(patch),
-      });
+      const result = await patchProjectSettings(apiFetch, params.projectId, patch);
+      if (!result.ok) {
+        setFeedback({ kind: "error", message: result.message ?? t.projectSettings.saveError });
+        return false;
+      }
+      setFeedback({ kind: "ok", message: t.projectSettings.saveSuccess });
       router.refresh();
+      load();
+      return true;
+    } catch {
+      setFeedback({ kind: "error", message: t.projectSettings.saveError });
+      return false;
     } finally {
       setSaving(false);
     }
+  }
+
+  /** Payload do healthcheck preservando Docker × deploy. */
+  function healthcheckPayload(changes: {
+    enabled?: boolean;
+    path?: string;
+    deployPath?: string;
+    deployTimeoutSeconds?: string;
+  }): Record<string, unknown> {
+    return buildHealthcheckPayload(healthcheckBase, {
+      ...healthcheckValues,
+      enabled: changes.enabled ?? healthcheckEnabled,
+      path: changes.path ?? healthcheckPath,
+      ...(changes.deployPath !== undefined ? { deployPath: changes.deployPath } : {}),
+      ...(changes.deployTimeoutSeconds !== undefined
+        ? { deployTimeoutSeconds: changes.deployTimeoutSeconds }
+        : {}),
+    });
+  }
+
+  async function saveDeployHealth(): Promise<void> {
+    await updateSettings({
+      healthcheck: healthcheckPayload({
+        deployPath: deployPathInput,
+        deployTimeoutSeconds: deployTimeoutInput,
+      }),
+    });
   }
 
   if (project === undefined) {
@@ -157,6 +193,18 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
 
   return (
     <div className="mx-auto w-full max-w-5xl px-8 py-6">
+      {feedback && (
+        <p
+          role="status"
+          className={`mb-4 rounded-md border px-3 py-2 text-[12.5px] ${
+            feedback.kind === "ok"
+              ? "border-border-subtle text-foreground"
+              : "border-destructive/40 text-destructive"
+          }`}
+        >
+          {feedback.message}
+        </p>
+      )}
       <div className="mb-4 flex items-center justify-between">
         <p className="text-[13.5px] font-medium text-foreground">{t.projectSettings.featuresTitle}</p>
         {saving && <Loader2 size={14} className="animate-spin text-muted-foreground" />}
@@ -328,7 +376,7 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
           disabled={saving}
           onChange={(value) =>
             updateSettings({
-              healthcheck: { ...healthcheckValues, enabled: value, path: healthcheckPath },
+              healthcheck: healthcheckPayload({ enabled: value }),
             })
           }
         />
@@ -348,10 +396,50 @@ export default function ProjectSettingsPage(props: { params: Promise<{ projectId
             <button
               onClick={() =>
                 updateSettings({
-                  healthcheck: { ...healthcheckValues, enabled: healthcheckEnabled, path: healthcheckPath },
+                  healthcheck: healthcheckPayload({}),
                 })
               }
               disabled={saving || !healthcheckEnabled}
+              className="rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              {t.common.save}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <p className="mb-2 mt-6 text-[13.5px] font-medium text-foreground">{t.projectSettings.deployHealthTitle}</p>
+      <p className="mb-2 text-[12.5px] text-muted-foreground">{t.projectSettings.deployHealthDescription}</p>
+      <div className="rounded-xl border border-border-subtle bg-surface px-4">
+        <div className="flex items-center justify-between border-b border-border-subtle py-4">
+          <div>
+            <p className="text-[13.5px] font-medium text-foreground">{t.projectSettings.deployHealthPathLabel}</p>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t.projectSettings.deployHealthPathHint}</p>
+          </div>
+          <input
+            value={deployPathInput}
+            onChange={(e) => setDeployPathInput(e.target.value)}
+            placeholder={t.projectSettings.deployHealthPathPlaceholder}
+            className="w-40 rounded-md border border-border-subtle bg-transparent px-2.5 py-1.5 font-mono text-[13px] text-foreground outline-none focus:border-accent"
+          />
+        </div>
+        <div className="flex items-center justify-between py-4">
+          <div>
+            <p className="text-[13.5px] font-medium text-foreground">{t.projectSettings.deployHealthTimeoutLabel}</p>
+            <p className="mt-0.5 text-[12.5px] text-muted-foreground">{t.projectSettings.deployHealthTimeoutHint}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              value={deployTimeoutInput}
+              onChange={(e) => setDeployTimeoutInput(e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder="120"
+              inputMode="numeric"
+              className="w-24 rounded-md border border-border-subtle bg-transparent px-2.5 py-1.5 text-right font-mono text-[13px] text-foreground outline-none focus:border-accent"
+            />
+            <span className="text-[12.5px] text-muted-foreground">s</span>
+            <button
+              onClick={() => saveDeployHealth()}
+              disabled={saving}
               className="rounded-md border border-border-subtle px-2.5 py-1.5 text-[12.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
             >
               {t.common.save}

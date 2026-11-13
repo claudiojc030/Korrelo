@@ -45,6 +45,15 @@ export interface ProjectSettingsDict {
   healthcheckPathLabel: string;
   healthcheckPathHint: string;
   healthcheckPathPlaceholder: string;
+  deployHealthTitle: string;
+  deployHealthDescription: string;
+  deployHealthPathLabel: string;
+  deployHealthPathHint: string;
+  deployHealthPathPlaceholder: string;
+  deployHealthTimeoutLabel: string;
+  deployHealthTimeoutHint: string;
+  saveSuccess: string;
+  saveError: string;
 }
 
 export const projectSettingsEn: ProjectSettingsDict = {
@@ -102,6 +111,16 @@ export const projectSettingsEn: ProjectSettingsDict = {
   healthcheckPathLabel: "Health path",
   healthcheckPathHint: "Path checked inside the container (must answer with a status below 500).",
   healthcheckPathPlaceholder: "/",
+  deployHealthTitle: "Deploy health",
+  deployHealthDescription:
+    "Contract used by Korrelo to approve staging, production and rollback. When a path is set, only HTTP 2xx approves the step.",
+  deployHealthPathLabel: "Readiness path",
+  deployHealthPathHint: "Example: /health/ready. Leave empty to keep the legacy behavior (any response on /).",
+  deployHealthPathPlaceholder: "/health/ready",
+  deployHealthTimeoutLabel: "Production timeout",
+  deployHealthTimeoutHint: "Seconds Korrelo waits for production/rollback (10 to 300). Empty keeps 30s.",
+  saveSuccess: "Settings saved.",
+  saveError: "Couldn't save the settings.",
 };
 
 export const projectSettingsPt: ProjectSettingsDict = {
@@ -159,4 +178,14 @@ export const projectSettingsPt: ProjectSettingsDict = {
   healthcheckPathLabel: "Caminho de saúde",
   healthcheckPathHint: "Caminho checado dentro do container (precisa responder com status abaixo de 500).",
   healthcheckPathPlaceholder: "/",
+  deployHealthTitle: "Saúde do deploy",
+  deployHealthDescription:
+    "Contrato usado pelo Korrelo para aprovar staging, produção e rollback. Quando um caminho é definido, somente HTTP 2xx aprova a etapa.",
+  deployHealthPathLabel: "Caminho de readiness",
+  deployHealthPathHint: "Ex.: /health/ready. Vazio mantém o comportamento antigo (qualquer resposta em /).",
+  deployHealthPathPlaceholder: "/health/ready",
+  deployHealthTimeoutLabel: "Timeout de produção",
+  deployHealthTimeoutHint: "Segundos que o Korrelo espera a produção/rollback (10 a 300). Vazio usa 30s.",
+  saveSuccess: "Configurações salvas.",
+  saveError: "Não foi possível salvar as configurações.",
 };

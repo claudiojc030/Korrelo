@@ -69,6 +69,15 @@ export interface ProjectDetailDict {
   domainHelpStep2: string;
   domainHelpStep3: string;
   domainHelpStep4: string;
+  // reconcile-state.tsx
+  reconcileTitle: string;
+  reconcileDescription: string;
+  reconcileButton: string;
+  reconcileConfirm: string;
+  reconcileRunning: string;
+  reconcileSuccess: string;
+  reconcileBlocked: string;
+  reconcileFailed: string;
   unknownError: string;
   domainStatusNone: string;
   domainStatusPending: string;
@@ -149,6 +158,17 @@ export const projectDetailEn: ProjectDetailDict = {
   domainStatusPending: "Issuing certificate...",
   domainStatusActive: "HTTPS active",
   domainStatusFailed: "Failed",
+  reconcileTitle: "Recovery pending",
+  reconcileDescription:
+    "The last deploy left production, compose and database in an unconfirmed state. Reconciliation inspects the real container and its readiness; it does not deploy, restart or roll back.",
+  reconcileButton: "Reconcile state",
+  reconcileConfirm:
+    "Reconcile the project state? Korrelo will verify the container image and readiness. If anything cannot be proven, the block remains.",
+  reconcileRunning: "Reconciling...",
+  reconcileSuccess: "State reconciled. New deploys are allowed again.",
+  reconcileBlocked:
+    "Reconciliation refused: the container image or readiness could not be confirmed. The project remains blocked.",
+  reconcileFailed: "Couldn't reconcile the project state.",
 };
 
 export const projectDetailPt: ProjectDetailDict = {
@@ -224,4 +244,15 @@ export const projectDetailPt: ProjectDetailDict = {
   domainStatusPending: "Emitindo certificado...",
   domainStatusActive: "HTTPS ativo",
   domainStatusFailed: "Falhou",
+  reconcileTitle: "Recuperação pendente",
+  reconcileDescription:
+    "O último deploy deixou produção, compose e banco sem confirmação. A reconciliação inspeciona o container real e o readiness; não faz deploy, restart nem rollback.",
+  reconcileButton: "Reconciliar estado",
+  reconcileConfirm:
+    "Reconciliar o estado do projeto? O Korrelo vai verificar a imagem do container e o readiness. Se algo não puder ser comprovado, o bloqueio permanece.",
+  reconcileRunning: "Reconciliando...",
+  reconcileSuccess: "Estado reconciliado. Novos deploys estão liberados.",
+  reconcileBlocked:
+    "Reconciliação recusada: a imagem ou o readiness não puderam ser confirmados. O projeto continua bloqueado.",
+  reconcileFailed: "Não foi possível reconciliar o estado do projeto.",
 };

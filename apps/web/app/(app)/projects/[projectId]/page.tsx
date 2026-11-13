@@ -5,6 +5,7 @@ import { getRequestHostServer } from "../../../../lib/get-request-host-server";
 import { DomainCard } from "./domain-card";
 import { DeployButton } from "../deploy-button";
 import { DeployHistory } from "./deploy-history";
+import { ReconcileStateControl } from "./reconcile-state";
 import { getProjectPublicUrl } from "../../../../lib/project-public-url";
 import { getLocaleServer } from "../../../../lib/i18n/get-locale-server";
 import { getDictionary } from "../../../../lib/i18n/dictionaries";
@@ -102,6 +103,9 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
 
   return (
     <div className="mx-auto w-full max-w-5xl px-8 py-6">
+      {project.lastDeployStatus === "indeterminate" && (
+        <ReconcileStateControl projectId={project.id} />
+      )}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="rounded-xl border border-border-subtle bg-surface p-4">
           <h2 className="mb-1 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
