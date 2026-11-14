@@ -119,6 +119,7 @@ import { inspectContainerTruth } from "./infrastructure/docker-container-inspect
 import { DeployLogger } from "./infrastructure/deploy-logger";
 import { StagingCleanupService } from "./infrastructure/staging-cleanup.service";
 import { RuntimeReconciliationService } from "./infrastructure/runtime-reconciliation.service";
+import { ImageGcAuditService } from "./infrastructure/image-gc-audit.service";
 import { CompatibilityDryRunService } from "./infrastructure/compatibility-dry-run.service";
 
 @Module({
@@ -205,6 +206,7 @@ import { CompatibilityDryRunService } from "./infrastructure/compatibility-dry-r
     },
     DeployQueueService,
     RuntimeReconciliationService,
+    ImageGcAuditService,
     CompatibilityDryRunService,
     { provide: PROJECT_REPOSITORY, useClass: PrismaProjectRepository },
     { provide: ENV_VAR_REPOSITORY, useClass: PrismaEnvVarRepository },

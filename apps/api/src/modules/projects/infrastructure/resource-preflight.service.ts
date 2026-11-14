@@ -12,6 +12,10 @@ import {
   type HostResourceProvider,
 
 } from "../../../infrastructure/host-resources";
+import {
+  evaluateBuildDiskPolicy,
+  type BuildDiskDecision,
+} from "./build-disk-policy";
 
 /**
  * Verificação de recursos ANTES de começar um build.
@@ -50,6 +54,8 @@ export interface PreflightMetrics {
   stagingReservationMb: number;
   /** Memória realmente disponível para o build. */
   availableForBuildMb: number;
+  /** Decisão da política de disco (reserva + estimativa + margem). */
+  buildDiskPolicy?: BuildDiskDecision;
 }
 
 export interface PreflightResult {
@@ -154,6 +160,10 @@ export class ResourcePreflightService {
         productionLimitMb: options.productionLimitMb ?? 0,
         productionUsageMb,
       });
+      const diskDecision = evaluateBuildDiskPolicy({
+        freeMb: resources.diskAvailableMb,
+        explicitRequiredMb: options.requiredDiskMb,
+      });
       const evaluation = evaluateHostResources({
         resources,
         thresholds: {
@@ -161,10 +171,10 @@ export class ResourcePreflightService {
           // PISO do host e necessidade do build continuam um PISO, nunca
           // um teto (ver computeBuildMemoryRequirementMb).
           memAvailableMb: requirement.requiredMb,
-          diskFreeMb: options.requiredDiskMb ?? thresholds.diskFreeMb,
+          diskFreeMb: diskDecision.requiredMb,
         },
       });
-      if (evaluation.safe) {
+      if (evaluation.safe && diskDecision.ok) {
         if (attempts > 1) {
           log(
             `[deploy] recursos normalizados após ${Math.round((now() - startedAt) / 1000)}s ` +
@@ -179,13 +189,13 @@ export class ResourcePreflightService {
         };
       }
 
-      lastReason = evaluation.reason;
+      lastReason = evaluation.safe ? diskDecision.reason : evaluation.reason;
       const elapsedSec = Math.round((now() - startedAt) / 1000);
       if (elapsedSec + intervalSec > timeoutSec) {
         return { safe: false, reason: lastReason, waitedSec: elapsedSec, attempts };
       }
       log(
-        `[deploy] aguardando recursos para o build (${evaluation.reason}); ` +
+        `[deploy] aguardando recursos para o build (${lastReason}); ` +
           `tentativa=${attempts}, próxima checagem em ${intervalSec}s`,
       );
       await sleep(intervalSec * 1000);
@@ -226,7 +236,6 @@ export class ResourcePreflightService {
     dockerReachable?: boolean;
   }): Promise<PreflightResult> {
     const requiredMemoryMb = params.requiredMemoryMb ?? DEFAULT_BUILD_MEMORY_REQUIREMENT_MB;
-    const requiredDiskMb = params.requiredDiskMb ?? DEFAULT_BUILD_DISK_REQUIREMENT_MB;
     const activeBuilds = params.activeBuilds ?? 0;
     const stagingReservationMb = params.stagingReservationMb ?? 0;
     const productionReservedMb = params.productionReservedMb ?? 0;
@@ -240,6 +249,17 @@ export class ResourcePreflightService {
     const { swapTotalMb, swapFreeMb } = this.readSwap();
 
     const diskFreeMb = await this.readDiskFreeMb();
+    // Política de disco: reserva operacional + estimativa do build + margem.
+    // Medição indisponível BLOQUEIA (não dá para provar folga).
+    const diskDecision = evaluateBuildDiskPolicy({
+      freeMb: diskFreeMb,
+      explicitRequiredMb:
+        params.requiredDiskMb ??
+        (process.env.KORRELO_BUILD_DISK_REQUIREMENT_MB
+          ? DEFAULT_BUILD_DISK_REQUIREMENT_MB
+          : undefined),
+    });
+    const requiredDiskMb = diskDecision.requiredMb;
     const dockerReachable =
       params.dockerReachable ?? (await this.isDockerReachable());
 
@@ -264,6 +284,7 @@ export class ResourcePreflightService {
       requiredHostMemoryMb: 0,
       stagingReservationMb,
       availableForBuildMb,
+      buildDiskPolicy: diskDecision,
     };
 
     if (activeBuilds > 0) {
@@ -344,10 +365,10 @@ export class ResourcePreflightService {
       };
     }
 
-    if (diskFreeMb !== null && diskFreeMb < requiredDiskMb) {
+    if (!diskDecision.ok) {
       return {
         ok: false,
-        reason: `disco livre insuficiente (${diskFreeMb} MB, build precisa de ${requiredDiskMb} MB)`,
+        reason: diskDecision.reason ?? "política de disco bloqueou o build",
         metrics,
       };
     }

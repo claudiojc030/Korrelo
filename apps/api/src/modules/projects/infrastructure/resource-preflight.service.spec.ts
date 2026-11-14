@@ -220,4 +220,58 @@ describe("ResourcePreflightService", () => {
     expect(check.ok).toBe(true);
     expect(check.reason).toBeNull();
   });
+
+  describe("política de disco para builds (reserva + estimativa)", () => {
+    function mockDf(freeMb: number): void {
+      mockedRunCommand.mockImplementation(async (command: string) => {
+        if (command === "df") {
+          const totalKb = 48 * 1024 * 1024;
+          const availKb = freeMb * 1024;
+          return result({
+            stdout: `Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/sda1 ${totalKb} ${totalKb - availKb} ${availKb} 90% /\n`,
+          });
+        }
+        if (command === "docker") return result({ stdout: "app\n" });
+        return result();
+      });
+    }
+
+    it("bloqueia quando o espaço livre é menor que reserva + estimativa", async () => {
+      mockDf(9000);
+      const check = await makeService().check({ requiredMemoryMb: 1024 });
+
+      expect(check.ok).toBe(false);
+      expect(check.reason).toContain("disco livre insuficiente");
+      expect(check.metrics.requiredDiskMb).toBe(9216);
+      expect(check.metrics.buildDiskPolicy?.estimateSource).toBe("default");
+    });
+
+    it("libera acima do requisito calculado", async () => {
+      mockDf(10000);
+      const check = await makeService().check({ requiredMemoryMb: 1024 });
+
+      expect(check.ok).toBe(true);
+      expect(check.metrics.requiredDiskMb).toBe(9216);
+    });
+
+    it("medição de disco indisponível bloqueia o build", async () => {
+      mockedRunCommand.mockImplementation(async (command: string) => {
+        if (command === "df") return result({ timedOut: true, exitCode: null });
+        if (command === "docker") return result({ stdout: "app\n" });
+        return result();
+      });
+      const check = await makeService().check({ requiredMemoryMb: 1024 });
+
+      expect(check.ok).toBe(false);
+      expect(check.reason).toContain("não pôde ser medido");
+      expect(check.metrics.buildDiskPolicy?.blockedBy).toBe("disk_unknown");
+    });
+
+    it("override explícito não remove a reserva operacional", async () => {
+      mockDf(7200);
+      const check = await makeService().check({ requiredMemoryMb: 1024, requiredDiskMb: 2000 });
+      expect(check.ok).toBe(true);
+      expect(check.metrics.requiredDiskMb).toBe(7120);
+    });
+  });
 });

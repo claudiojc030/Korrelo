@@ -1,8 +1,13 @@
-import { Controller, Get, NotFoundException, Param, Post, Query } from "@nestjs/common";
+import { Controller, ConflictException, Get, Inject, NotFoundException, Param, Post, Query } from "@nestjs/common";
 import { apiError } from "../../../infrastructure/api-error";
 import { DeployQueueService } from "../infrastructure/deploy-queue.service";
 import { CompatibilityDryRunService } from "../infrastructure/compatibility-dry-run.service";
 import { StagingCleanupService } from "../infrastructure/staging-cleanup.service";
+import { ImageGcAuditService } from "../infrastructure/image-gc-audit.service";
+import {
+  DEPLOY_JOB_REPOSITORY,
+  type DeployJobRepository,
+} from "../domain/deploy-job.repository";
 
 /**
  * Fila global de deploy (Wave 2).
@@ -22,6 +27,8 @@ export class DeployJobsController {
     private readonly deployQueue: DeployQueueService,
     private readonly dryRun: CompatibilityDryRunService,
     private readonly stagingCleanup: StagingCleanupService,
+    private readonly imageGcAudit: ImageGcAuditService,
+    @Inject(DEPLOY_JOB_REPOSITORY) private readonly jobs: DeployJobRepository,
   ) {}
 
   @Get()
@@ -44,6 +51,33 @@ export class DeployJobsController {
   @Get("dry-run")
   async compatibilityDryRun() {
     return this.dryRun.run();
+  }
+
+  /**
+   * Auditoria ADMINISTRATIVA e SOMENTE LEITURA do planejador de imagens.
+   *
+   * - autenticada pelo guard global (mesmo acesso do painel);
+   * - recusada enquanto houver job de deploy na fila/rodando (evita
+   *   confundir estado transitório com estado atual);
+   * - nunca remove nada, nunca habilita apply;
+   * - respeita o modo KORRELO_IMAGE_GC_MODE (off/dry-run).
+   */
+  @Get("image-gc-audit")
+  async imageGcAuditRun() {
+    const [queued, running] = await Promise.all([
+      this.jobs.findAllByStatus("queued"),
+      this.jobs.findAllByStatus("running"),
+    ]);
+    if (queued.length > 0 || running.length > 0) {
+      throw new ConflictException(
+        apiError(
+          "IMAGE_GC_AUDIT_BUSY",
+          "Auditoria recusada: há deploy na fila ou em execução. Rode novamente quando a fila estiver ociosa.",
+        ),
+      );
+    }
+    const plan = await this.imageGcAudit.audit();
+    return { auditedAt: new Date().toISOString(), ...plan };
   }
 
   /**

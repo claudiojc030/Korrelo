@@ -48,6 +48,7 @@ import { ensureDockerignore } from "../infrastructure/dockerignore";
 import { DeployLogger } from "../infrastructure/deploy-logger";
 import { ResourcePreflightService } from "../infrastructure/resource-preflight.service";
 import { parseDeployHealthConfig } from "../infrastructure/deploy-health-config";
+import { ImageGcAuditService } from "../infrastructure/image-gc-audit.service";
 import { WorkerLock } from "../infrastructure/worker-lock";
 import {
   defaultSelfUpdateState,
@@ -167,6 +168,12 @@ export class DeployProjectUseCase {
      */
     @Optional()
     private readonly selfUpdateState: SelfUpdateStateLike | null = null,
+    /**
+     * Auditoria dry-run de imagens (somente leitura). Opcional: sem ela, o
+     * deploy funciona exatamente como antes.
+     */
+    @Optional()
+    private readonly imageGcAudit: ImageGcAuditService | null = null,
   ) {}
 
   async executeJob(job: DeployJob): Promise<void> {
@@ -477,6 +484,28 @@ export class DeployProjectUseCase {
           );
         }
       } else {
+        // Deploy direto (staging desabilitado): se a imagem do commit ainda
+        // NÃO existe, o promote vai BUILDAR. Nesse caso a proteção de disco/
+        // memória precisa rodar IMEDIATAMENTE antes, igual ao staging.
+        const candidateExists = candidateImage
+          ? await this.orchestrator.imageReferenceExists(candidateImage)
+          : false;
+        if (!candidateExists) {
+          const hostWait = await this.resourcePreflight.waitForSafeHost({
+            productionLimitMb: plan.productionLimitMb,
+            productionContainerName: project.containerName,
+            requiredDiskMb: undefined,
+            stagingReservationMb: 0,
+            log: (message) => this.deployLogger.log("staging-start", context, message),
+          });
+          if (!hostWait.safe) {
+            throw new DeployFailure(
+              `O host não ficou com recursos para o build direto em ${hostWait.waitedSec}s (${hostWait.reason}). ` +
+                "A versão em produção não foi tocada - o deploy pode ser tentado de novo mais tarde.",
+              false,
+            );
+          }
+        }
         await this.setStage(job, "staging-start", context);
         deployRecord = await this.deployRecordRepository.save(
           deployRecord.appendLog("--- deploy direto (sem container de teste, configurado nas Configurações) ---"),
@@ -757,39 +786,114 @@ export class DeployProjectUseCase {
       );
       throw error;
     } finally {
-      // SEMPRE remove a instância de teste - sucesso, falha ou exceção.
+      // 1) AUDITORIA DRY-RUN PRIMEIRO: retrata o estado ANTES de qualquer
+      // limpeza legada (staging/prune/cache). Somente leitura.
+      await this.runImageGcAudit(job, context);
+
+      // 2) Cleanup do container de teste.
       if (deployConfig && !stagingRemoved) {
         await this.removeStagingIgnoringErrors(deployConfig, context);
       }
-      // Imagens do projeto que não são a atual nem a anterior podem sair.
+      // 3) Política LEGADA de imagens (documentada: protege current/previous/
+      // candidata + containers por ID + candidatas de jobs pendentes; a
+      // auditoria NÃO participa desta remoção).
       if (deployConfig?.imageName) {
-        const protectedImages = [project.currentImage, project.previousImage, candidateImage].filter(
+        let protectedImages: string[] = [project.currentImage, project.previousImage, candidateImage].filter(
           (image): image is string => Boolean(image),
         );
+        let pruneAllowed = true;
         try {
-          const removed = await this.orchestrator.pruneProjectImages({
-            imageName: deployConfig.imageName,
-            protectedImages,
-          });
-          if (removed) {
-            this.deployLogger.log("cleanup", context, `imagens antigas removidas: ${removed}`);
-          }
+          const [queued, running] = await Promise.all([
+            this.deployJobRepository.findAllByStatus("queued"),
+            this.deployJobRepository.findAllByStatus("running"),
+          ]);
+          const pending = [...queued, ...running]
+            .filter((other) => other.id !== job.id)
+            .map((other) => other.candidateImage)
+            .filter((image): image is string => Boolean(image));
+          protectedImages = [...new Set([...protectedImages, ...pending])];
         } catch (error) {
-          this.logger.warn(`Falha ao limpar imagens antigas: ${(error as Error).message}`);
+          // Sem certeza sobre jobs pendentes, não remove nada.
+          pruneAllowed = false;
+          this.deployLogger.warn(
+            "cleanup",
+            context,
+            `prune de imagens pulado: jobs pendentes não puderam ser lidos (${(error as Error).message})`,
+          );
+        }
+        if (pruneAllowed) {
+          try {
+            const removed = await this.orchestrator.pruneProjectImages({
+              imageName: deployConfig.imageName,
+              protectedImages,
+            });
+            if (removed) {
+              this.deployLogger.log("cleanup", context, `imagens antigas removidas: ${removed}`);
+            }
+          } catch (error) {
+            this.logger.warn(`Falha ao limpar imagens antigas: ${(error as Error).message}`);
+          }
         }
       }
 
-      // Cache de build + imagens dangling: SEMPRE depois do deploy (sucesso
-      // ou falha), com checagem de concorrência feita AGORA. Nunca altera o
-      // resultado original do job (método trata os próprios erros).
+      // 4) Cache de build + imagens dangling.
       await this.cleanupBuildCache(job, context);
 
-      // Compose/env POR JOB são temporários; o estável e o `.previous` ficam.
-      // Em estado INDETERMINADO o compose do job é PRESERVADO para recuperação.
+      // 5) Compose/env POR JOB são temporários; o estável e o `.previous` ficam.
       if (deployConfig) {
         const preserve = preserveJobCompose || (promoted && rollbackAttempted && !rollbackSucceeded);
         await this.cleanupJobComposeArtifacts(deployConfig, context, preserve);
       }
+    }
+  }
+
+  /**
+   * Executa a auditoria dry-run de imagens quando não há conflito.
+   *
+   * - não roda durante self-update, sem lock do worker ou com outro job;
+   * - timeout finito (KORRELO_IMAGE_GC_AUDIT_TIMEOUT_MS, default 8s);
+   * - qualquer erro/timeout só gera WARN, jamais falha o deploy.
+   */
+  private async runImageGcAudit(
+    job: DeployJob,
+    context: { deployJobId: string; projectId: string; commitSha: string | null },
+  ): Promise<void> {
+    if (!this.imageGcAudit) return;
+    try {
+      if (this.deployLock && !this.deployLock.isHeldByMe()) {
+        this.deployLogger.warn("cleanup", context, "auditoria de imagens pulada: lock do worker não é deste processo");
+        return;
+      }
+      const selfUpdate = this.selfUpdateState ?? defaultSelfUpdateState;
+      if (selfUpdate.isRunning()) {
+        this.deployLogger.warn("cleanup", context, "auditoria de imagens pulada: self-update em andamento");
+        return;
+      }
+      const running = await this.deployJobRepository.findAllByStatus("running");
+      if (running.some((other) => other.id !== job.id)) {
+        this.deployLogger.warn("cleanup", context, "auditoria de imagens pulada: outro deploy em andamento");
+        return;
+      }
+
+      const parsed = Number.parseInt(process.env.KORRELO_IMAGE_GC_AUDIT_TIMEOUT_MS ?? "", 10);
+      const timeoutMs = Number.isFinite(parsed) && parsed > 0 ? parsed : 8_000;
+      const timeout = new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), timeoutMs),
+      );
+      const result = await Promise.race([this.imageGcAudit.audit(), timeout]);
+      if (result === "timeout") {
+        this.deployLogger.warn(
+          "cleanup",
+          context,
+          `auditoria de imagens excedeu ${timeoutMs}ms (segue em segundo plano, sem efeito no deploy)`,
+        );
+      }
+    } catch (error) {
+      this.deployLogger.warn(
+        "cleanup",
+        context,
+        `auditoria de imagens falhou (não afeta o deploy): ${(error as Error).message}`,
+      );
     }
   }
 

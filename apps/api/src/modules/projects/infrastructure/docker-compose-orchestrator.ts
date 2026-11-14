@@ -460,9 +460,45 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
   async pruneProjectImages(config: { imageName: string; protectedImages: string[] }): Promise<string> {
     const protectedSet = new Set(config.protectedImages.filter(Boolean));
     try {
+      // PROTEÇÃO POR ID (mesma semântica conservadora do planejador novo):
+      // qualquer imagem usada por container (rodando ou parado) é intocável.
+      // Se a identidade de QUALQUER container não puder ser verificada,
+      // aborta o prune inteiro.
+      const protectedIds = new Set<string>();
+      let containerImages: string[] = [];
+      try {
+        const { stdout } = await execFile(
+          "docker",
+          ["ps", "-a", "--format", "{{.Image}}"],
+          { timeout: PRUNE_TIMEOUT_MS },
+        );
+        containerImages = [...new Set(stdout.split("\n").map((line) => line.trim()).filter(Boolean))];
+      } catch (error) {
+        this.logger.warn(
+          `Prune de imagens abortado: não foi possível listar containers (${(error as Error).message})`,
+        );
+        return "";
+      }
+      for (const reference of [...containerImages, ...protectedSet]) {
+        try {
+          const { stdout } = await execFile(
+            "docker",
+            ["image", "inspect", "--format", "{{.Id}}", reference],
+            { timeout: PRUNE_TIMEOUT_MS },
+          );
+          const id = normalizeImageId(stdout);
+          if (id) protectedIds.add(id);
+        } catch (error) {
+          this.logger.warn(
+            `Prune de imagens abortado: referência protegida "${reference}" não pôde ser verificada (${(error as Error).message})`,
+          );
+          return "";
+        }
+      }
+
       const { stdout } = await execFile(
         "docker",
-        ["images", "--filter", `reference=${config.imageName}`, "--format", "{{.Repository}}:{{.Tag}}\t{{.CreatedAt}}"],
+        ["images", "--filter", `reference=${config.imageName}`, "--format", "{{.Repository}}:{{.Tag}}\t{{.CreatedAt}}\t{{.ID}}"],
         { timeout: PRUNE_TIMEOUT_MS },
       );
 
@@ -470,8 +506,12 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
         .split("\n")
         .filter(Boolean)
         .map((line) => {
-          const [reference, createdAt] = line.split("\t");
-          return { reference, createdAt: createdAt ? Date.parse(createdAt) || 0 : 0 };
+          const [reference, createdAt, id] = line.split("\t");
+          return {
+            reference,
+            createdAt: createdAt ? Date.parse(createdAt) || 0 : 0,
+            id: id ?? null,
+          };
         })
         .filter((entry) => entry.reference && entry.reference !== "<none>:<none>");
 
@@ -482,6 +522,22 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
 
       const removed: string[] = [];
       for (const entry of removable) {
+        // Confirma o ID no momento da remoção: uma tag pode ter sido
+        // re-apontada para uma imagem protegida entre a listagem e o rmi.
+        let id = normalizeImageId(entry.id ?? "");
+        if (!id) {
+          try {
+            const inspect = await execFile(
+              "docker",
+              ["image", "inspect", "--format", "{{.Id}}", entry.reference],
+              { timeout: PRUNE_TIMEOUT_MS },
+            );
+            id = normalizeImageId(inspect.stdout);
+          } catch {
+            continue;
+          }
+        }
+        if (protectedIds.has(id)) continue;
         try {
           await execFile("docker", ["rmi", entry.reference], { timeout: PRUNE_TIMEOUT_MS });
           removed.push(entry.reference);

@@ -64,6 +64,8 @@ class FakeOrchestrator {
   failRollback = false;
   /** Resultado de `docker image inspect` para o pré-requisito de promoção. */
   currentImageExists = true;
+  /** Existência da imagem candidata (build direto / promote). */
+  candidateImageExists = true;
   checkedImages: string[] = [];
   /** Estados de produção devolvidos em sequência (fila); default = ausente. */
   productionStates: any[] = [];
@@ -118,6 +120,7 @@ class FakeOrchestrator {
   }
   async imageReferenceExists(reference: string): Promise<boolean> {
     this.checkedImages.push(reference);
+    if (reference.includes(":commit-aaaaaaabbbbb")) return this.candidateImageExists;
     return this.currentImageExists;
   }
   async inspectProductionContainer(containerName: string): Promise<any> {
@@ -132,8 +135,10 @@ class FakeOrchestrator {
   }
   async pruneProjectImages(config: { protectedImages: string[] }): Promise<string> {
     this.pruneCalls.push(config);
+    this.order?.push("prune");
     return "";
   }
+  order: string[] | null = null;
 }
 
 class FakeHealthChecker {
@@ -153,6 +158,20 @@ class FakeHealthChecker {
 }
 
 /** Coletor de diagnóstico do staging (não chama Docker nos testes). */
+class FakeImageGcAudit {
+  calls = 0;
+  fail = false;
+  hang = false;
+  order: string[] | null = null;
+  async audit(): Promise<any> {
+    this.calls += 1;
+    this.order?.push("audit");
+    if (this.hang) return new Promise(() => {});
+    if (this.fail) throw new Error("auditoria indisponível (simulado)");
+    return { mode: "dry-run", decisions: [], summary: { keep: 0, candidate: 0, unknown: 0, skipped: false }, notes: [] };
+  }
+}
+
 class FakeStagingDiagnostics {
   calls: string[] = [];
   fail = false;
@@ -302,6 +321,7 @@ describe("DeployProjectUseCase (Wave 2)", () => {
   const cloner = new FakeCloner();
   const envVarRepository = new FakeEnvVarRepository();
   const stagingDiagnostics = new FakeStagingDiagnostics();
+  const imageGcAudit = new FakeImageGcAudit();
   const deployLock = { held: true, isHeldByMe(): boolean { return this.held; } };
   const selfUpdateState = { running: false, isRunning(): boolean { return this.running; } };
   /** Porta alocada seguinte (a de produção vem antes da do staging). */
@@ -352,6 +372,7 @@ describe("DeployProjectUseCase (Wave 2)", () => {
       // Lock do worker e estado do self-update (fakes mutáveis).
       deployLock as any,
       selfUpdateState,
+      imageGcAudit as any,
     );
   });
 
@@ -366,10 +387,12 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     orchestrator.removeStagingCalls = 0;
     orchestrator.removeStagingConfigs = [];
     orchestrator.promoteConfigs = [];
+    orchestrator.pruneCalls = [];
     orchestrator.failStaging = false;
     orchestrator.failPromote = false;
     orchestrator.failRollback = false;
     orchestrator.currentImageExists = true;
+    orchestrator.candidateImageExists = true;
     orchestrator.checkedImages = [];
     orchestrator.productionStates = [];
     orchestrator.defaultProductionState = { kind: "absent" };
@@ -382,6 +405,11 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     deployRecordRepository.records = [];
     stagingDiagnostics.calls = [];
     stagingDiagnostics.fail = false;
+    imageGcAudit.calls = 0;
+    imageGcAudit.fail = false;
+    imageGcAudit.hang = false;
+    imageGcAudit.order = null;
+    orchestrator.order = null;
     envVarRepository.vars = [];
     orchestrator.lastConfig = null;
     orchestrator.buildPruneCalls = 0;
@@ -810,6 +838,111 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     await useCase.executeJob(makeJob());
 
     expect(orchestrator.buildPruneCalls).toBe(0);
+  });
+
+  it("deploy bem-sucedido executa auditoria dry-run somente leitura", async () => {
+    await useCase.executeJob(makeJob());
+
+    expect(imageGcAudit.calls).toBe(1);
+    expect(projectRepository.project?.lastDeployStatus).toBe("succeeded");
+  });
+
+  it("staging reprovado também executa a auditoria após o deploy", async () => {
+    orchestrator.failStaging = true;
+
+    await expect(useCase.executeJob(makeJob())).rejects.toThrow("falha no staging");
+
+    expect(imageGcAudit.calls).toBe(1);
+    expect(projectRepository.project?.lastDeployStatus).toBe("failed");
+  });
+
+  it("falha da auditoria NÃO altera o resultado do deploy", async () => {
+    imageGcAudit.fail = true;
+    const job = makeJob();
+
+    await useCase.executeJob(job);
+
+    expect(imageGcAudit.calls).toBe(1);
+    expect(deployJobRepository.jobs.get(job.id)?.status).toBe("succeeded");
+    expect(projectRepository.project?.lastDeployStatus).toBe("succeeded");
+  });
+
+  it("auditoria não roda quando o lock do worker não é deste processo", async () => {
+    deployLock.held = false;
+
+    await useCase.executeJob(makeJob());
+
+    expect(imageGcAudit.calls).toBe(0);
+  });
+
+  it("auditoria não roda durante self-update", async () => {
+    selfUpdateState.running = true;
+
+    await useCase.executeJob(makeJob());
+
+    expect(imageGcAudit.calls).toBe(0);
+  });
+
+  it("auditoria dry-run roda ANTES do prune legado", async () => {
+    const order: string[] = [];
+    orchestrator.order = order;
+    imageGcAudit.order = order;
+
+    await useCase.executeJob(makeJob());
+
+    expect(order[0]).toBe("audit");
+    expect(order).toContain("prune");
+    expect(order.indexOf("audit")).toBeLessThan(order.indexOf("prune"));
+  });
+
+  it("timeout da auditoria não bloqueia nem falha o deploy", async () => {
+    const previous = process.env.KORRELO_IMAGE_GC_AUDIT_TIMEOUT_MS;
+    process.env.KORRELO_IMAGE_GC_AUDIT_TIMEOUT_MS = "10";
+    imageGcAudit.hang = true;
+    const job = makeJob();
+    try {
+      const startedAt = Date.now();
+      await useCase.executeJob(job);
+      expect(Date.now() - startedAt).toBeLessThan(2000);
+      expect(imageGcAudit.calls).toBe(1);
+      expect(deployJobRepository.jobs.get(job.id)?.status).toBe("succeeded");
+    } finally {
+      if (previous === undefined) delete process.env.KORRELO_IMAGE_GC_AUDIT_TIMEOUT_MS;
+      else process.env.KORRELO_IMAGE_GC_AUDIT_TIMEOUT_MS = previous;
+    }
+  });
+
+  it("build direto (sem staging) reavalia disco imediatamente antes", async () => {
+    const current = projectRepository.project as any;
+    projectRepository.project = current.withSkipStagingTest(true);
+    orchestrator.candidateImageExists = false;
+    const spy = jest.spyOn((useCase as any).resourcePreflight, "waitForSafeHost");
+
+    await useCase.executeJob(makeJob());
+
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(orchestrator.promoteCalls).toBe(1);
+    spy.mockRestore();
+  });
+
+  it("prune legado protege candidata de job pendente", async () => {
+    const pending = DeployJobEntity.create({
+      projectId: "proj-1",
+      commitSha: "deadbeefcafe",
+      branch: "main",
+      trigger: "manual",
+    });
+    await deployJobRepository.save(
+      pending.withImageInfo({
+        previousImage: null,
+        candidateImage: "korrelo-x:commit-pendente",
+        imageTag: "commit-pendente",
+      }),
+    );
+
+    await useCase.executeJob(makeJob());
+
+    expect(orchestrator.pruneCalls[0]?.protectedImages).toContain("korrelo-x:commit-pendente");
   });
 
   it("resultado parcial (builder prune falhou) não derruba o deploy", async () => {
