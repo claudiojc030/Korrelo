@@ -384,6 +384,101 @@ describe("ImageGcAuditService (dry-run)", () => {
     expect(plan.applied?.skipped).toContain(failed);
   });
 
+  it("inventário real com 7 imagens (inclui -app/-app_staging) é representado sem candidatos perigosos", async () => {
+    process.env.KORRELO_IMAGE_GC_MODE = "dry-run";
+    const mesatta = "korrelo-mesatta-8452004c";
+    const evolution = "korrelo-evolution-api-whatsapp-f848a858";
+    const mesattaProd = `${mesatta}:commit-b162880a5c14`;
+    const mesattaRollback = `${mesatta}:commit-58d1db22f9a2`;
+    const mesattaOld = `${mesatta}:commit-af66af14684e`;
+    const mesattaApp = `${mesatta}-app:latest`;
+    const mesattaStaging = `${mesatta}-app_staging:latest`;
+    const evolutionApp = `${evolution}-app:latest`;
+    const evolutionStaging = `${evolution}-app_staging:latest`;
+    const runner = async (_command: string, args: string[]) => {
+      if (args[0] === "images") {
+        return {
+          stdout: [
+            `${mesattaProd}\tsha256:mprod\t2026-11-01`,
+            `${mesattaRollback}\tsha256:mroll\t2026-10-20`,
+            `${mesattaOld}\tsha256:mold\t2026-09-01`,
+            `${mesattaApp}\tsha256:mapp\t2026-08-01`,
+            `${mesattaStaging}\tsha256:mstg\t2026-08-01`,
+            `${evolutionApp}\tsha256:2273c1dc\t2026-08-01`,
+            `${evolutionStaging}\tsha256:12028e2a\t2026-08-01`,
+          ].join("\n") + "\n",
+          stderr: "", exitCode: 0, timedOut: false,
+        };
+      }
+      if (args[0] === "ps") {
+        return {
+          stdout:
+            `korrelo-mesatta-8452004c\t${mesattaProd}\trunning\n` +
+            `korrelo-evolution-api-whatsapp-f848a858\t${evolution}-app\trunning\n`,
+          stderr: "", exitCode: 0, timedOut: false,
+        };
+      }
+      if (args[0] === "inspect") {
+        const name = args[args.length - 1];
+        return {
+          stdout: `${name.includes("evolution") ? "sha256:2273c1dc" : "sha256:mprod"}\n`,
+          stderr: "", exitCode: 0, timedOut: false,
+        };
+      }
+      if (args[0] === "system") return { stdout: "Images=1GB\n", stderr: "", exitCode: 0, timedOut: false };
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    };
+    const service = new ImageGcAuditService(
+      {
+        findAll: async () => [
+          { id: "p1", containerName: mesatta, currentImage: mesattaProd, previousImage: mesattaRollback },
+          { id: "p2", containerName: evolution, currentImage: null, previousImage: null },
+        ],
+      } as any,
+      { findAllByStatus: async () => [] } as any,
+      runner as any,
+    );
+
+    const plan = await service.audit();
+    const byRef = new Map(plan.decisions.map((d) => [d.reference, d.decision]));
+
+    // Todas as 7 imagens gerenciadas ficam representadas.
+    expect(plan.decisions).toHaveLength(7);
+    expect(byRef.get(mesattaProd)).toBe("KEEP");
+    expect(byRef.get(mesattaRollback)).toBe("KEEP");
+    expect(byRef.get(mesattaOld)).toBe("KEEP");
+    expect(byRef.get(mesattaApp)).toBe("UNKNOWN");
+    expect(byRef.get(mesattaStaging)).toBe("UNKNOWN");
+    // Container ativo da Evolution sem tag: protegido por ID real.
+    expect(byRef.get(evolutionApp)).toBe("KEEP");
+    expect(byRef.get(evolutionStaging)).toBe("UNKNOWN");
+    // Nenhuma imagem de produção/staging vira candidata.
+    expect(plan.summary.candidate).toBe(0);
+  });
+
+  it("apply com o inventário legado não remove ativos, rollback ou staging desconhecido", async () => {
+    process.env.KORRELO_IMAGE_GC_MODE = "apply";
+    process.env.KORRELO_IMAGE_GC_RETENTION_EXTRA = "0";
+    const calls: string[][] = [];
+    const runner = async (_command: string, args: string[]) => {
+      calls.push(args);
+      if (args[0] === "images") {
+        return { stdout: "korrelo-x-app:latest\tsha256:app\t2026-01-01\nkorrelo-x-app_staging:latest\tsha256:stg\t2026-01-01\n", stderr: "", exitCode: 0, timedOut: false };
+      }
+      if (args[0] === "ps") return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+      if (args[0] === "inspect") return { stdout: "sha256:app\n", stderr: "", exitCode: 0, timedOut: false };
+      return { stdout: "", stderr: "", exitCode: 0, timedOut: false };
+    };
+    const service = new ImageGcAuditService(
+      { findAll: async () => [{ id: "p1", containerName: "korrelo-x", currentImage: "korrelo-x:commit-abc" }] } as any,
+      { findAllByStatus: async () => [] } as any,
+      runner as any,
+    );
+    const plan = await service.audit();
+    expect(plan.decisions.every((d) => d.decision !== "CANDIDATE")).toBe(true);
+    expect(calls.some((args) => args[0] === "image" && args[1] === "rm")).toBe(false);
+  });
+
   it("apply explícito é respeitado e não remove sem candidatos", async () => {
     process.env.KORRELO_IMAGE_GC_MODE = "apply";
     const { service } = harness();

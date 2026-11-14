@@ -159,12 +159,12 @@ export class ImageGcAuditService {
         if (scan.error) {
           composeErrors.push(`${project.id}: ${scan.error}`);
           if (project.containerName?.startsWith("korrelo-")) {
-            unknownImageNames.push(project.containerName);
+            unknownImageNames.push(...projectVariants(project.containerName));
           }
         }
         if (!project.currentImage && project.containerName?.startsWith("korrelo-")) {
           // Sem identidade de produção comprovada: NUNCA candidata.
-          unknownImageNames.push(project.containerName);
+          unknownImageNames.push(...projectVariants(project.containerName));
         }
         return {
           projectId: project.id,
@@ -293,7 +293,7 @@ export class ImageGcAuditService {
         if (project.currentImage) protectedRefs.add(project.currentImage);
         if (project.previousImage) protectedRefs.add(project.previousImage);
         if (!project.currentImage && project.containerName?.startsWith("korrelo-")) {
-          unknownNamesFresh.add(project.containerName);
+          for (const name of projectVariants(project.containerName)) unknownNamesFresh.add(name);
         }
         const scan = await this.readComposeReferences(project.id, Boolean(project.currentImage));
         if (scan.error) {
@@ -483,6 +483,12 @@ function normalizeImageId(id: string | null | undefined): string {
   return (id ?? "").trim().replace(/^sha256:/i, "").toLowerCase();
 }
 
+function projectVariants(containerName: string | null | undefined): string[] {
+  const base = (containerName ?? "").trim();
+  if (!base.startsWith("korrelo-")) return [];
+  return [base, `${base}-app`, `${base}-app_staging`];
+}
+
 function projectImageNames(
   projects: ImageGcProjectRefs[],
   containers: ImageGcContainer[] = [],
@@ -492,18 +498,31 @@ function projectImageNames(
   const managedContainerNames = new Set(
     projects.map((project) => project.containerName).filter((name): name is string => Boolean(name)),
   );
-  const add = (ref: string | null | undefined) => {
-    if (!ref) return;
-    const index = ref.lastIndexOf(":");
-    if (index > 0) {
-      const name = ref.slice(0, index);
-      // Só nomes gerenciados pelo Korrelo. Imagens externas (mongo, postgres,
-      // redis, app:latest) NUNCA entram na avaliação.
-      if (name.startsWith("korrelo-")) names.add(name);
-    }
+  const addName = (name: string | null | undefined) => {
+    const trimmed = (name ?? "").trim();
+    if (trimmed.startsWith("korrelo-")) names.add(trimmed);
   };
+  /**
+   * Aceita `repo:tag`, `repo` (sem tag), `repo@sha256:...` e caminhos com
+   * registry. O nome é o repositório; tags/digests não importam para a
+   * descoberta do inventário.
+   */
+  const add = (ref: string | null | undefined) => {
+    let name = (ref ?? "").trim();
+    if (!name) return;
+    const at = name.indexOf("@");
+    if (at > 0) name = name.slice(0, at);
+    const slash = name.lastIndexOf("/");
+    const colon = name.lastIndexOf(":");
+    if (colon > slash) name = name.slice(0, colon);
+    addName(name);
+  };
+  const addProjectVariants = (containerName: string | null | undefined) => {
+    for (const name of projectVariants(containerName)) addName(name);
+  };
+
   for (const project of projects) {
-    if (project.containerName?.startsWith("korrelo-")) names.add(project.containerName);
+    addProjectVariants(project.containerName);
     add(project.currentImage);
     add(project.previousImage);
     for (const ref of project.composeReferences ?? []) add(ref);

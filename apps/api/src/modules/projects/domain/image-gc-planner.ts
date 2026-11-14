@@ -228,6 +228,17 @@ export function planImageGc(input: ImageGcInput): ImageGcPlan {
         decision: "UNKNOWN",
         reasons: ["projeto sem identidade confiável (currentImage nulo) — requer reconciliação"],
       });
+      continue;
+    }
+    if (imageName.endsWith("-app") || imageName.endsWith("-app_staging")) {
+      // Nomenclatura legada do Compose: sufixo NÃO é prova de descartabilidade.
+      protectedByRefOrId.add(image.reference);
+      unused.push({
+        reference: image.reference,
+        id: image.id,
+        decision: "UNKNOWN",
+        reasons: ["imagem com sufixo legado (-app/-app_staging) sem prova completa de uso"],
+      });
     }
   }
 
