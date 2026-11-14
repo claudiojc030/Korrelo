@@ -12,6 +12,7 @@ import type {
   TeardownConfig,
 } from "../domain/container-orchestrator";
 import { COMPOSE_FILENAME } from "../domain/container-orchestrator";
+import { readImageRetentionExtra } from "../domain/image-gc-planner";
 import { SHARED_NETWORK } from "./docker-compose-file-builder";
 
 const execFile = promisify(execFileCallback);
@@ -53,7 +54,7 @@ const BUILD_CACHE_PRUNE_TIMEOUT_MS = 300_000;
  * anterior. As imagens são tagueadas por commit, então o prune seguro é
  * explícito (remove por TAG, nunca "docker system prune -a").
  */
-const IMAGE_RETENTION = 3;
+const IMAGE_RETENTION = readImageRetentionExtra();
 
 function combineOutput(stdout: string, stderr: string): string {
   return [stdout, stderr].filter(Boolean).join("\n").trim();

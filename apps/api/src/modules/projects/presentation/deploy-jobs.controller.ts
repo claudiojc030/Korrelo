@@ -76,7 +76,7 @@ export class DeployJobsController {
         ),
       );
     }
-    const plan = await this.imageGcAudit.audit();
+    const plan = await this.imageGcAudit.audit({ readOnly: true });
     return { auditedAt: new Date().toISOString(), ...plan };
   }
 

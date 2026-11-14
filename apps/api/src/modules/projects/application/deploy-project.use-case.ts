@@ -49,6 +49,7 @@ import { DeployLogger } from "../infrastructure/deploy-logger";
 import { ResourcePreflightService } from "../infrastructure/resource-preflight.service";
 import { parseDeployHealthConfig } from "../infrastructure/deploy-health-config";
 import { ImageGcAuditService } from "../infrastructure/image-gc-audit.service";
+import { normalizeImageGcMode } from "../domain/image-gc-planner";
 import { WorkerLock } from "../infrastructure/worker-lock";
 import {
   defaultSelfUpdateState,
@@ -786,18 +787,20 @@ export class DeployProjectUseCase {
       );
       throw error;
     } finally {
-      // 1) AUDITORIA DRY-RUN PRIMEIRO: retrata o estado ANTES de qualquer
-      // limpeza legada (staging/prune/cache). Somente leitura.
-      await this.runImageGcAudit(job, context);
-
-      // 2) Cleanup do container de teste.
+      // 1) Cleanup do container de teste PRIMEIRO: assim a candidata de um
+      // staging reprovado deixa de estar "em uso" e pode ser auditada/limpa.
       if (deployConfig && !stagingRemoved) {
         await this.removeStagingIgnoringErrors(deployConfig, context);
       }
-      // 3) Política LEGADA de imagens (documentada: protege current/previous/
-      // candidata + containers por ID + candidatas de jobs pendentes; a
-      // auditoria NÃO participa desta remoção).
-      if (deployConfig?.imageName) {
+
+      // 2) AUDITORIA/GC (somente leitura em dry-run; apply só se explícito).
+      await this.runImageGcAudit(job, context);
+
+      // 3) Política LEGADA de imagens. Quando o GC novo está em apply, ele é
+      // a ÚNICA autoridade de remoção e o prune legado não roda. Em dry-run,
+      // o legado usa a MESMA retenção (1) do planejador.
+      const gcMode = normalizeImageGcMode(process.env.KORRELO_IMAGE_GC_MODE).mode;
+      if (deployConfig?.imageName && gcMode !== "apply") {
         let protectedImages: string[] = [project.currentImage, project.previousImage, candidateImage].filter(
           (image): image is string => Boolean(image),
         );

@@ -7,7 +7,7 @@
  *  - não classifica imagem como descartável só porque não está em `docker ps`;
  *  - `apply` NÃO é suportado nesta fase.
  */
-export type ImageGcMode = "off" | "dry-run";
+export type ImageGcMode = "off" | "dry-run" | "apply";
 
 export type ImageGcDecisionType = "KEEP" | "CANDIDATE" | "UNKNOWN";
 
@@ -30,6 +30,8 @@ export interface ImageGcContainer {
 
 export interface ImageGcProjectRefs {
   projectId: string;
+  /** Nome/base da imagem do projeto (ex.: korrelo-mesatta-...). */
+  containerName?: string | null;
   currentImage?: string | null;
   previousImage?: string | null;
   /** Referências do compose estável/rollback/job. */
@@ -37,8 +39,14 @@ export interface ImageGcProjectRefs {
 }
 
 export interface ImageGcInput {
-  /** Nome da imagem do projeto (sem tag). */
+  /** Nome principal da imagem gerenciada (sem tag). */
   imageName: string;
+  /**
+   * Outros nomes gerenciados do mesmo inventário (ex.: projeto Evolution,
+   * candidatas de jobs). Somente estes nomes entram na avaliação — imagens
+   * externas (mongo/postgres/redis/app:latest) ficam fora.
+   */
+  imageNames?: string[];
   images: ImageGcImage[];
   containers: ImageGcContainer[];
   projects: ImageGcProjectRefs[];
@@ -48,7 +56,11 @@ export interface ImageGcInput {
   recoveryReferences?: string[];
   /** Referências cujo `docker inspect` falhou (proteção conservadora). */
   unverifiedReferences?: string[];
-  /** Quantas imagens não protegidas manter (política atual = 3). */
+  /** Nomes de imagem sem identidade confiável (ex.: projeto sem currentImage). */
+  unknownImageNames?: string[];
+  /** Inventário completo? false => tudo UNKNOWN e apply bloqueado. */
+  inventoryComplete?: boolean;
+  /** Quantas imagens não protegidas manter (política atual = 1). */
   retentionExtra?: number;
   /** Disponibilidade das fontes de verdade. */
   databaseOk: boolean;
@@ -68,9 +80,17 @@ export interface ImageGcPlan {
   decisions: ImageGcDecision[];
   summary: { keep: number; candidate: number; unknown: number; skipped: boolean };
   notes: string[];
+  /** Preenchido SOMENTE em mode=apply. */
+  applied?: { removed: string[]; skipped: string[] };
 }
 
 const RETENTION_EXTRA = 3;
+
+/** Autoridade ÚNICA de retenção (planner, serviço e prune legado). */
+export function readImageRetentionExtra(env: NodeJS.ProcessEnv = process.env): number {
+  const parsed = Number.parseInt(env.KORRELO_IMAGE_GC_RETENTION_EXTRA ?? "", 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : RETENTION_EXTRA;
+}
 
 function normalizeId(id: string | null | undefined): string | null {
   if (!id) return null;
@@ -101,11 +121,17 @@ export function planImageGc(input: ImageGcInput): ImageGcPlan {
   }
 
   const unused: ImageGcDecision[] = [];
-  const projectImages = input.images.filter(
-    (image) => image.reference.startsWith(`${input.imageName}:`) || image.reference === input.imageName,
+  const managedNames = new Set(
+    [input.imageName, ...(input.imageNames ?? [])].map((name) => name.trim()).filter(Boolean),
   );
+  const projectImages = input.images.filter((image) => {
+    const separator = image.reference.lastIndexOf(":");
+    const name = separator > 0 ? image.reference.slice(0, separator) : image.reference;
+    return managedNames.has(name);
+  });
 
   const unverified = new Set((input.unverifiedReferences ?? []).map((ref) => ref.trim()));
+  const unknownNames = new Set((input.unknownImageNames ?? []).map((name) => name.trim()).filter(Boolean));
 
   if (!input.databaseOk) {
     notes.push("Banco indisponível: todas as imagens classificadas como UNKNOWN.");
@@ -114,13 +140,18 @@ export function planImageGc(input: ImageGcInput): ImageGcPlan {
     notes.push("Docker indisponível/inconsistente: todas as imagens classificadas como UNKNOWN.");
   }
 
-  if (!input.databaseOk || !input.dockerOk) {
+  if (!input.databaseOk || !input.dockerOk || input.inventoryComplete === false) {
+    const reason = !input.databaseOk
+      ? "fonte de verdade indisponível (banco)"
+      : !input.dockerOk
+        ? "fonte de verdade indisponível (Docker)"
+        : "inventário de containers incompleto/truncado";
     for (const image of projectImages) {
       unused.push({
         reference: image.reference,
         id: image.id,
         decision: "UNKNOWN",
-        reasons: ["fonte de verdade indisponível (banco ou Docker)"],
+        reasons: [reason],
       });
     }
     return summarize(input.mode, unused, notes);
@@ -185,6 +216,18 @@ export function planImageGc(input: ImageGcInput): ImageGcPlan {
         decision: "UNKNOWN",
         reasons: ["identidade não verificável (docker inspect/inspeção do container falhou)"],
       });
+      continue;
+    }
+    const separator = image.reference.lastIndexOf(":");
+    const imageName = separator > 0 ? image.reference.slice(0, separator) : image.reference;
+    if (unknownNames.has(imageName)) {
+      protectedByRefOrId.add(image.reference);
+      unused.push({
+        reference: image.reference,
+        id: image.id,
+        decision: "UNKNOWN",
+        reasons: ["projeto sem identidade confiável (currentImage nulo) — requer reconciliação"],
+      });
     }
   }
 
@@ -238,13 +281,13 @@ function summarize(
   };
 }
 
-/** Normaliza a feature flag. `apply` NÃO existe nesta fase. */
+/** Normaliza a feature flag. `apply` exige configuração explícita. */
 export function normalizeImageGcMode(raw: string | undefined | null): {
   mode: ImageGcMode;
   downgraded: boolean;
 } {
   const value = (raw ?? "").trim().toLowerCase();
   if (value === "off") return { mode: "off", downgraded: false };
-  if (value === "apply") return { mode: "dry-run", downgraded: true };
+  if (value === "apply") return { mode: "apply", downgraded: false };
   return { mode: "dry-run", downgraded: false };
 }

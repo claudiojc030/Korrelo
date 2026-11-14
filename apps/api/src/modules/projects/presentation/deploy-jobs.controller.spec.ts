@@ -7,6 +7,7 @@ import { DeployJobsController } from "./deploy-jobs.controller";
 describe("DeployJobsController.imageGcAuditRun", () => {
   function build(running: unknown[] = [], queued: unknown[] = []) {
     const auditCalls: number[] = [];
+    const auditOptions: any[] = [];
     const plan = {
       mode: "dry-run",
       decisions: [
@@ -19,13 +20,26 @@ describe("DeployJobsController.imageGcAuditRun", () => {
       {} as any,
       {} as any,
       {} as any,
-      { audit: async () => { auditCalls.push(1); return plan; } } as any,
+      { audit: async (options?: any) => { auditCalls.push(1); auditOptions.push(options ?? null); return plan; } } as any,
       {
         findAllByStatus: async (status: string) => (status === "running" ? running : queued),
       } as any,
     );
-    return { controller, auditCalls };
+    return { controller, auditCalls, auditOptions };
   }
+
+  afterEach(() => {
+    delete process.env.KORRELO_IMAGE_GC_MODE;
+  });
+
+  it("GET força readOnly mesmo com KORRELO_IMAGE_GC_MODE=apply", async () => {
+    process.env.KORRELO_IMAGE_GC_MODE = "apply";
+    const { controller, auditOptions } = build();
+
+    await controller.imageGcAuditRun();
+
+    expect(auditOptions).toEqual([{ readOnly: true }]);
+  });
 
   it("executa a auditoria sem disparar deploy e devolve timestamp", async () => {
     const { controller, auditCalls } = build();

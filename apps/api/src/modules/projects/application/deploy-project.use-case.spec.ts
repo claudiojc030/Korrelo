@@ -945,6 +945,19 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     expect(orchestrator.pruneCalls[0]?.protectedImages).toContain("korrelo-x:commit-pendente");
   });
 
+  it("com GC em apply, o prune legado NÃO roda (autoridade única)", async () => {
+    const previous = process.env.KORRELO_IMAGE_GC_MODE;
+    process.env.KORRELO_IMAGE_GC_MODE = "apply";
+    try {
+      await useCase.executeJob(makeJob());
+      expect(imageGcAudit.calls).toBe(1);
+      expect(orchestrator.pruneCalls).toHaveLength(0);
+    } finally {
+      if (previous === undefined) delete process.env.KORRELO_IMAGE_GC_MODE;
+      else process.env.KORRELO_IMAGE_GC_MODE = previous;
+    }
+  });
+
   it("resultado parcial (builder prune falhou) não derruba o deploy", async () => {
     orchestrator.buildPruneResult = {
       imagePrune: { ok: true, output: null, error: null },

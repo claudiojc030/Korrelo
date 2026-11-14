@@ -5,6 +5,7 @@ import { HEALTH_CHECKER, type HealthChecker } from "../domain/health-checker";
 import type { Project } from "../domain/project.entity";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
 import { parseDeployHealthConfig } from "../infrastructure/deploy-health-config";
+import { beginReconciliation, endReconciliation } from "../infrastructure/reconciliation-lock";
 
 /**
  * RECONCILIAÇÃO EXPLÍCITA de um projeto em ESTADO INDETERMINADO.
@@ -30,6 +31,15 @@ export class ReconcileProjectStateUseCase {
   ) {}
 
   async execute(projectId: string): Promise<Project> {
+    beginReconciliation();
+    try {
+      return await this.executeInternal(projectId);
+    } finally {
+      endReconciliation();
+    }
+  }
+
+  private async executeInternal(projectId: string): Promise<Project> {
     const project = await this.repository.findById(projectId);
     if (!project) {
       throw new NotFoundException(apiError("PROJECT_NOT_FOUND", `Projeto ${projectId} não encontrado`));

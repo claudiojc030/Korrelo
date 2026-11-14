@@ -180,8 +180,8 @@ describe("image GC planner (dry-run)", () => {
     expect(plan.summary.skipped).toBe(true);
   });
 
-  it("apply é rebaixado para dry-run (nunca aplica nesta fase)", () => {
-    expect(normalizeImageGcMode("apply")).toEqual({ mode: "dry-run", downgraded: true });
+  it("apply é habilitável apenas por configuração explícita", () => {
+    expect(normalizeImageGcMode("apply")).toEqual({ mode: "apply", downgraded: false });
     expect(normalizeImageGcMode("off")).toEqual({ mode: "off", downgraded: false });
     expect(normalizeImageGcMode(undefined)).toEqual({ mode: "dry-run", downgraded: false });
   });
