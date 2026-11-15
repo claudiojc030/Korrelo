@@ -146,10 +146,12 @@ export class StagingExecutionService {
           composeProject: request.plan.composeProject,
         });
         healthy = await this.runtime.health({ run: reservation.run, lease: reservation.lease });
-      } catch {
+      } catch (error) {
         await this.safeCleanup(reservation.run, reservation.lease, "falha ao iniciar/health");
         cleanupDone = true;
-        return result("failed", reservation.run, reservation.lease, generated.composeHash, ["falha ao executar o staging"]);
+        return result("failed", reservation.run, reservation.lease, generated.composeHash, [
+          `falha ao executar o staging: ${detail(error)}`,
+        ]);
       }
       if (!healthy) {
         await this.safeCleanup(reservation.run, reservation.lease, "health reprovado");
@@ -200,6 +202,12 @@ export class StagingExecutionService {
       return { ok: false, reason: "falha no cleanup do staging" };
     }
   }
+}
+
+function detail(error: unknown): string {
+  return error instanceof Error
+    ? error.message.replace(/\s+/g, " ").trim().slice(0, 600)
+    : "erro desconhecido";
 }
 
 function result(

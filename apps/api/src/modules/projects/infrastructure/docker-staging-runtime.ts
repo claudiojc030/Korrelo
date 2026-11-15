@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { execFile as execFileCallback } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -58,7 +59,12 @@ export class DockerComposeStagingRuntime implements StagingRuntimeAdapter {
 
     const args = ["compose", "-p", project, "-f", file, "up", "-d", "--remove-orphans"];
     if (!documentHasBuild(input.document)) args.push("--no-build");
-    await this.run("docker", args, { timeout: COMMAND_TIMEOUT_MS });
+    await this.assertHostPortsFree(input.document);
+    try {
+      await this.run("docker", args, { timeout: COMMAND_TIMEOUT_MS });
+    } catch (error) {
+      throw new Error(`docker compose up falhou: ${commandDetail(error)}`);
+    }
   }
 
   async health(input: StagingRuntimeHealthInput): Promise<boolean> {
@@ -124,6 +130,18 @@ export class DockerComposeStagingRuntime implements StagingRuntimeAdapter {
     return { ok: true, reason: null };
   }
 
+  private async assertHostPortsFree(document: StagingComposeDocument): Promise<void> {
+    for (const service of Object.values(document.services)) {
+      for (const binding of service.ports ?? []) {
+        const hostPort = parseLoopbackBinding(binding);
+        if (hostPort === null) continue;
+        if (await portInUse(hostPort)) {
+          throw new Error(`porta ${hostPort} já está em uso; staging não será iniciado`);
+        }
+      }
+    }
+  }
+
   private async appContainer(project: string): Promise<string | null> {
     const ids = await this.containersForProject(project);
     if (ids.length === 0) return null;
@@ -178,6 +196,22 @@ function documentHasBuild(document: StagingComposeDocument): boolean {
   return Object.values(document.services).some((service) => Boolean(service.build));
 }
 
+function parseLoopbackBinding(binding: string): number | null {
+  const match = /^127\.0\.0\.1:(\d+):\d+$/.exec(binding.trim());
+  if (!match) return null;
+  const port = Number(match[1]);
+  return Number.isInteger(port) && port > 0 ? port : null;
+}
+
+function portInUse(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = createServer();
+    server.once("error", () => resolve(true));
+    server.once("listening", () => server.close(() => resolve(false)));
+    server.listen(port, "127.0.0.1");
+  });
+}
+
 function safeSegment(value: string): string {
   const segment = String(value).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
   if (!segment) throw new Error("identificador de staging inválido");
@@ -210,4 +244,17 @@ function safeState(raw: string): { Running?: boolean; Health?: { Status?: string
 
 function describe(error: unknown): string {
   return error instanceof Error ? error.message : "falha no runtime Docker do staging";
+}
+
+function commandDetail(error: unknown): string {
+  const parts: string[] = [];
+  if (error instanceof Error) {
+    parts.push(error.message);
+    const withOutput = error as Error & { stdout?: string | Buffer; stderr?: string | Buffer };
+    if (withOutput.stderr) parts.push(String(withOutput.stderr));
+    else if (withOutput.stdout) parts.push(String(withOutput.stdout));
+  } else {
+    parts.push(String(error));
+  }
+  return parts.join(" | ").replace(/\s+/g, " ").trim().slice(0, 800);
 }

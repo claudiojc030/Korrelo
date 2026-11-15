@@ -1,0 +1,73 @@
+name: staging-lab
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-lab
+  cancel-in-progress: false
+
+jobs:
+  docker-lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Instalar dependências do laboratório
+        run: npm install --no-audit --no-fund
+
+      - name: Construir imagens sintéticas (somente runner)
+        run: |
+          docker build \
+            -t korrelo-lab-app:healthy \
+            --label "korrelo.projectId=lab-project" \
+            --label "korrelo.commitSha=${GITHUB_SHA}" \
+            test/staging-lab/synthetic-app
+          docker build \
+            -t korrelo-lab-app:crash \
+            --build-arg APP_MODE=crash \
+            --label "korrelo.projectId=lab-project" \
+            --label "korrelo.commitSha=${GITHUB_SHA}" \
+            test/staging-lab/synthetic-app
+
+      - name: Executar cenários Docker reais
+        env:
+          LAB_COMMIT_SHA: ${{ github.sha }}
+          LAB_IMAGE_HEALTHY: korrelo-lab-app:healthy
+          LAB_IMAGE_CRASH: korrelo-lab-app:crash
+          LAB_EVIDENCE_FILE: ${{ github.workspace }}/staging-lab-evidence.json
+        run: npx tsx test/staging-lab/harness.ts
+
+      - name: Inventário pós-teste (sempre)
+        if: always()
+        run: |
+          echo "--- containers ---"
+          docker ps -a --format '{{.Names}}\t{{.Image}}\t{{.Labels}}'
+          echo "--- redes ---"
+          docker network ls
+          echo "--- volumes ---"
+          docker volume ls
+
+      - name: Cleanup de segurança (sempre)
+        if: always()
+        run: |
+          ids=$(docker ps -a --filter label=korrelo.ephemeral=true -q)
+          if [ -n "$ids" ]; then docker rm -f $ids; fi
+          docker network ls --format '{{.Name}}' | grep '^korrelo-stg-' | xargs -r -n1 docker network rm || true
+          docker volume ls --format '{{.Name}}' | grep '^korrelo-stg-' | xargs -r -n1 docker volume rm || true
+
+      - name: Publicar evidências
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-lab-evidence
+          path: staging-lab-evidence.json
+          if-no-files-found: warn

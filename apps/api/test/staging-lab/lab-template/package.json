@@ -1,0 +1,19 @@
+{
+  "name": "korrelo-staging-lab",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Laboratório descartável de validação do staging isolado do Korrelo",
+  "scripts": {
+    "test": "tsx test/staging-lab/harness.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0"
+  }
+}

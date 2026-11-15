@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StagingComposeDocument } from "../domain/staging-compose";
@@ -139,6 +140,38 @@ describe("DockerComposeStagingRuntime", () => {
     expect(down?.args).toEqual(
       expect.arrayContaining(["compose", "-p", run.composeProject, "down", "--volumes", "--remove-orphans"]),
     );
+  });
+
+  it("porta loopback ocupada falha antes de chamar o Compose", async () => {
+    const calls: Array<{ args: string[] }> = [];
+    const runtime = new DockerComposeStagingRuntime(
+      async (_command, args) => {
+        calls.push({ args });
+        return { stdout: "" };
+      },
+      async () => undefined,
+      baseDir,
+    );
+    const port = 47998;
+    const server = createServer();
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, "127.0.0.1", () => resolve());
+    });
+    const busyDocument = {
+      ...document,
+      services: {
+        app_staging: { ...document.services.app_staging, ports: [`127.0.0.1:${port}:3000`] },
+      },
+    } as unknown as StagingComposeDocument;
+    try {
+      await expect(
+        runtime.start({ run, lease: { ...lease, hostPort: port }, document: busyDocument, composeProject: run.composeProject }),
+      ).rejects.toThrow(/em uso/);
+      expect(calls).toHaveLength(0);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it("health aceita container sem healthcheck quando está rodando", async () => {
