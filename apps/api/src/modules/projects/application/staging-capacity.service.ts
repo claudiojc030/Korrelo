@@ -1,6 +1,7 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
   STAGING_PORT_LEASE_REPOSITORY,
+  type StagingPortLease,
   type StagingPortLeaseRepository,
 } from "../domain/staging-lease";
 import {
@@ -12,6 +13,7 @@ import {
 import {
   STAGING_HOST_METRICS,
   type StagingHostMetricsReader,
+  type StagingHostMetricsSnapshot,
 } from "../domain/staging-context";
 import { LocalStagingHostMetrics } from "../infrastructure/read-only-staging-context.collector";
 
@@ -117,6 +119,23 @@ export class StagingCapacityService {
       };
     }
 
+    return this.evaluateWithLeases(request, host, liveLeases);
+  }
+
+  /**
+   * Cálculo puro usado tanto pela consulta quanto pela transação atômica do
+   * StagingRun. Não lê banco, Docker ou host.
+   */
+  evaluateWithLeases(
+    request: StagingCapacityRequest,
+    host: StagingHostMetricsSnapshot,
+    liveLeases: StagingPortLease[],
+  ): StagingCapacityDecision {
+    const issues: StagingCapacityIssue[] = [];
+    const add = (code: string, field: string, message: string) => issues.push({ code, field, message });
+    const policy = request.policy;
+    const resources = [request.app, ...request.dependencies];
+
     const requiredMemoryMb = resources.reduce((sum, resource) => sum + resource.memoryMb, 0);
     const requiredCpu = resources.reduce((sum, resource) => sum + resource.cpu, 0);
     const requiredDiskMb = resources.reduce((sum, resource) => sum + resource.diskMb, 0);
@@ -126,10 +145,16 @@ export class StagingCapacityService {
 
     const availableMemoryMb = Math.max(
       0,
-      host.availableMemoryMb - policy.productionReservedMemoryMb - policy.safetyMemoryMb,
+      (host.availableMemoryMb ?? 0) - policy.productionReservedMemoryMb - policy.safetyMemoryMb,
     );
-    const availableCpu = Math.max(0, host.availableCpu - policy.productionReservedCpu - policy.safetyCpu);
-    const availableDiskMb = Math.max(0, host.freeDiskMb - policy.productionReservedDiskMb - policy.safetyDiskMb);
+    const availableCpu = Math.max(
+      0,
+      (host.availableCpu ?? 0) - policy.productionReservedCpu - policy.safetyCpu,
+    );
+    const availableDiskMb = Math.max(
+      0,
+      (host.freeDiskMb ?? 0) - policy.productionReservedDiskMb - policy.safetyDiskMb,
+    );
 
     const metrics: StagingCapacityMetrics = {
       hostAvailableCpu: host.availableCpu,

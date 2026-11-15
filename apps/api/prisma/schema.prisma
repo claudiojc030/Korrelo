@@ -75,6 +75,7 @@ model Project {
   stagingConfig    ProjectStagingConfig?
   stagingSecrets   StagingSecret[]
   stagingPortLeases StagingPortLease[]
+  stagingRuns      StagingRun[]
 }
 
 // Hostnames extras que servem o MESMO projeto (mesma porta), no mesmo
@@ -222,9 +223,46 @@ model StagingPortLease {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   releasedAt DateTime?
+  stagingRun StagingRun?
 
   @@unique([projectId, runId])
   @@index([status, expiresAt])
+}
+
+model StagingRun {
+  id             String   @id @default(uuid())
+  projectId      String
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  deployJobId    String?
+  runId          String
+  composeProject String
+  status         String
+  planHash       String
+  composeHash    String
+  imageReference String?
+  imageId        String?
+  imageDigest    String?
+  memoryMb       Int
+  cpu            Float
+  diskMb         Int
+  leaseId        String   @unique
+  lease          StagingPortLease @relation(fields: [leaseId], references: [id], onDelete: Cascade)
+  networkName    String?
+  volumePrefix   String?
+  ownerId        String?
+  cleanupState   String   @default("none")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  expiresAt      DateTime
+
+  @@unique([projectId, runId])
+  @@index([status, expiresAt])
+}
+
+model StagingCoordinator {
+  id        String   @id
+  version   Int      @default(0)
+  updatedAt DateTime @updatedAt
 }
 
 model CronJob {
