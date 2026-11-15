@@ -9,6 +9,7 @@ import type {
   StagingContextSnapshot,
 } from "../domain/staging-context";
 import type { StagingProjectConfig } from "../domain/staging-planner";
+import type { StagingConfigLoader, StagingConfigLoadResult } from "../domain/persisted-staging-config";
 
 jest.mock("node:child_process", () => ({ execFile: jest.fn() }));
 
@@ -41,6 +42,21 @@ class FakeContextCollector implements StagingContextCollector {
   async collect(request: StagingContextCollectRequest): Promise<StagingContextCollectionResult> {
     this.calls.push(request);
     if (this.throws) throw new Error("coleta falhou");
+    return this.result;
+  }
+}
+
+class FakeConfigLoader implements StagingConfigLoader {
+  calls: string[] = [];
+  result: StagingConfigLoadResult = {
+    ok: true,
+    legacy: false,
+    config: makeConfig(),
+    dependencies: [],
+    issues: [],
+  };
+  async load(projectId: string): Promise<StagingConfigLoadResult> {
+    this.calls.push(projectId);
     return this.result;
   }
 }
@@ -147,6 +163,79 @@ describe("DryRunStagingPlanUseCase (P1A)", () => {
       maxTtlMinutes: 240,
     });
     expect(result.contextWarnings).toEqual(["contexto de teste"]);
+  });
+
+  it("dry-run com configuração persistida carrega via loader interno", async () => {
+    const loader = new FakeConfigLoader();
+    loader.result = {
+      ok: true,
+      legacy: false,
+      config: makeConfig(),
+      dependencies: [
+        {
+          name: "database",
+          kind: "postgres",
+          envKey: "DATABASE_URL",
+          resources: { memoryMb: 256, cpu: 0.25, diskMb: 512 },
+        },
+      ],
+      issues: [],
+    };
+    const useCase = new DryRunStagingPlanUseCase(new FakeProjectRepository(), new FakeContextCollector(), loader);
+
+    const result = await useCase.execute({
+      projectId: "project-1",
+      loadPersistedConfig: true,
+      portCandidates: [4101, 4102],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(loader.calls).toEqual(["project-1"]);
+    expect(result.plan?.dependencies[0]).toMatchObject({ name: "database", kind: "postgres" });
+  });
+
+  it("configuração explícita tem precedência sobre a persistida", async () => {
+    const loader = new FakeConfigLoader();
+    const useCase = new DryRunStagingPlanUseCase(new FakeProjectRepository(), new FakeContextCollector(), loader);
+
+    const result = await useCase.execute(makeInput({ loadPersistedConfig: true }));
+
+    expect(result.ok).toBe(true);
+    expect(loader.calls).toHaveLength(0);
+  });
+
+  it("loader persistido indisponível falha sem fallback", async () => {
+    const useCase = new DryRunStagingPlanUseCase(new FakeProjectRepository(), new FakeContextCollector());
+
+    const result = await useCase.execute({
+      projectId: "project-1",
+      loadPersistedConfig: true,
+      portCandidates: [4101],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues[0].code).toBe("STAGING_CONFIG_LOADER_UNAVAILABLE");
+  });
+
+  it("falha do loader persistido retorna erro estruturado", async () => {
+    const loader = new FakeConfigLoader();
+    loader.result = {
+      ok: false,
+      legacy: false,
+      config: null,
+      dependencies: [],
+      issues: [{ code: "STAGING_CONFIG_UNAVAILABLE", field: "config", message: "db off" }],
+    };
+    const useCase = new DryRunStagingPlanUseCase(new FakeProjectRepository(), new FakeContextCollector(), loader);
+
+    const result = await useCase.execute({
+      projectId: "project-1",
+      loadPersistedConfig: true,
+      portCandidates: [4101],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues[0].code).toBe("STAGING_CONFIG_UNAVAILABLE");
   });
 
   it("falha da coleta retorna erro estruturado e nenhum plano", async () => {

@@ -1,5 +1,9 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.repository";
+import {
+  STAGING_CONFIG_LOADER,
+  type StagingConfigLoader,
+} from "../domain/persisted-staging-config";
 import {
   STAGING_CONTEXT_COLLECTOR,
   type StagingContextCollector,
@@ -28,11 +32,15 @@ export class DryRunStagingPlanUseCase {
   constructor(
     @Inject(PROJECT_REPOSITORY) private readonly projectRepository: ProjectRepository,
     @Inject(STAGING_CONTEXT_COLLECTOR) private readonly contextCollector: StagingContextCollector,
+    @Optional()
+    @Inject(STAGING_CONFIG_LOADER)
+    private readonly configLoader: StagingConfigLoader | null = null,
   ) {}
 
   async execute(input: StagingDryRunInput): Promise<StagingDryRunResult> {
     const projectId = String(input?.projectId ?? "").trim();
-    const config = input?.config ?? null;
+    let config = input?.config ?? null;
+    let dependencies = input?.dependencies ?? [];
     const requestedMode = config?.mode ?? "legacy";
 
     if (!projectId) {
@@ -59,6 +67,47 @@ export class DryRunStagingPlanUseCase {
         "projectId",
         `Projeto ${projectId} não encontrado.`,
       );
+    }
+
+    // Configuração persistida é OPCIONAL e só é lida quando o chamador
+    // interno pede explicitamente. Sem isso, continua legado.
+    if (!config && input.loadPersistedConfig === true) {
+      if (!this.configLoader) {
+        return failure(
+          projectId,
+          "isolated",
+          "STAGING_CONFIG_LOADER_UNAVAILABLE",
+          "config",
+          "Carregador de configuração persistida não está disponível; dry-run recusado.",
+        );
+      }
+      let loaded;
+      try {
+        loaded = await this.configLoader.load(projectId);
+      } catch {
+        return failure(
+          projectId,
+          "isolated",
+          "STAGING_CONFIG_UNAVAILABLE",
+          "config",
+          "Falha ao carregar a configuração persistida; dry-run recusado.",
+        );
+      }
+      if (!loaded.ok) {
+        return {
+          projectId,
+          ok: false,
+          mode: "isolated",
+          legacy: false,
+          plan: null,
+          issues: loaded.issues,
+          contextWarnings: [],
+        };
+      }
+      if (!loaded.legacy && loaded.config) {
+        config = loaded.config;
+        dependencies = loaded.dependencies;
+      }
     }
 
     // Compatibilidade absoluta: legado não exige host, Docker ou contexto.
@@ -134,7 +183,7 @@ export class DryRunStagingPlanUseCase {
           projectId,
           runId: input.runId ?? `dry-run-${projectId}`,
           config,
-          dependencies: input.dependencies ?? [],
+          dependencies,
           production: collection.snapshot.production,
           host: collection.snapshot.host,
           authorizedBindMounts: input.authorizedBindMounts,

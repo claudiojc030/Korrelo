@@ -89,6 +89,8 @@ export interface StagingDryRunInput {
   runId?: string;
   /** Candidatos vêm do alocador/operador; o dry-run não abre portas. */
   portCandidates: number[];
+  /** Quando true, carrega a configuração persistida se não houver config explícita. */
+  loadPersistedConfig?: boolean;
   maxConcurrentEnvironments?: number;
   maxTtlMinutes?: number;
   authorizedBindMounts?: string[];

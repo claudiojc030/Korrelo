@@ -72,6 +72,8 @@ model Project {
   deployRecords    DeployRecord[]
   deployJobs       DeployJob[]
   domainAliases    ProjectDomainAlias[]
+  stagingConfig    ProjectStagingConfig?
+  stagingSecrets   StagingSecret[]
 }
 
 // Hostnames extras que servem o MESMO projeto (mesma porta), no mesmo
@@ -141,6 +143,64 @@ model DeployJob {
 
   @@unique([projectId, commitSha])
   @@index([status, createdAt])
+}
+
+// --- P1B1: configuração OPCIONAL de staging isolado -------------------
+// Ausência de linha = fluxo legado. Nenhuma configuração é criada
+// automaticamente e nenhum projeto existente é alterado.
+model ProjectStagingConfig {
+  id             String   @id @default(uuid())
+  projectId      String   @unique
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // Apenas "isolated" é persistido nesta fase; legado = sem linha.
+  mode           String
+  ttlMinutes     Int
+  allowEgress    Boolean  @default(false)
+  appMemoryMb    Int
+  appCpu         Float
+  appDiskMb      Int
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  dependencies   StagingDependency[]
+}
+
+// Segredos EXCLUSIVOS do staging. Nunca são EnvVar de produção e o valor
+// cifrado nunca é retornado em consultas comuns.
+model StagingSecret {
+  id              String   @id @default(uuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  key             String
+  valueCiphertext String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  dependencies    StagingDependency[]
+
+  @@unique([projectId, key])
+}
+
+model StagingDependency {
+  id               String   @id @default(uuid())
+  configId         String
+  config           ProjectStagingConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  name             String
+  kind             String
+  mode             String
+  envKey           String?
+  targetScheme     String?
+  targetHost       String?
+  targetPort       Int?
+  targetDatabase   String?
+  memoryMb         Int?
+  cpu              Float?
+  diskMb           Int?
+  externalSecretId String?
+  externalSecret   StagingSecret? @relation(fields: [externalSecretId], references: [id], onDelete: SetNull)
+  healthcheck      String?
+  createdAt        DateTime @default(now())
+
+  @@unique([configId, name])
+  @@index([externalSecretId])
 }
 
 model CronJob {
