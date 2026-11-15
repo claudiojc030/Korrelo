@@ -477,7 +477,7 @@ function failure(issues: StagingComposeIssue[]): StagingComposeResult {
   return { ok: false, planHash: null, composeHash: null, model: null, document: null, serialized: null, issues };
 }
 
-function stagingVolumePrefix(plan: StagingPlan): string {
+export function stagingVolumePrefix(plan: StagingPlan): string {
   return `korrelo-stg-${slug(plan.projectId)}-${slug(plan.runId)}-`;
 }
 
