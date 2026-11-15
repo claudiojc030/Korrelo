@@ -4,6 +4,7 @@ import {
   STAGING_RUN_REPOSITORY,
   type StagingRunRepository,
 } from "../domain/staging-run";
+import { STAGING_PORT_LEASE_REPOSITORY, type StagingPortLeaseRepository } from "../domain/staging-lease";
 import {
   STAGING_IMAGE_VERIFIER,
   STAGING_RUNTIME_ADAPTER,
@@ -37,6 +38,9 @@ export class StagingExecutionService {
     @Inject(STAGING_IMAGE_VERIFIER) private readonly imageVerifier: StagingImageVerifier,
     @Inject(STAGING_RUNTIME_ADAPTER) private readonly runtime: StagingRuntimeAdapter,
     @Optional() private readonly enabled: boolean = process.env.KORRELO_STAGING_ISOLATED_EXECUTION === "true",
+    @Optional()
+    @Inject(STAGING_PORT_LEASE_REPOSITORY)
+    private readonly leaseRepository: StagingPortLeaseRepository | null = null,
   ) {}
 
   async execute(
@@ -76,6 +80,27 @@ export class StagingExecutionService {
       return result("blocked", null, null, null, ["build local exige contexto explícito"]);
     }
 
+    const environmentFiles: Record<string, Record<string, string>> = {};
+    const appEnvFile =
+      request.stagingEnv && Object.keys(request.stagingEnv).length > 0 ? "staging-app.env" : null;
+    if (appEnvFile) {
+      const invalid = findInvalidEnvEntry(request.stagingEnv!);
+      if (invalid) return result("blocked", null, null, null, [`variável de staging inválida: ${invalid}`]);
+      environmentFiles[appEnvFile] = request.stagingEnv!;
+    }
+    const dependencyEnvFiles: Record<string, string> = {};
+    for (const dependency of request.plan.dependencies ?? []) {
+      const values = request.dependencyEnvironment?.[dependency.name];
+      if (!values || Object.keys(values).length === 0) continue;
+      const invalid = findInvalidEnvEntry(values);
+      if (invalid) {
+        return result("blocked", null, null, null, [`variável da dependência ${dependency.name} inválida`]);
+      }
+      const fileName = `staging-${dependency.name}.env`;
+      dependencyEnvFiles[dependency.name] = fileName;
+      environmentFiles[fileName] = values;
+    }
+
     const generated = generateStagingCompose({
       plan: request.plan,
       containerPort: request.compose.containerPort,
@@ -86,6 +111,9 @@ export class StagingExecutionService {
       deployJobId: request.deployJobId,
       healthcheck: request.compose.healthcheck,
       dependencyImages: request.compose.dependencyImages,
+      appEnvFile,
+      dependencyEnvFiles,
+      dependencyHealthchecks: request.dependencyHealthchecks,
       authorizedBindMounts: request.compose.authorizedBindMounts,
     });
     if (!generated.ok || !generated.document || !generated.planHash || !generated.composeHash) {
@@ -135,6 +163,7 @@ export class StagingExecutionService {
       // atômica precisa confirmar exatamente a mesma porta antes de executar.
       if (reservation.lease.hostPort !== request.plan.app.hostPort) {
         await this.safeCleanup(reservation.run, reservation.lease, "porta reservada divergente do plano");
+        await this.releaseLease(reservation.run);
         cleanupDone = true;
         return result("blocked", reservation.run, reservation.lease, generated.composeHash, [
           "porta reservada diverge da porta do Compose; execução bloqueada",
@@ -148,10 +177,12 @@ export class StagingExecutionService {
           lease: reservation.lease,
           document: generated.document,
           composeProject: request.plan.composeProject,
+          envFiles: environmentFiles,
         });
         healthy = await this.runtime.health({ run: reservation.run, lease: reservation.lease, httpHealth });
       } catch (error) {
         await this.safeCleanup(reservation.run, reservation.lease, "falha ao iniciar/health");
+        await this.releaseLease(reservation.run);
         cleanupDone = true;
         return result("failed", reservation.run, reservation.lease, generated.composeHash, [
           `falha ao executar o staging: ${detail(error)}`,
@@ -159,6 +190,7 @@ export class StagingExecutionService {
       }
       if (!healthy) {
         await this.safeCleanup(reservation.run, reservation.lease, "health reprovado");
+        await this.releaseLease(reservation.run);
         cleanupDone = true;
         return result("failed", reservation.run, reservation.lease, generated.composeHash, ["healthcheck do staging reprovado"]);
       }
@@ -170,6 +202,7 @@ export class StagingExecutionService {
           promoted = true;
         } catch {
           await this.safeCleanup(reservation.run, reservation.lease, "falha na promoção");
+          await this.releaseLease(reservation.run);
           cleanupDone = true;
           return result("failed", reservation.run, reservation.lease, generated.composeHash, ["falha ao promover staging"]);
         }
@@ -178,18 +211,35 @@ export class StagingExecutionService {
       const cleanup = await this.safeCleanup(reservation.run, reservation.lease, "conclusão");
       cleanupDone = true;
       if (!cleanup.ok) {
+        await this.releaseLease(reservation.run);
         return result("failed", reservation.run, reservation.lease, generated.composeHash, [
           cleanup.reason ?? "falha no cleanup do staging",
+        ]);
+      }
+      if (!(await this.releaseLease(reservation.run))) {
+        return result("failed", reservation.run, reservation.lease, generated.composeHash, [
+          "falha ao liberar a reserva de porta do staging",
         ]);
       }
       return result(promoted ? "promoted" : "healthy", reservation.run, reservation.lease, generated.composeHash, []);
     } catch {
       if (active && !cleanupDone) {
         await this.safeCleanup(active.run, active.lease, "falha interna");
+        await this.releaseLease(active.run);
       }
       return result("failed", active?.run ?? null, active?.lease ?? null, generated.composeHash, ["falha interna no executor de staging"]);
     } finally {
       if (!alreadyHeld) await this.workerLock.release();
+    }
+  }
+
+  private async releaseLease(run: NonNullable<StagingExecutionResult["run"]>): Promise<boolean> {
+    if (!this.leaseRepository) return true;
+    try {
+      const released = await this.leaseRepository.release(run.projectId, run.runId);
+      return released.ok;
+    } catch {
+      return false;
     }
   }
 
@@ -206,6 +256,16 @@ export class StagingExecutionService {
       return { ok: false, reason: "falha no cleanup do staging" };
     }
   }
+}
+
+function findInvalidEnvEntry(values: Record<string, string>): string | null {
+  for (const [key, value] of Object.entries(values)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return key;
+    if (typeof value !== "string" || value.includes("\n") || value.includes("\0") || value.includes("\r")) {
+      return key;
+    }
+  }
+  return null;
 }
 
 function detail(error: unknown): string {

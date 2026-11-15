@@ -2,33 +2,36 @@
 
 Repositório **descartável** de validação do MVP de staging isolado do Korrelo.
 
-- Código copiado do repositório principal do Korrelo (planner, compose, executor,
-  runtime Docker/Compose, `WorkerLock`, verificador de imagem pré-construída).
+- Código copiado do repositório principal (planner, compose, executor, runtime
+  Docker/Compose, `WorkerLock`, verificador de imagem, repositórios Prisma).
 - Nenhum endpoint, webhook, runner self-hosted, registry ou deploy.
-- Nenhum segredo: o workflow usa apenas as variáveis padrão do GitHub.
+- Nenhum segredo: o workflow usa apenas variáveis padrão do GitHub. As
+  credenciais do MongoDB efêmero são geradas por execução.
 - Execução manual (`workflow_dispatch`), permissão `contents: read`.
 - Todo recurso Docker criado é efêmero, loopback e removido no próprio run.
 
 ## Escopo
 
-O harness (`test/staging-lab/harness.ts`) executa o executor real com um
-adaptador de repositório de teste (o repositório real é Prisma/SQLite). São
-validados: staging sem banco, imagem pré-construída, imagem ausente, identidade
-divergente, porta ocupada, capacidade insuficiente, healthcheck reprovado,
-falha na criação, ownership divergente, recuperação após crash, MongoDB e
-PostgreSQL temporários e ausência de mudanças fora do staging.
+O harness executa o código real com:
+
+- `PrismaStagingRunRepository` e `PrismaStagingPortLeaseRepository` sobre
+  SQLite temporário (`prisma db push`);
+- `StagingExecutionService` e `DockerComposeStagingRuntime` reais;
+- imagem pré-construída e healthcheck HTTP no IP do container;
+- MongoDB 7 efêmero com credenciais aleatórias, rede e volume exclusivos;
+- aplicação sintética que conecta, grava e lê no MongoDB temporário.
+
+Cenários: staging sem banco, imagem ausente/divergente, porta ocupada,
+capacidade insuficiente, health reprovado, falha de criação rastreável,
+concorrência de reserva, ownership divergente, recuperação após SIGKILL,
+MongoDB efêmero, falha do MongoDB, `MONGODB_URL` ausente e preservação de
+recursos externos.
 
 ## Limitações conhecidas
 
-- O adaptador de repositório do harness é JSON; a integração Prisma real é
-  coberta por testes na API (`staging-execution-prisma.integration.spec.ts`)
-  com SQLite temporário e runtime fake.
-- A recuperação após crash usa o registro persistido em JSON, não
-  `PrismaStagingRunRepository.recoverRun`.
-- O gate de deploy isolado (`StagingDeployIntegrationService`) é coberto por
-  testes unitários; não é exercitado por este harness.
-- Bancos temporários são validados quanto a ciclo de vida (subir/limpar), não
-  quanto a conectividade da aplicação.
-- A sonda HTTP usa o IP do container na rede interna; portas publicadas em
-  127.0.0.1 podem não ser alcançáveis no host do runner.
+- A recuperação após crash usa o run persistido no SQLite e o cleanup escopado,
+  não o job de reconciliação do Core.
+- A sonda HTTP usa o IP do container; portas publicadas em `127.0.0.1` podem
+  não ser alcançáveis no host do runner.
+- Apenas MongoDB efêmero é suportado no deploy isolado nesta fase.
 - Nenhum teste toca a VPS, o Mesatta, a Evolution API ou produção.

@@ -4,15 +4,19 @@
   "version": "0.0.0",
   "description": "Laboratório descartável de validação do staging isolado do Korrelo",
   "scripts": {
-    "test": "tsx test/staging-lab/harness.ts"
+    "test": "tsx test/staging-lab/harness.ts",
+    "db:push": "prisma db push --skip-generate"
   },
   "dependencies": {
+    "@korrelo/shared-types": "file:./vendor/shared-types",
     "@nestjs/common": "^11.0.0",
+    "@prisma/client": "^6.2.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "prisma": "^6.2.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0"
   }

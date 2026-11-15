@@ -182,7 +182,7 @@ describe("StagingExecutionService com Prisma real (SQLite temporário)", () => {
   it("executa, aprova health e persiste StagingRun real", async () => {
     const runtime = new FakeRuntime();
     const verifier = new FakeVerifier();
-    const service = new StagingExecutionService(runs, new WorkerLock(), verifier, runtime, true);
+    const service = new StagingExecutionService(runs, new WorkerLock(), verifier, runtime, true, leases);
     const input = request("run-exec-ok");
 
     const result = await service.execute(input, { path: "/health", require2xx: true });
@@ -196,6 +196,9 @@ describe("StagingExecutionService com Prisma real (SQLite temporário)", () => {
     expect(persisted).not.toBeNull();
     expect(persisted?.imageId).toBe("sha256:" + "a".repeat(64));
     expect(persisted?.composeHash).toBe(result.composeHash);
+    const released = await prisma.stagingPortLease.findFirst({ where: { projectId, runId: "run-exec-ok" } });
+    expect(released?.status).toBe("released");
+    expect(released?.portKey).toBeNull();
   });
 
   it("health reprovado não promove e persiste a evidência", async () => {

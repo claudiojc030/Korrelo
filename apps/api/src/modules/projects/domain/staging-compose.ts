@@ -36,6 +36,12 @@ export interface StagingComposeRequest {
   healthcheck?: StagingComposeHealthcheck | null;
   /** Imagens explícitas por nome de dependência; necessárias para banco local. */
   dependencyImages?: Record<string, string>;
+  /** Arquivo de env do app (nome relativo seguro, gerado pelo executor). */
+  appEnvFile?: string | null;
+  /** Arquivo de env por NOME da dependência. */
+  dependencyEnvFiles?: Record<string, string>;
+  /** Healthcheck CMD-SHELL por NOME da dependência. */
+  dependencyHealthchecks?: Record<string, string>;
   authorizedBindMounts?: string[];
 }
 
@@ -52,6 +58,7 @@ export interface StagingComposeService {
   pids_limit: number;
   labels: Record<string, string>;
   environment?: Record<string, string>;
+  env_file?: string[];
   healthcheck?: {
     test: string[];
     interval: string;
@@ -59,9 +66,10 @@ export interface StagingComposeService {
     retries: number;
     start_period: string;
   };
-  depends_on?: string[];
+  depends_on?: string[] | Record<string, { condition: "service_started" | "service_healthy" }>;
   security_opt: string[];
   cap_drop: string[];
+  cap_add?: string[];
   logging: { driver: "json-file"; options: { "max-size": string; "max-file": string } };
 }
 
@@ -242,6 +250,7 @@ export function generateStagingCompose(request: StagingComposeRequest): StagingC
       add("STAGING_COMPOSE_DEPENDENCY_INVALID", `dependencies.${dependency.name}`, "Tipo de banco não suportado no Compose.");
       continue;
     }
+    const dependencyCaps = dependencyCapabilities(dependency.kind);
     dependencyServices[dependency.serviceName] = {
       container_name: dependency.containerName,
       image,
@@ -252,8 +261,15 @@ export function generateStagingCompose(request: StagingComposeRequest): StagingC
       cpus: dependency.resources.cpu,
       pids_limit: request.pidsLimit,
       labels: ownershipLabels(plan, request),
+      ...(request.dependencyEnvFiles?.[dependency.name]
+        ? { env_file: [request.dependencyEnvFiles[dependency.name]] }
+        : {}),
+      ...(request.dependencyHealthchecks?.[dependency.name]
+        ? { healthcheck: normalizeDependencyHealthcheck(request.dependencyHealthchecks[dependency.name]) }
+        : {}),
       security_opt: ["no-new-privileges:true"],
       cap_drop: ["ALL"],
+      ...(dependencyCaps ? { cap_add: dependencyCaps } : {}),
       logging: loggingConfig(),
     };
   }
@@ -281,9 +297,23 @@ export function generateStagingCompose(request: StagingComposeRequest): StagingC
     pids_limit: request.pidsLimit,
     labels: ownershipLabels(plan, request),
     environment: { KORRELO_DEPLOY_ENV: "staging" },
+    ...(request.appEnvFile ? { env_file: [request.appEnvFile] } : {}),
     ...(request.healthcheck ? { healthcheck: normalizeHealthcheck(request.healthcheck) } : {}),
     ...(Object.keys(dependencyServices).length > 0
-      ? { depends_on: Object.keys(dependencyServices) }
+      ? Object.values(dependencyServices).some((service) => service.healthcheck)
+        ? {
+            depends_on: Object.fromEntries(
+              Object.keys(dependencyServices).map((serviceName) => [
+                serviceName,
+                {
+                  condition: dependencyServices[serviceName].healthcheck
+                    ? ("service_healthy" as const)
+                    : ("service_started" as const),
+                },
+              ]),
+            ),
+          }
+        : { depends_on: Object.keys(dependencyServices) }
       : {}),
     security_opt: ["no-new-privileges:true"],
     cap_drop: ["ALL"],
@@ -411,8 +441,10 @@ export function validateStagingCompose(
     if (service.environment && Object.keys(service.environment).some((envKey) => envKey !== "KORRELO_DEPLOY_ENV")) {
       add("STAGING_COMPOSE_ENV", `services.${key}.environment`, "Compose não pode conter valores de ambiente arbitrários.");
     }
-    if ((service as unknown as { env_file?: unknown }).env_file) {
-      add("STAGING_COMPOSE_ENV", `services.${key}.env_file`, "env_file é proibido no modelo interno.");
+    for (const envFile of service.env_file ?? []) {
+      if (!isSafeEnvFileName(envFile)) {
+        add("STAGING_COMPOSE_ENV", `services.${key}.env_file`, "env_file precisa ser nome relativo seguro.");
+      }
     }
     if ((service as unknown as { privileged?: unknown }).privileged === true) {
       add("STAGING_COMPOSE_PRIVILEGED", `services.${key}`, "privileged é proibido.");
@@ -503,6 +535,27 @@ function ownershipLabels(plan: StagingPlan, request: Pick<StagingComposeRequest,
 
 function loggingConfig() {
   return { driver: "json-file" as const, options: { "max-size": "10m", "max-file": "3" } };
+}
+
+function isSafeEnvFileName(name: string): boolean {
+  return /^[a-z0-9][a-z0-9._-]{0,63}$/.test(name) && !name.includes("..");
+}
+
+function dependencyCapabilities(kind: string): string[] | null {
+  if (kind === "mongodb" || kind === "postgres" || kind === "mysql") {
+    return ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"];
+  }
+  return null;
+}
+
+function normalizeDependencyHealthcheck(command: string) {
+  return {
+    test: ["CMD-SHELL", command],
+    interval: "5s",
+    timeout: "5s",
+    retries: 20,
+    start_period: "10s",
+  };
 }
 
 function normalizeHealthcheck(healthcheck: StagingComposeHealthcheck) {

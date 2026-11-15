@@ -113,6 +113,8 @@ export interface StagingRuntimeStartInput {
   lease: StagingPortLease;
   document: StagingComposeDocument;
   composeProject: string;
+  /** Arquivos env por NOME ARQUIVO declarado no documento (valores nunca no hash). */
+  envFiles?: Record<string, Record<string, string>>;
 }
 
 export interface StagingRuntimeHealthInput {
@@ -156,6 +158,12 @@ export interface StagingExecutionRequest {
     authorizedBindMounts?: string[];
   };
   imageIdentity?: StagingImageIdentityInput | null;
+  /** Valores de ambiente do app (nunca vão para o documento/hash). */
+  stagingEnv?: Record<string, string> | null;
+  /** Ambiente por NOME da dependência (ex.: credenciais do Mongo). */
+  dependencyEnvironment?: Record<string, Record<string, string>>;
+  /** Healthcheck CMD-SHELL por NOME da dependência. */
+  dependencyHealthchecks?: Record<string, string>;
   deployJobId?: string | null;
   ownerId?: string | null;
   portCandidates: number[];

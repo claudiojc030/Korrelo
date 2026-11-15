@@ -95,7 +95,7 @@ describe("StagingDeployIntegrationService", () => {
     expect(fake.execute).not.toHaveBeenCalled();
   });
 
-  it("dependências (bancos) bloqueiam o deploy isolado nesta fase", async () => {
+  it("MongoDB efêmero entra no executor com credenciais próprias", async () => {
     const fake = executor();
     const service = new StagingDeployIntegrationService(
       loader(
@@ -118,8 +118,70 @@ describe("StagingDeployIntegrationService", () => {
       true,
     );
     const result = await service.prepare(input);
+    expect(result.issues).toEqual([]);
+    expect(result.ok).toBe(true);
+    const [request] = fake.execute.mock.calls[0] as unknown as [Record<string, unknown>];
+    const stagingEnv = request.stagingEnv as Record<string, string>;
+    expect(stagingEnv.MONGO_URL).toContain("@");
+    expect(stagingEnv.MONGO_URL).toContain(":27017");
+    expect(stagingEnv.MONGO_URL).not.toContain("production");
+    const dependencyEnv = request.dependencyEnvironment as Record<string, Record<string, string>>;
+    expect(dependencyEnv.mongo.MONGO_INITDB_ROOT_PASSWORD.length).toBeGreaterThan(10);
+    expect(request.dependencies).toHaveLength(1);
+  });
+
+  it("dependência que não seja MongoDB efêmero bloqueia o deploy", async () => {
+    const fake = executor();
+    const service = new StagingDeployIntegrationService(
+      loader(
+        isolated({
+          dependencies: [
+            {
+              name: "pg",
+              kind: "postgres",
+              mode: "ephemeral",
+              envKey: "DATABASE_URL",
+              target: undefined,
+              resources: { memoryMb: 256, cpu: 0.25, diskMb: 256 },
+              healthcheck: undefined,
+            },
+          ],
+        }),
+      ),
+      collector(),
+      fake.service,
+      true,
+    );
+    const result = await service.prepare(input);
     expect(result.ok).toBe(false);
-    expect(result.issues.join(" ")).toContain("dependências");
+    expect(result.issues.join(" ")).toContain("apenas MongoDB");
+    expect(fake.execute).not.toHaveBeenCalled();
+  });
+
+  it("segredo de staging ausente bloqueia antes do executor", async () => {
+    const fake = executor();
+    const service = new StagingDeployIntegrationService(
+      loader(
+        isolated({
+          config: {
+            mode: "isolated",
+            ttlMinutes: 30,
+            allowEgress: false,
+            app: { memoryMb: 256, cpu: 0.25, diskMb: 256 },
+            env: [{ key: "APP_SECRET", source: "explicit" }],
+          },
+        }),
+      ),
+      collector(),
+      fake.service,
+      true,
+      {
+        resolveSecretValue: async () => null,
+      } as never,
+    );
+    const result = await service.prepare(input);
+    expect(result.ok).toBe(false);
+    expect(result.issues.join(" ")).toContain("APP_SECRET");
     expect(fake.execute).not.toHaveBeenCalled();
   });
 

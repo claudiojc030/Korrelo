@@ -1,3 +1,4 @@
 node_modules/
 staging-lab-evidence.json
+lab.db*
 *.log

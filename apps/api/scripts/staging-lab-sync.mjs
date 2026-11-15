@@ -6,7 +6,6 @@
  * Uso:
  *   node apps/api/scripts/staging-lab-sync.mjs <destino>
  *
- * O destino deve estar vazio ou ser um clone do repositório de laboratório.
  * Nada é enviado (push) por este script.
  */
 import { cpSync, existsSync, mkdirSync } from "node:fs";
@@ -15,8 +14,6 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const apiRoot = resolve(here, "..");
-const projects = join(apiRoot, "src", "modules", "projects");
-const labSource = join(apiRoot, "test", "staging-lab");
 const destination = resolve(process.argv[2] ?? "");
 
 if (!process.argv[2] || !existsSync(destination)) {
@@ -24,7 +21,7 @@ if (!process.argv[2] || !existsSync(destination)) {
   process.exit(2);
 }
 
-const sourceFiles = [
+const projectFiles = [
   "domain/staging-planner.ts",
   "domain/staging-compose.ts",
   "domain/staging-execution.ts",
@@ -32,36 +29,55 @@ const sourceFiles = [
   "domain/staging-lease.ts",
   "domain/staging-capacity.ts",
   "domain/staging-plan-hash.ts",
+  "domain/staging-context.ts",
+  "domain/staging-docker-inventory.ts",
+  "domain/staging-ephemeral-mongo.ts",
+  "domain/project.repository.ts",
+  "domain/managed-database.repository.ts",
+  "domain/env-var.repository.ts",
+  "domain/project.entity.ts",
+  "domain/managed-database.entity.ts",
+  "domain/env-var.entity.ts",
   "application/staging-execution.service.ts",
+  "application/staging-capacity.service.ts",
   "infrastructure/worker-lock.ts",
   "infrastructure/docker-staging-runtime.ts",
   "infrastructure/docker-prebuilt-image.verifier.ts",
+  "infrastructure/prisma-staging-run.repository.ts",
+  "infrastructure/prisma-staging-port-lease.repository.ts",
+  "infrastructure/read-only-staging-context.collector.ts",
 ];
 
-for (const relative of sourceFiles) {
-  const target = join(destination, "src", "modules", "projects", relative);
-  mkdirSync(dirname(target), { recursive: true });
-  cpSync(join(projects, relative), target);
+for (const relative of projectFiles) {
+  copy(join(apiRoot, "src", "modules", "projects", relative), join(destination, "src", "modules", "projects", relative));
 }
 
-const labFiles = [
-  "harness.ts",
-  "test-run-repository.ts",
-  "synthetic-app/Dockerfile",
-  "synthetic-app/server.js",
-];
-
-for (const relative of labFiles) {
-  const target = join(destination, "test", "staging-lab", relative);
-  mkdirSync(dirname(target), { recursive: true });
-  cpSync(join(labSource, relative), target);
+for (const relative of ["infrastructure/command-runner.ts", "infrastructure/host-resources.ts", "infrastructure/prisma/prisma.service.ts"]) {
+  copy(join(apiRoot, "src", relative), join(destination, "src", relative));
 }
 
-const template = join(labSource, "lab-template");
-for (const relative of ["package.json", "tsconfig.json", "README.md", ".gitignore", ".github/workflows/staging-lab.yml"]) {
-  const target = join(destination, relative);
-  mkdirSync(dirname(target), { recursive: true });
-  cpSync(join(template, relative), target);
+for (const relative of ["harness.ts", "synthetic-app/Dockerfile", "synthetic-app/server.js", "synthetic-app/package.json"]) {
+  copy(join(apiRoot, "test", "staging-lab", relative), join(destination, "test", "staging-lab", relative));
+}
+
+const template = join(apiRoot, "test", "staging-lab", "lab-template");
+for (const relative of [
+  "package.json",
+  "tsconfig.json",
+  "README.md",
+  ".gitignore",
+  ".github/workflows/staging-lab.yml",
+  "prisma/schema.prisma",
+  "vendor/shared-types/package.json",
+  "vendor/shared-types/index.d.ts",
+  "vendor/shared-types/index.js",
+]) {
+  copy(join(template, relative), join(destination, relative));
 }
 
 console.log(`laboratório sincronizado em ${destination}`);
+
+function copy(from, to) {
+  mkdirSync(dirname(to), { recursive: true });
+  cpSync(from, to);
+}

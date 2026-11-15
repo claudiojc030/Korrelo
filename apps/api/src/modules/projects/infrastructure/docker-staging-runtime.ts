@@ -53,10 +53,19 @@ export class DockerComposeStagingRuntime implements StagingRuntimeAdapter {
   async start(input: StagingRuntimeStartInput): Promise<void> {
     const project = assertComposeProject(input.composeProject, input.run.composeProject);
     const directory = this.runDirectory(input.run);
-    await mkdir(directory, { recursive: true });
+    await mkdir(directory, { recursive: true, mode: 0o700 });
     const file = join(directory, "compose.json");
     // JSON é YAML válido; o documento já é determinístico.
     await writeFile(file, JSON.stringify(input.document), "utf8");
+    for (const [name, values] of Object.entries(input.envFiles ?? {})) {
+      if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(name) || name.includes("..")) {
+        throw new Error("nome de arquivo de ambiente inválido");
+      }
+      const content = Object.entries(values)
+        .map(([key, value]) => `${key}=${value}`)
+        .join("\n");
+      await writeFile(join(directory, name), `${content}\n`, { encoding: "utf8", mode: 0o600 });
+    }
 
     const args = ["compose", "-p", project, "-f", file, "up", "-d", "--remove-orphans"];
     if (!documentHasBuild(input.document)) args.push("--no-build");
@@ -305,12 +314,14 @@ function describe(error: unknown): string {
 function commandDetail(error: unknown): string {
   const parts: string[] = [];
   if (error instanceof Error) {
-    parts.push(error.message);
+    parts.push(error.message.slice(-300));
     const withOutput = error as Error & { stdout?: string | Buffer; stderr?: string | Buffer };
-    if (withOutput.stderr) parts.push(String(withOutput.stderr));
-    else if (withOutput.stdout) parts.push(String(withOutput.stdout));
+    const stderr = withOutput.stderr ? String(withOutput.stderr) : "";
+    const stdout = withOutput.stdout ? String(withOutput.stdout) : "";
+    const tail = (stderr || stdout).slice(-900);
+    if (tail) parts.push(tail);
   } else {
     parts.push(String(error));
   }
-  return parts.join(" | ").replace(/\s+/g, " ").trim().slice(0, 800);
+  return parts.join(" | ").replace(/\s+/g, " ").trim().slice(-1200);
 }

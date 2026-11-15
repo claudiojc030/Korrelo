@@ -24,10 +24,25 @@ jobs:
       - name: Instalar dependências do laboratório
         run: npm install --no-audit --no-fund
 
+      - name: Preparar SQLite temporário (Prisma)
+        env:
+          DATABASE_URL: file:./lab.db
+        run: |
+          npx prisma generate
+          npx prisma db push --skip-generate
+
+      - name: Pré-baixar imagens de dependências
+        run: docker pull mongo:7
+
       - name: Construir imagens sintéticas (somente runner)
         run: |
           docker build \
             -t korrelo-lab-app:healthy \
+            --label "korrelo.projectId=lab-project" \
+            --label "korrelo.commitSha=${GITHUB_SHA}" \
+            test/staging-lab/synthetic-app
+          docker build \
+            -t korrelo-lab-app:mongo \
             --label "korrelo.projectId=lab-project" \
             --label "korrelo.commitSha=${GITHUB_SHA}" \
             test/staging-lab/synthetic-app
@@ -42,8 +57,10 @@ jobs:
         env:
           LAB_COMMIT_SHA: ${{ github.sha }}
           LAB_IMAGE_HEALTHY: korrelo-lab-app:healthy
+          LAB_IMAGE_MONGO: korrelo-lab-app:mongo
           LAB_IMAGE_CRASH: korrelo-lab-app:crash
           LAB_EVIDENCE_FILE: ${{ github.workspace }}/staging-lab-evidence.json
+          DATABASE_URL: file:./lab.db
         run: npx tsx test/staging-lab/harness.ts
 
       - name: Inventário pós-teste (sempre)
