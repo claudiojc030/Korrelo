@@ -20,9 +20,15 @@ PostgreSQL temporários e ausência de mudanças fora do staging.
 
 ## Limitações conhecidas
 
-- O adaptador de repositório não reproduz a transação Prisma de reserva.
+- O adaptador de repositório do harness é JSON; a integração Prisma real é
+  coberta por testes na API (`staging-execution-prisma.integration.spec.ts`)
+  com SQLite temporário e runtime fake.
 - A recuperação após crash usa o registro persistido em JSON, não
   `PrismaStagingRunRepository.recoverRun`.
+- O gate de deploy isolado (`StagingDeployIntegrationService`) é coberto por
+  testes unitários; não é exercitado por este harness.
 - Bancos temporários são validados quanto a ciclo de vida (subir/limpar), não
   quanto a conectividade da aplicação.
+- A sonda HTTP usa o IP do container na rede interna; portas publicadas em
+  127.0.0.1 podem não ser alcançáveis no host do runner.
 - Nenhum teste toca a VPS, o Mesatta, a Evolution API ou produção.

@@ -121,6 +121,24 @@ import { StagingCleanupService } from "./infrastructure/staging-cleanup.service"
 import { RuntimeReconciliationService } from "./infrastructure/runtime-reconciliation.service";
 import { ImageGcAuditService } from "./infrastructure/image-gc-audit.service";
 import { CompatibilityDryRunService } from "./infrastructure/compatibility-dry-run.service";
+import { PrismaStagingRunRepository } from "./infrastructure/prisma-staging-run.repository";
+import { PrismaStagingPortLeaseRepository } from "./infrastructure/prisma-staging-port-lease.repository";
+import { PrismaStagingConfigRepository } from "./infrastructure/prisma-staging-config.repository";
+import { PersistedStagingConfigLoader } from "./application/persisted-staging-config.loader";
+import { StagingCapacityService } from "./application/staging-capacity.service";
+import { StagingExecutionService } from "./application/staging-execution.service";
+import { StagingDeployIntegrationService } from "./application/staging-deploy-integration.service";
+import { ReadOnlyStagingContextCollector } from "./infrastructure/read-only-staging-context.collector";
+import { DockerComposeStagingRuntime } from "./infrastructure/docker-staging-runtime";
+import { DockerPrebuiltImageVerifier } from "./infrastructure/docker-prebuilt-image.verifier";
+import { STAGING_PORT_LEASE_REPOSITORY } from "./domain/staging-lease";
+import { STAGING_RUN_REPOSITORY } from "./domain/staging-run";
+import { STAGING_CONFIG_LOADER, STAGING_CONFIG_REPOSITORY } from "./domain/persisted-staging-config";
+import { STAGING_CONTEXT_COLLECTOR } from "./domain/staging-context";
+import {
+  STAGING_IMAGE_VERIFIER,
+  STAGING_RUNTIME_ADAPTER,
+} from "./domain/staging-execution";
 
 @Module({
   imports: [GithubModule, AuthModule, ScheduleModule.forRoot()],
@@ -208,6 +226,55 @@ import { CompatibilityDryRunService } from "./infrastructure/compatibility-dry-r
     RuntimeReconciliationService,
     ImageGcAuditService,
     CompatibilityDryRunService,
+    PrismaStagingRunRepository,
+    PrismaStagingPortLeaseRepository,
+    PrismaStagingConfigRepository,
+    PersistedStagingConfigLoader,
+    StagingCapacityService,
+    ReadOnlyStagingContextCollector,
+    DockerPrebuiltImageVerifier,
+    {
+      provide: STAGING_PORT_LEASE_REPOSITORY,
+      useExisting: PrismaStagingPortLeaseRepository,
+    },
+    {
+      provide: STAGING_RUN_REPOSITORY,
+      useExisting: PrismaStagingRunRepository,
+    },
+    {
+      provide: STAGING_CONFIG_REPOSITORY,
+      useExisting: PrismaStagingConfigRepository,
+    },
+    {
+      provide: STAGING_CONFIG_LOADER,
+      useExisting: PersistedStagingConfigLoader,
+    },
+    {
+      provide: STAGING_CONTEXT_COLLECTOR,
+      useExisting: ReadOnlyStagingContextCollector,
+    },
+    {
+      provide: STAGING_RUNTIME_ADAPTER,
+      useFactory: () => new DockerComposeStagingRuntime(),
+    },
+    {
+      provide: STAGING_IMAGE_VERIFIER,
+      useExisting: DockerPrebuiltImageVerifier,
+    },
+    {
+      // Factory explícita: o executor não recebe a flag por injeção de
+      // `boolean` (token inexistente no Nest); a leitura de ambiente fica
+      // dentro do próprio serviço.
+      provide: StagingExecutionService,
+      useFactory: (
+        runs: PrismaStagingRunRepository,
+        lock: WorkerLock,
+        verifier: DockerPrebuiltImageVerifier,
+        runtime: DockerComposeStagingRuntime,
+      ) => new StagingExecutionService(runs, lock, verifier, runtime),
+      inject: [PrismaStagingRunRepository, WorkerLock, STAGING_IMAGE_VERIFIER, STAGING_RUNTIME_ADAPTER],
+    },
+    StagingDeployIntegrationService,
     { provide: PROJECT_REPOSITORY, useClass: PrismaProjectRepository },
     { provide: ENV_VAR_REPOSITORY, useClass: PrismaEnvVarRepository },
     { provide: MANAGED_DATABASE_REPOSITORY, useClass: PrismaManagedDatabaseRepository },

@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { execFile as execFileCallback } from "node:child_process";
+import { request as httpRequest } from "node:http";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -71,6 +72,7 @@ export class DockerComposeStagingRuntime implements StagingRuntimeAdapter {
     const project = assertComposeProject(input.run.composeProject, input.run.composeProject);
     const container = await this.appContainer(project);
     if (!container) return false;
+    let containerIp: string | null = null;
     for (let attempt = 0; attempt < HEALTH_ATTEMPTS; attempt += 1) {
       const { stdout } = await this.run(
         "docker",
@@ -80,9 +82,18 @@ export class DockerComposeStagingRuntime implements StagingRuntimeAdapter {
       const state = safeState(stdout);
       if (!state) return false;
       if (state.Health && state.Health.Status === "unhealthy") return false;
-      if (state.Health && state.Health.Status === "healthy") return true;
-      if (!state.Health && state.Running === true) return true;
       if (state.Running === false && !state.Health) return false;
+      const containerReady =
+        state.Health?.Status === "healthy" || (!state.Health && state.Running === true);
+      if (containerReady) {
+        if (!input.httpHealth) return true;
+        if (!containerIp) containerIp = await this.containerIp(container);
+        const targetHost = containerIp ?? "127.0.0.1";
+        const targetPort = input.httpHealth.containerPort ?? input.lease.hostPort;
+        if (await probeHttp(targetHost, targetPort, input.httpHealth.path, input.httpHealth.require2xx)) {
+          return true;
+        }
+      }
       if (attempt < HEALTH_ATTEMPTS - 1) await this.sleep(HEALTH_INTERVAL_MS);
     }
     return false;
@@ -139,6 +150,19 @@ export class DockerComposeStagingRuntime implements StagingRuntimeAdapter {
           throw new Error(`porta ${hostPort} já está em uso; staging não será iniciado`);
         }
       }
+    }
+  }
+
+  private async containerIp(container: string): Promise<string | null> {
+    try {
+      const { stdout } = await this.run(
+        "docker",
+        ["inspect", "--format", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", container],
+        { timeout: 20_000 },
+      );
+      return stdout.split(/\s+/).find((entry) => /^\d+\.\d+\.\d+\.\d+$/.test(entry)) ?? null;
+    } catch {
+      return null;
     }
   }
 
@@ -201,6 +225,38 @@ function parseLoopbackBinding(binding: string): number | null {
   if (!match) return null;
   const port = Number(match[1]);
   return Number.isInteger(port) && port > 0 ? port : null;
+}
+
+function probeHttp(host: string, port: number, path: string, require2xx: boolean): Promise<boolean> {
+  const debug = process.env.KORRELO_STAGING_HEALTH_DEBUG === "true";
+  return new Promise((resolve) => {
+    const request = httpRequest(
+      {
+        host,
+        port,
+        path: path.startsWith("/") ? path : `/${path}`,
+        method: "GET",
+        timeout: 5_000,
+      },
+      (response) => {
+        response.resume();
+        const status = response.statusCode ?? 0;
+        const ok = require2xx ? status >= 200 && status < 300 : status > 0 && status < 400;
+        if (debug) console.error(`[staging-health] GET ${host}:${port}${path} -> ${status} ok=${ok}`);
+        resolve(ok);
+      },
+    );
+    request.once("timeout", () => {
+      request.destroy();
+      if (debug) console.error(`[staging-health] GET ${host}:${port}${path} timeout`);
+      resolve(false);
+    });
+    request.once("error", (error) => {
+      if (debug) console.error(`[staging-health] GET ${host}:${port}${path} erro=${(error as Error).message}`);
+      resolve(false);
+    });
+    request.end();
+  });
 }
 
 function portInUse(port: number): Promise<boolean> {

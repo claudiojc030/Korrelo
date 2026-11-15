@@ -118,6 +118,13 @@ export interface StagingRuntimeStartInput {
 export interface StagingRuntimeHealthInput {
   run: StagingRun;
   lease: StagingPortLease;
+  /** Sonda HTTP opcional no host (loopback) além do estado do container. */
+  httpHealth?: {
+    path: string;
+    require2xx: boolean;
+    /** Porta interna do container; preferida à porta publicada. */
+    containerPort?: number;
+  } | null;
 }
 
 export interface StagingRuntimeCleanupInput {

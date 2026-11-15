@@ -11,6 +11,7 @@ import {
   type StagingExecutionResult,
   type StagingImageVerifier,
   type StagingRuntimeAdapter,
+  type StagingRuntimeHealthInput,
 } from "../domain/staging-execution";
 import { generateStagingCompose, stagingVolumePrefix } from "../domain/staging-compose";
 
@@ -38,7 +39,10 @@ export class StagingExecutionService {
     @Optional() private readonly enabled: boolean = process.env.KORRELO_STAGING_ISOLATED_EXECUTION === "true",
   ) {}
 
-  async execute(request: StagingExecutionRequest): Promise<StagingExecutionResult> {
+  async execute(
+    request: StagingExecutionRequest,
+    httpHealth: StagingRuntimeHealthInput["httpHealth"] = null,
+  ): Promise<StagingExecutionResult> {
     if (!this.enabled) return result("disabled", null, null, null, ["execução de staging isolado desabilitada"]);
     if (!request.commitSha || !/^[a-f0-9]{40}$/i.test(request.commitSha)) {
       return result("blocked", null, null, null, ["commit SHA completo é obrigatório"]);
@@ -145,7 +149,7 @@ export class StagingExecutionService {
           document: generated.document,
           composeProject: request.plan.composeProject,
         });
-        healthy = await this.runtime.health({ run: reservation.run, lease: reservation.lease });
+        healthy = await this.runtime.health({ run: reservation.run, lease: reservation.lease, httpHealth });
       } catch (error) {
         await this.safeCleanup(reservation.run, reservation.lease, "falha ao iniciar/health");
         cleanupDone = true;

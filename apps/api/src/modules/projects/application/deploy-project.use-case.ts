@@ -69,6 +69,7 @@ import {
   STAGING_ENV_PREFIX,
 } from "../domain/staging-config";
 import type { HealthcheckConfig } from "../domain/container-orchestrator";
+import { StagingDeployIntegrationService } from "./staging-deploy-integration.service";
 
 const HEALTH_CHECK_TIMEOUT_MS = 30_000;
 
@@ -175,6 +176,12 @@ export class DeployProjectUseCase {
      */
     @Optional()
     private readonly imageGcAudit: ImageGcAuditService | null = null,
+    /**
+     * Integração opcional do staging isolado. Sem configuração persistida,
+     * devolve `legacy` e o fluxo abaixo permanece idêntico.
+     */
+    @Optional()
+    private readonly isolatedStaging: StagingDeployIntegrationService | null = null,
   ) {}
 
   async executeJob(job: DeployJob): Promise<void> {
@@ -219,6 +226,7 @@ export class DeployProjectUseCase {
     let rollbackSucceeded = false;
     let stagingRemoved = false;
     let stagingCreated = false;
+    let isolatedStagingHandled = false;
     let candidateImage: string | null = null;
     let previousImage: string | null = null;
     /**
@@ -421,6 +429,45 @@ export class DeployProjectUseCase {
       }
 
       // ------------------------------------------------------------------
+      // 4.1. staging isolado OPCIONAL (imagem pré-construída, sem banco)
+      //
+      // Só entra em ação quando o projeto tem configuração persistida em
+      // modo isolated. Sem configuração o retorno é `legacy` e nada muda.
+      // Falha do modo isolado NUNCA cai para o staging legado.
+      // ------------------------------------------------------------------
+      if (!stagingOnly && this.isolatedStaging && candidateImage) {
+        const isolatedPortCandidates = Array.from({ length: 10 }, (_, index) => stagingHostPort + index);
+        const isolated = await this.isolatedStaging.prepare({
+          projectId: project.id,
+          deployJobId: job.id,
+          commitSha: prepared.sha,
+          imageReference: candidateImage,
+          containerPort: deployConfig.containerPort,
+          portCandidates: isolatedPortCandidates,
+          healthPath: deployHealth.path,
+          healthRequire2xx: deployHealth.require2xx,
+        });
+        if (isolated.mode === "isolated") {
+          if (!isolated.ok) {
+            throw new DeployFailure(
+              `Staging isolado reprovado: ${isolated.issues.join("; ")}. A versão em produção não foi tocada.`,
+              false,
+            );
+          }
+          isolatedStagingHandled = true;
+          deployRecord = await this.deployRecordRepository.save(
+            deployRecord.appendLog(
+              `--- staging isolado ---\nrun=${isolated.runId ?? "?"} composeHash=${isolated.composeHash ?? "?"}`,
+            ),
+          );
+          this.deployLogger.log("staging-health", context, "staging isolado aprovado", {
+            runId: isolated.runId,
+            composeHash: isolated.composeHash,
+          });
+        }
+      }
+
+      // ------------------------------------------------------------------
       // 5. staging: builda e sobe a instância de teste
       //
       // Antes do build pesado, ESPERA o host ficar seguro (load, RAM, disco,
@@ -428,7 +475,7 @@ export class DeployProjectUseCase {
       // deploy por causa dela é desperdício. A produção em execução NUNCA é
       // parada, reduzida ou reiniciada para liberar recurso.
       // ------------------------------------------------------------------
-      if (stagingOnly || !project.skipStagingTest) {
+      if (!isolatedStagingHandled && (stagingOnly || !project.skipStagingTest)) {
         await this.setStage(job, "staging-start", context);
         const hostWait = await this.resourcePreflight.waitForSafeHost({
           // A política é a MESMA do preflight da fila: requisito base do
@@ -700,7 +747,9 @@ export class DeployProjectUseCase {
       // Limpeza do container de teste é best-effort: uma falha aqui não pode
       // marcar como "failed" uma produção já validada/coerente.
       await this.setStage(job, "cleanup", context);
-      await this.removeStagingIgnoringErrors(deployConfig, context);
+      if (!isolatedStagingHandled) {
+        await this.removeStagingIgnoringErrors(deployConfig, context);
+      }
       stagingRemoved = true;
 
       await this.setStage(job, "complete", context);
@@ -789,7 +838,7 @@ export class DeployProjectUseCase {
     } finally {
       // 1) Cleanup do container de teste PRIMEIRO: assim a candidata de um
       // staging reprovado deixa de estar "em uso" e pode ser auditada/limpa.
-      if (deployConfig && !stagingRemoved) {
+      if (deployConfig && !stagingRemoved && !isolatedStagingHandled) {
         await this.removeStagingIgnoringErrors(deployConfig, context);
       }
 

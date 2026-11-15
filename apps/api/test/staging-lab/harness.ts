@@ -38,6 +38,7 @@ const EVIDENCE_FILE = process.env.LAB_EVIDENCE_FILE ?? join(WORK_DIR, "evidence.
 
 process.env.KORRELO_LOCK_DIR = join(WORK_DIR, "locks");
 process.env.KORRELO_STAGING_ISOLATED_EXECUTION = "true";
+process.env.KORRELO_STAGING_HEALTH_DEBUG = "true";
 
 interface ScenarioResult {
   name: string;
@@ -322,7 +323,7 @@ async function main(): Promise<void> {
       new DockerPrebuiltImageVerifier(),
       assertingRuntime(runtime),
       true,
-    ).execute(executionRequest(plan));
+    ).execute(executionRequest(plan), { path: "/health", require2xx: true, containerPort: 3000 });
 
     assert(
       result.ok && (result.status === "promoted" || result.status === "healthy"),
