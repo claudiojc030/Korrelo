@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { DryRunStagingPlanUseCase } from "./dry-run-staging-plan.use-case";
+import { StagingPortLeaseService } from "./staging-port-lease.service";
 import type { Project } from "../domain/project.entity";
 import type { ProjectRepository } from "../domain/project.repository";
 import type {
@@ -373,6 +374,16 @@ describe("DryRunStagingPlanUseCase (P1A)", () => {
       serviceName: null,
       mode: "external",
     });
+  });
+
+  it("dry-run não adquire lease de porta", async () => {
+    const acquire = jest.spyOn(StagingPortLeaseService.prototype, "acquire");
+    const useCase = new DryRunStagingPlanUseCase(new FakeProjectRepository(), new FakeContextCollector());
+
+    await useCase.execute(makeInput());
+
+    expect(acquire).not.toHaveBeenCalled();
+    acquire.mockRestore();
   });
 
   it("dry-run não executa processos nem altera o projeto", async () => {

@@ -74,6 +74,7 @@ model Project {
   domainAliases    ProjectDomainAlias[]
   stagingConfig    ProjectStagingConfig?
   stagingSecrets   StagingSecret[]
+  stagingPortLeases StagingPortLease[]
 }
 
 // Hostnames extras que servem o MESMO projeto (mesma porta), no mesmo
@@ -201,6 +202,29 @@ model StagingDependency {
 
   @@unique([configId, name])
   @@index([externalSecretId])
+}
+
+model StagingPortLease {
+  id        String   @id @default(uuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  runId     String
+  hostPort  Int
+  // Nullable e único: apenas leases que ainda reservam porta ocupam a chave.
+  portKey   String?  @unique
+  status    String
+  expiresAt DateTime
+  // Recursos reservados para o ambiente. Somados pela capacidade.
+  memoryMb  Int
+  cpu       Float
+  diskMb    Int
+  ownerId   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  releasedAt DateTime?
+
+  @@unique([projectId, runId])
+  @@index([status, expiresAt])
 }
 
 model CronJob {
