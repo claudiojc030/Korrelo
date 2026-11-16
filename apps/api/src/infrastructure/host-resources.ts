@@ -210,9 +210,20 @@ export const realHostResourceProvider: HostResourceProvider = {
     }
   },
   async getDiskFreeMb() {
-    // Mantido aqui por simetria com o provider (a leitura de disco do
-    // preflight de deploy usa o runCommand com timeout).
-    return null;
+    // `-P` (POSIX): uma linha por filesystem, sem quebra de linha por nome
+    // longo. Sem isso, `df -k /` pode quebrar o dispositivo em uma linha e os
+    // números em outra, e o parser antigo devolvia null.
+    try {
+      const result = await runCommand("df", ["-kP", "/"], { timeoutMs: 5_000 });
+      if (result.timedOut || result.exitCode !== 0) return null;
+      const line = result.stdout.trim().split("\n").filter(Boolean).at(-1) ?? "";
+      const parts = line.trim().split(/\s+/);
+      const availableKb = Number(parts[3]);
+      if (parts.length < 6 || !Number.isFinite(availableKb) || availableKb < 0) return null;
+      return Math.round(availableKb / 1024);
+    } catch {
+      return null;
+    }
   },
   async getSwapActivity(options = {}) {
     const sampleMs = options.sampleMs ?? 1000;

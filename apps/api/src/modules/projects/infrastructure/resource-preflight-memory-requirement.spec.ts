@@ -224,6 +224,54 @@ describe("requisito de memória do build (política única)", () => {
       };
     }
 
+    it("mede o disco pelo fallback quando o provider devolve null", async () => {
+      const provider = safeHostResourceProvider({ memAvailableMb: 4096 });
+      provider.getDiskFreeMb = async () => null;
+      const service = new ResourcePreflightService(provider);
+      mockedRunCommand.mockImplementation(async (command: string) => {
+        if (command === "df") {
+          return result({
+            stdout:
+              "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda1 50000000 25000000 25000000 50% /\n",
+          });
+        }
+        return result();
+      });
+
+      const wait = await service.waitForSafeHost({
+        timeoutSec: 180,
+        sleep: async () => {
+          throw new Error("não deveria esperar: o disco foi medido");
+        },
+        now: () => 0,
+        log: () => undefined,
+      });
+
+      expect(wait.safe).toBe(true);
+      expect(wait.attempts).toBe(1);
+      expect(mockedRunCommand.mock.calls.some(([command]) => command === "df")).toBe(true);
+    });
+
+    it("mantém fail-closed quando o df também não fornece disco", async () => {
+      const provider = safeHostResourceProvider({ memAvailableMb: 4096 });
+      provider.getDiskFreeMb = async () => null;
+      const service = new ResourcePreflightService(provider);
+      mockedRunCommand.mockImplementation(async (command: string) => {
+        if (command === "df") return result({ timedOut: true, exitCode: null });
+        return result();
+      });
+
+      const wait = await service.waitForSafeHost({
+        timeoutSec: 0,
+        sleep: async () => undefined,
+        now: () => 0,
+        log: () => undefined,
+      });
+
+      expect(wait.safe).toBe(false);
+      expect(wait.reason).toContain("não pôde ser medido");
+    });
+
     it("usa a MESMA política do check(): mesmo cenário, mesmo veredito", async () => {
       const service = makeService({ memAvailableMb: 2500, containerMemoryUsageMb: 730 });
 

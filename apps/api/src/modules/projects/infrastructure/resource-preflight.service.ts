@@ -152,6 +152,15 @@ export class ResourcePreflightService {
       // Consumo ATUAL da produção: MemAvailable já o desconta. Só o que
       // ainda pode crescer (headroom) precisa continuar livre.
       const productionUsageMb = await this.measureProductionUsageMb(options.productionContainerName);
+      // O provider pode não medir disco (ex.: provider legado devolvia null).
+      // A espera NUNCA assume folga: mede pelo caminho `df -kP /` e, se ainda
+      // assim for null, a política bloqueia (fail-closed).
+      const measuredDiskMb =
+        resources.diskAvailableMb !== null ? resources.diskAvailableMb : await this.readDiskFreeMb();
+      const resourcesForEvaluation =
+        measuredDiskMb === resources.diskAvailableMb
+          ? resources
+          : { ...resources, diskAvailableMb: measuredDiskMb };
       const requirement = computeBuildMemoryRequirementMb({
         hostFloorMb: thresholds.memAvailableMb,
         buildRequirementMb,
@@ -161,11 +170,11 @@ export class ResourcePreflightService {
         productionUsageMb,
       });
       const diskDecision = evaluateBuildDiskPolicy({
-        freeMb: resources.diskAvailableMb,
+        freeMb: measuredDiskMb,
         explicitRequiredMb: options.requiredDiskMb,
       });
       const evaluation = evaluateHostResources({
-        resources,
+        resources: resourcesForEvaluation,
         thresholds: {
           ...thresholds,
           // PISO do host e necessidade do build continuam um PISO, nunca
@@ -412,7 +421,7 @@ export class ResourcePreflightService {
 
   private async readDiskFreeMb(): Promise<number | null> {
     try {
-      const result = await runCommand("df", ["-k", "/"], { timeoutMs: DISK_CHECK_TIMEOUT_MS });
+      const result = await runCommand("df", ["-kP", "/"], { timeoutMs: DISK_CHECK_TIMEOUT_MS });
       if (result.timedOut || result.exitCode !== 0) return null;
       const lastLine = result.stdout.trim().split("\n").at(-1) ?? "";
       const parts = lastLine.split(/\s+/);
