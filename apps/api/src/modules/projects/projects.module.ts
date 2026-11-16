@@ -126,6 +126,8 @@ import { PrismaStagingPortLeaseRepository } from "./infrastructure/prisma-stagin
 import { PrismaStagingConfigRepository } from "./infrastructure/prisma-staging-config.repository";
 import { PersistedStagingConfigLoader } from "./application/persisted-staging-config.loader";
 import { StagingCapacityService } from "./application/staging-capacity.service";
+import { StagingRunRecoveryService } from "./application/staging-run-recovery.service";
+import { StagingRunRecoveryScheduler } from "./infrastructure/staging-run-recovery.scheduler";
 import { StagingExecutionService } from "./application/staging-execution.service";
 import { StagingDeployIntegrationService } from "./application/staging-deploy-integration.service";
 import { ReadOnlyStagingContextCollector } from "./infrastructure/read-only-staging-context.collector";
@@ -231,6 +233,8 @@ import {
     PrismaStagingConfigRepository,
     PersistedStagingConfigLoader,
     StagingCapacityService,
+    StagingRunRecoveryService,
+    StagingRunRecoveryScheduler,
     ReadOnlyStagingContextCollector,
     DockerPrebuiltImageVerifier,
     {
