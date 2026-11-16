@@ -57,16 +57,21 @@ function timingSafeEqualText(left, right) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+function stateDir() {
+  return process.env.KORRELO_STATE_DIR ?? path.join(os.homedir(), ".korrelo");
+}
+
 function assertPrivateFile(file, label) {
   const stat = fs.statSync(file);
-  if ((stat.mode & 0o077) !== 0) {
+  // Windows não expõe o modo POSIX; em Linux (produção) o 0600 é obrigatório.
+  if (process.platform !== "win32" && (stat.mode & 0o077) !== 0) {
     throw new Error(`${label} precisa ter permissões 0600 (atual: ${(stat.mode & 0o777).toString(8)})`);
   }
   return stat;
 }
 
 function assertAuthenticated(args, env = process.env) {
-  const tokenFile = args["token-file"] ?? path.join(os.homedir(), ".korrelo", "staging-admin.token");
+  const tokenFile = args["token-file"] ?? path.join(stateDir(), "staging-admin.token");
   assertPrivateFile(tokenFile, "token");
   const expected = fs.readFileSync(tokenFile, "utf8").trim();
   const provided = args.token ?? env.KORRELO_STAGING_ADMIN_TOKEN ?? "";
@@ -106,7 +111,7 @@ function projectSlot(name) {
 
 function appendAudit(entry) {
   try {
-    const dir = path.join(os.homedir(), ".korrelo");
+    const dir = stateDir();
     fs.mkdirSync(dir, { recursive: true });
     fs.appendFileSync(
       path.join(dir, "staging-admin.log"),
