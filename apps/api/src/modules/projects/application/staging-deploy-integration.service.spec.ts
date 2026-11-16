@@ -2,7 +2,7 @@ import { StagingDeployIntegrationService } from "./staging-deploy-integration.se
 import type { StagingConfigLoader, StagingConfigLoadResult } from "../domain/persisted-staging-config";
 import type { StagingContextCollector } from "../domain/staging-context";
 import type { StagingExecutionService } from "./staging-execution.service";
-import type { StagingExecutionResult } from "../domain/staging-execution";
+import type { StagingExecutionResult, StagingImageVerifier } from "../domain/staging-execution";
 
 const commit = "a".repeat(40);
 
@@ -215,5 +215,74 @@ describe("StagingDeployIntegrationService", () => {
     const result = await service.prepare(input);
     expect(result.ok).toBe(false);
     expect(fake.execute).not.toHaveBeenCalled();
+  });
+
+  function imageVerifier(imageId: string | null) {
+    return {
+      verify: async () => ({
+        ok: imageId !== null,
+        identityVerified: imageId !== null,
+        originAuthenticated: false as const,
+        imageId,
+        digest: null,
+        issues: imageId === null ? ["imagem inválida"] : [],
+      }),
+    } as StagingImageVerifier;
+  }
+
+  it("aprovado devolve o image ID verificado para a promoção", async () => {
+    const fake = executor({ run: { runId: "job-job-1", imageId: "sha256:" + "a".repeat(64) } as never });
+    const service = new StagingDeployIntegrationService(
+      loader(isolated()),
+      collector(),
+      fake.service,
+      true,
+      null,
+      imageVerifier("sha256:" + "a".repeat(64)),
+    );
+    const result = await service.prepare(input);
+    expect(result.imageId).toBe("sha256:" + "a".repeat(64));
+  });
+
+  it("reconfere o ID da imagem antes da promoção", async () => {
+    const expected = "sha256:" + "a".repeat(64);
+    const service = new StagingDeployIntegrationService(
+      loader(isolated()),
+      collector(),
+      executor().service,
+      true,
+      null,
+      imageVerifier(expected),
+    );
+
+    await expect(
+      service.verifyImageUnchanged({
+        projectId: input.projectId,
+        commitSha: input.commitSha,
+        imageReference: input.imageReference,
+        expectedImageId: expected,
+      }),
+    ).resolves.toBe(true);
+
+    await expect(
+      service.verifyImageUnchanged({
+        projectId: input.projectId,
+        commitSha: input.commitSha,
+        imageReference: input.imageReference,
+        expectedImageId: "sha256:" + "b".repeat(64),
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("sem verificador ou sem ID esperado a promoção é bloqueada", async () => {
+    const service = new StagingDeployIntegrationService(loader(isolated()), collector(), executor().service, true);
+    await expect(
+      service.verifyImageUnchanged({
+        projectId: input.projectId,
+        commitSha: input.commitSha,
+        imageReference: input.imageReference,
+        expectedImageId: null,
+      }),
+    ).resolves.toBe(false);
   });
 });

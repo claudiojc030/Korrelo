@@ -11,6 +11,7 @@ import {
 } from "../domain/staging-context";
 import type { StagingCapacityPolicy } from "../domain/staging-capacity";
 import type { StagingExecutionRequest } from "../domain/staging-execution";
+import { STAGING_IMAGE_VERIFIER, type StagingImageVerifier } from "../domain/staging-execution";
 import { planStaging } from "../domain/staging-planner";
 import { buildEphemeralMongo } from "../domain/staging-ephemeral-mongo";
 import { StagingExecutionService } from "./staging-execution.service";
@@ -46,6 +47,8 @@ export interface StagingDeployPrepareResult {
   issues: string[];
   runId: string | null;
   composeHash: string | null;
+  /** ID local verificado; a promoção deve usar exatamente este ID. */
+  imageId: string | null;
 }
 
 const DEPLOY_CAPACITY_POLICY: StagingCapacityPolicy = {
@@ -69,6 +72,9 @@ export class StagingDeployIntegrationService {
     @Optional()
     @Inject(STAGING_CONFIG_REPOSITORY)
     private readonly secretRepository: StagingConfigRepository | null = null,
+    @Optional()
+    @Inject(STAGING_IMAGE_VERIFIER)
+    private readonly imageVerifier: StagingImageVerifier | null = null,
   ) {}
 
   async prepare(input: StagingDeployPrepareInput): Promise<StagingDeployPrepareResult> {
@@ -83,7 +89,7 @@ export class StagingDeployIntegrationService {
       return isolatedFailure("falha ao carregar configuração de staging; deploy bloqueado sem fallback");
     }
     if (loaded.legacy) {
-      return { mode: "legacy", ok: true, legacy: true, issues: [], runId: null, composeHash: null };
+      return { mode: "legacy", ok: true, legacy: true, issues: [], runId: null, composeHash: null, imageId: null };
     }
     if (!loaded.ok || !loaded.config) {
       return isolatedFailure(
@@ -220,7 +226,33 @@ export class StagingDeployIntegrationService {
       issues: [],
       runId: result.run?.runId ?? validation.plan.runId,
       composeHash: result.composeHash,
+      imageId: result.run?.imageId ?? null,
     };
+  }
+
+  /**
+   * Reconfere a identidade da imagem imediatamente antes da promoção.
+   * Retorna false em qualquer dúvida: o deploy deve falhar fechado.
+   */
+  async verifyImageUnchanged(input: {
+    projectId: string;
+    commitSha: string;
+    imageReference: string;
+    expectedImageId: string | null;
+  }): Promise<boolean> {
+    if (!this.imageVerifier || !input.expectedImageId) return false;
+    try {
+      const verified = await this.imageVerifier.verify({
+        projectId: input.projectId,
+        commitSha: input.commitSha.toLowerCase(),
+        imageReference: input.imageReference,
+        expectedImageId: input.expectedImageId,
+        observed: { imageId: "", repoDigests: [], labels: {} },
+      });
+      return verified.ok && verified.identityVerified && verified.imageId === input.expectedImageId;
+    } catch {
+      return false;
+    }
   }
 
   private async resolveExplicitEnv(
@@ -255,7 +287,7 @@ export class StagingDeployIntegrationService {
 }
 
 function isolatedFailure(...issues: string[]): StagingDeployPrepareResult {
-  return { mode: "isolated", ok: false, legacy: false, issues, runId: null, composeHash: null };
+  return { mode: "isolated", ok: false, legacy: false, issues, runId: null, composeHash: null, imageId: null };
 }
 
 function isCompleteCommit(value: string): boolean {

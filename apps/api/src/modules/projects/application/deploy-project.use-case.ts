@@ -227,6 +227,7 @@ export class DeployProjectUseCase {
     let stagingRemoved = false;
     let stagingCreated = false;
     let isolatedStagingHandled = false;
+    let isolatedImageId: string | null = null;
     let candidateImage: string | null = null;
     let previousImage: string | null = null;
     /**
@@ -455,6 +456,13 @@ export class DeployProjectUseCase {
             );
           }
           isolatedStagingHandled = true;
+          isolatedImageId = isolated.imageId;
+          if (!isolatedImageId) {
+            throw new DeployFailure(
+              "Staging isolado aprovado sem image ID verificável; promoção bloqueada.",
+              false,
+            );
+          }
           deployRecord = await this.deployRecordRepository.save(
             deployRecord.appendLog(
               `--- staging isolado ---\nrun=${isolated.runId ?? "?"} composeHash=${isolated.composeHash ?? "?"}`,
@@ -576,6 +584,23 @@ export class DeployProjectUseCase {
           previousImage = recoveryTarget;
           job = job.withImageInfo({ previousImage, candidateImage, imageTag });
           await this.deployJobRepository.save(job);
+        }
+
+        // A imagem PROMOVIDA tem que ser EXATAMENTE a homologada no staging.
+        // Reconfere o ID imediatamente antes de tocar na produção.
+        if (isolatedStagingHandled && candidateImage && this.isolatedStaging) {
+          const sameImage = await this.isolatedStaging.verifyImageUnchanged({
+            projectId: project.id,
+            commitSha: prepared.sha,
+            imageReference: candidateImage,
+            expectedImageId: isolatedImageId,
+          });
+          if (!sameImage) {
+            throw new DeployFailure(
+              "A imagem candidata mudou desde o staging isolado; promoção bloqueada (a produção não foi tocada).",
+              false,
+            );
+          }
         }
 
         // Estado ANTES da promoção: usado para decidir se uma falha do comando
