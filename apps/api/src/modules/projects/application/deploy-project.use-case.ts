@@ -440,6 +440,7 @@ export class DeployProjectUseCase {
         const isolatedPortCandidates = Array.from({ length: 10 }, (_, index) => stagingHostPort + index);
         const isolated = await this.isolatedStaging.prepare({
           projectId: project.id,
+          projectName: project.name,
           deployJobId: job.id,
           commitSha: prepared.sha,
           imageReference: candidateImage,
@@ -591,6 +592,7 @@ export class DeployProjectUseCase {
         if (isolatedStagingHandled && candidateImage && this.isolatedStaging) {
           const sameImage = await this.isolatedStaging.verifyImageUnchanged({
             projectId: project.id,
+            projectName: project.name,
             commitSha: prepared.sha,
             imageReference: candidateImage,
             expectedImageId: isolatedImageId,

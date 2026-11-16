@@ -15,10 +15,14 @@ export type StagingExecutionMode = "local-build" | "prebuilt";
 
 export interface StagingImageIdentityInput {
   projectId: string;
+  /** Identificadores aceitos além do projectId (ex.: slug do projeto). */
+  projectAliases?: string[];
   commitSha: string;
   imageReference: string;
   expectedImageId?: string | null;
   expectedDigest?: string | null;
+  expectedOs?: string | null;
+  expectedArchitecture?: string | null;
   observed: {
     imageId: string;
     repoDigests: string[];
@@ -51,13 +55,29 @@ export function verifyPrebuiltImageIdentity(input: StagingImageIdentityInput): S
     issues.push("tag latest não é evidência de identidade");
   }
   if (input.observed.labels["korrelo.projectId"] !== input.projectId) {
-    issues.push("label korrelo.projectId ausente ou divergente");
+    const accepted = new Set(
+      [input.projectId, ...(input.projectAliases ?? [])]
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value)),
+    );
+    if (!accepted.has(input.observed.labels["korrelo.projectId"] ?? "")) {
+      issues.push("label korrelo.projectId ausente ou divergente");
+    }
   }
   if (input.observed.labels["korrelo.commitSha"] !== input.commitSha) {
     issues.push("label korrelo.commitSha ausente ou divergente");
   }
   if (input.expectedImageId && imageId !== input.expectedImageId.trim()) {
     issues.push("image ID observado diverge do esperado");
+  }
+  if (input.expectedOs && input.observed.os?.toLowerCase() !== input.expectedOs.toLowerCase()) {
+    issues.push("sistema operacional da imagem diverge do esperado");
+  }
+  if (
+    input.expectedArchitecture &&
+    input.observed.architecture?.toLowerCase() !== input.expectedArchitecture.toLowerCase()
+  ) {
+    issues.push("arquitetura da imagem diverge da esperada");
   }
   const expectedDigest = input.expectedDigest?.trim() || null;
   const digest =
@@ -103,6 +123,16 @@ function repoName(reference: string): string {
 
 export interface StagingImageVerifier {
   verify(input: StagingImageIdentityInput): Promise<StagingImageIdentityResult>;
+}
+
+/** Slug aceito como alias de identidade (mesmo formato do nome do container). */
+export function stagingProjectAlias(projectName: string | null | undefined): string | null {
+  const slug = String(projectName ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || null;
 }
 
 export const STAGING_IMAGE_VERIFIER = Symbol("STAGING_IMAGE_VERIFIER");

@@ -95,6 +95,17 @@ describe("StagingDeployIntegrationService", () => {
     expect(fake.execute).not.toHaveBeenCalled();
   });
 
+  it("bloqueia egress externo no staging de homologação", async () => {
+    const fake = executor();
+    const config = isolated();
+    config.config = { ...config.config!, allowEgress: true };
+    const service = new StagingDeployIntegrationService(loader(config), collector(), fake.service, true);
+    const result = await service.prepare(input);
+    expect(result.ok).toBe(false);
+    expect(result.issues.join(" ")).toContain("egress");
+    expect(fake.execute).not.toHaveBeenCalled();
+  });
+
   it("MongoDB efêmero entra no executor com credenciais próprias", async () => {
     const fake = executor();
     const service = new StagingDeployIntegrationService(

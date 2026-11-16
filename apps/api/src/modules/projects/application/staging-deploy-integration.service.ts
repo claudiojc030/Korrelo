@@ -11,7 +11,7 @@ import {
 } from "../domain/staging-context";
 import type { StagingCapacityPolicy } from "../domain/staging-capacity";
 import type { StagingExecutionRequest } from "../domain/staging-execution";
-import { STAGING_IMAGE_VERIFIER, type StagingImageVerifier } from "../domain/staging-execution";
+import { STAGING_IMAGE_VERIFIER, stagingProjectAlias, type StagingImageVerifier } from "../domain/staging-execution";
 import { planStaging } from "../domain/staging-planner";
 import { buildEphemeralMongo } from "../domain/staging-ephemeral-mongo";
 import { StagingExecutionService } from "./staging-execution.service";
@@ -31,6 +31,8 @@ export type StagingDeployMode = "legacy" | "isolated";
 
 export interface StagingDeployPrepareInput {
   projectId: string;
+  /** Nome do projeto; aceito como alias de label apenas se vier do banco. */
+  projectName?: string | null;
   deployJobId: string;
   commitSha: string;
   imageReference: string;
@@ -98,6 +100,11 @@ export class StagingDeployIntegrationService {
     }
     if (loaded.config.mode !== "isolated") {
       return isolatedFailure("modo de staging configurado é inválido");
+    }
+    if (loaded.config.allowEgress === true) {
+      return isolatedFailure(
+        "egress externo está proibido no staging de homologação; transmissão fiscal externa não é permitida",
+      );
     }
     if (!this.enabled) {
       return isolatedFailure(
@@ -195,8 +202,11 @@ export class StagingDeployIntegrationService {
       dependencyHealthchecks,
       imageIdentity: {
         projectId: input.projectId,
+        projectAliases: imageAliases(input),
         commitSha: input.commitSha.toLowerCase(),
         imageReference: input.imageReference.trim(),
+        expectedOs: "linux",
+        expectedArchitecture: hostArchitecture(),
         observed: { imageId: "", repoDigests: [], labels: {} },
       },
       deployJobId: input.deployJobId,
@@ -236,6 +246,7 @@ export class StagingDeployIntegrationService {
    */
   async verifyImageUnchanged(input: {
     projectId: string;
+    projectName?: string | null;
     commitSha: string;
     imageReference: string;
     expectedImageId: string | null;
@@ -244,9 +255,12 @@ export class StagingDeployIntegrationService {
     try {
       const verified = await this.imageVerifier.verify({
         projectId: input.projectId,
+        projectAliases: imageAliases(input),
         commitSha: input.commitSha.toLowerCase(),
         imageReference: input.imageReference,
         expectedImageId: input.expectedImageId,
+        expectedOs: "linux",
+        expectedArchitecture: hostArchitecture(),
         observed: { imageId: "", repoDigests: [], labels: {} },
       });
       return verified.ok && verified.identityVerified && verified.imageId === input.expectedImageId;
@@ -288,6 +302,15 @@ export class StagingDeployIntegrationService {
 
 function isolatedFailure(...issues: string[]): StagingDeployPrepareResult {
   return { mode: "isolated", ok: false, legacy: false, issues, runId: null, composeHash: null, imageId: null };
+}
+
+function imageAliases(input: { projectName?: string | null }): string[] {
+  const alias = stagingProjectAlias(input.projectName);
+  return alias ? [alias] : [];
+}
+
+function hostArchitecture(): string {
+  return process.arch === "arm64" ? "arm64" : "amd64";
 }
 
 function isCompleteCommit(value: string): boolean {

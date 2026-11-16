@@ -377,6 +377,36 @@ describe("verifyPrebuiltImageIdentity", () => {
     expect(result.originAuthenticated).toBe(false);
   });
 
+  it("aceita alias de projeto derivado do nome, além do UUID", () => {
+    const aliasBase = {
+      ...base,
+      projectId: "uuid-do-projeto",
+      projectAliases: ["mesatta"],
+      observed: {
+        ...base.observed,
+        labels: { ...base.observed.labels, "korrelo.projectId": "mesatta" },
+      },
+    };
+    expect(verifyPrebuiltImageIdentity(aliasBase).ok).toBe(true);
+    expect(
+      verifyPrebuiltImageIdentity({
+        ...aliasBase,
+        observed: {
+          ...aliasBase.observed,
+          labels: { ...aliasBase.observed.labels, "korrelo.projectId": "outro" },
+        },
+      }).ok,
+    ).toBe(false);
+  });
+
+  it("recusa arquitetura ou SO divergente quando exigidos", () => {
+    expect(
+      verifyPrebuiltImageIdentity({ ...base, expectedOs: "linux", expectedArchitecture: "amd64" }).ok,
+    ).toBe(true);
+    expect(verifyPrebuiltImageIdentity({ ...base, expectedArchitecture: "arm64" }).ok).toBe(false);
+    expect(verifyPrebuiltImageIdentity({ ...base, expectedOs: "windows" }).ok).toBe(false);
+  });
+
   it("recusa latest, labels divergentes e image ID ausente", () => {
     expect(verifyPrebuiltImageIdentity({ ...base, imageReference: "repo/app:latest" }).ok).toBe(false);
     expect(verifyPrebuiltImageIdentity({ ...base, observed: { ...base.observed, labels: {} } }).ok).toBe(false);
