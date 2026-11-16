@@ -89,4 +89,85 @@ describe("ReadOnlyDockerInventoryReader", () => {
     expect(snapshot.error).toBeTruthy();
     expect(snapshot.containers).toEqual([]);
   });
+
+  it("volume sem labels (null) é inventário válido e não ganha ownership", async () => {
+    mockedRunCommand
+      .mockResolvedValueOnce(result(""))
+      .mockResolvedValueOnce(result("bridge\n"))
+      .mockResolvedValueOnce(result("anon-data\n"))
+      .mockResolvedValueOnce(result("null"))
+      .mockResolvedValueOnce(result("null"));
+
+    const snapshot = await new ReadOnlyDockerInventoryReader().inspect();
+
+    expect(snapshot.complete).toBe(true);
+    expect(snapshot.error).toBeNull();
+    expect(snapshot.volumes).toEqual([{ name: "anon-data", labels: {} }]);
+    expect(snapshot.networks).toEqual([{ name: "bridge", labels: {} }]);
+    // Nenhuma label inventada: sem labels, sem ownership.
+    expect(snapshot.volumes[0].labels["korrelo.projectId"]).toBeUndefined();
+    expect(snapshot.volumes[0].labels["korrelo.stagingRunId"]).toBeUndefined();
+  });
+
+  it("mistura de null, {} e volume de outro projeto preserva as labels existentes", async () => {
+    mockedRunCommand
+      .mockResolvedValueOnce(result(""))
+      .mockResolvedValueOnce(result("bridge\n"))
+      .mockResolvedValueOnce(result("vazio\nanonimo\ndo-outro\n"))
+      .mockResolvedValueOnce(result("null"))
+      .mockResolvedValueOnce(result("{}"))
+      .mockResolvedValueOnce(result("null"))
+      .mockResolvedValueOnce(result('{"korrelo.projectId":"projeto-outro","korrelo.stagingRunId":"run-outro"}'));
+
+    const snapshot = await new ReadOnlyDockerInventoryReader().inspect();
+
+    expect(snapshot.complete).toBe(true);
+    expect(snapshot.volumes).toEqual([
+      { name: "vazio", labels: {} },
+      { name: "anonimo", labels: {} },
+      { name: "do-outro", labels: { "korrelo.projectId": "projeto-outro", "korrelo.stagingRunId": "run-outro" } },
+    ]);
+  });
+
+  it("labels malformadas continuam falhando fechado", async () => {
+    mockedRunCommand
+      .mockResolvedValueOnce(result(""))
+      .mockResolvedValueOnce(result("bridge\n"))
+      .mockResolvedValueOnce(result("volume-a\n"))
+      .mockResolvedValueOnce(result("{}"))
+      .mockResolvedValueOnce(result("nao-e-json"));
+
+    const snapshot = await new ReadOnlyDockerInventoryReader().inspect();
+
+    expect(snapshot.complete).toBe(false);
+    expect(snapshot.error).toMatch(/labels de volume/i);
+  });
+
+  it("labels em formato inesperado (array) continuam falhando fechado", async () => {
+    mockedRunCommand
+      .mockResolvedValueOnce(result(""))
+      .mockResolvedValueOnce(result("bridge\n"))
+      .mockResolvedValueOnce(result("volume-a\n"))
+      .mockResolvedValueOnce(result("[]"))
+      .mockResolvedValueOnce(result("{}"));
+
+    const snapshot = await new ReadOnlyDockerInventoryReader().inspect();
+
+    expect(snapshot.complete).toBe(false);
+    expect(snapshot.error).toMatch(/labels de network/i);
+  });
+
+  it("falha do Docker ao inspecionar volume continua falhando fechado", async () => {
+    mockedRunCommand
+      .mockResolvedValueOnce(result(""))
+      .mockResolvedValueOnce(result("bridge\n"))
+      .mockResolvedValueOnce(result("volume-a\n"))
+      .mockResolvedValueOnce(result("{}"))
+      .mockResolvedValueOnce(result("", 1));
+
+    const snapshot = await new ReadOnlyDockerInventoryReader().inspect();
+
+    expect(snapshot.complete).toBe(false);
+    expect(snapshot.volumes).toEqual([]);
+  });
 });

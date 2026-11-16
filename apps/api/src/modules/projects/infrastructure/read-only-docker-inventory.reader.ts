@@ -116,8 +116,14 @@ export class ReadOnlyDockerInventoryReader implements StagingDockerInventoryRead
   ): Promise<{ ok: true; labels: Record<string, string> } | { ok: false; error: string }> {
     const result = await this.runDocker([kind, "inspect", "--format", "{{json .Labels}}", name]);
     if (!result.ok) return { ok: false, error: result.error };
+    const raw = result.stdout.trim();
+    // `docker <kind> inspect --format '{{json .Labels}}'` devolve a STRING "null" (JSON válido) para
+    // recurso sem labels — ex.: volume anônimo declarado pela imagem (mongo:7 cria /data/configdb).
+    // Isso NÃO é falha de leitura e NÃO é dado malformado: é "sem labels". `null` vira conjunto
+    // vazio, igual a `{}`. Ausência de labels NUNCA concede ownership a ninguém.
+    if (raw === "" || raw === "null") return { ok: true, labels: {} };
     try {
-      const parsed = JSON.parse(result.stdout.trim() || "{}") as unknown;
+      const parsed = JSON.parse(raw) as unknown;
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
         return { ok: false, error: `labels de ${kind} inválidas` };
       }
