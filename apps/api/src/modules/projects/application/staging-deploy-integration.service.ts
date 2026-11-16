@@ -121,7 +121,7 @@ export class StagingDeployIntegrationService {
         );
       }
     }
-    const explicitEnv = await this.resolveExplicitEnv(input.projectId, loaded.config.env);
+    const explicitEnv = await this.resolveExplicitEnv(input.projectId, loaded.config.env ?? []);
     if (!explicitEnv.ok) {
       return isolatedFailure(...explicitEnv.issues);
     }

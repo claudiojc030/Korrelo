@@ -1,0 +1,33 @@
+{
+  "collectedAt": "2026-11-16T18:00:00.000Z",
+  "tool": { "name": "fixture", "version": 1, "readOnly": true },
+  "host": { "nproc": 4, "loadavg": [0.4, 0.5, 0.3], "kernel": "fixture", "uptimeSeconds": 86400 },
+  "memory": {
+    "totalMb": 8192,
+    "freeMb": 1200,
+    "availableMb": 5000,
+    "buffersMb": 200,
+    "cachedMb": 3000,
+    "swapTotalMb": 2048,
+    "swapFreeMb": 1800
+  },
+  "psi": { "memory": { "some10": 0.2, "full10": 0 }, "cpu": { "some10": 1 }, "io": { "some10": 0.1 } },
+  "oom": { "source": "fixture", "available": true, "events24h": 0, "samples": [] },
+  "disk": {
+    "root": { "path": "/", "totalGb": 80, "freeGb": 40, "usedPercent": 50, "totalInodes": 1000000, "freeInodes": 900000 },
+    "docker": { "path": "/var/lib/docker", "totalGb": 80, "freeGb": 40, "usedPercent": 50, "totalInodes": 1000000, "freeInodes": 900000 }
+  },
+  "dockerDisk": { "path": "/var/lib/docker", "totalGb": 80, "freeGb": 40, "usedPercent": 50, "totalInodes": 1000000, "freeInodes": 900000 },
+  "docker": {
+    "reachable": true,
+    "version": "27.0.0|amd64|linux",
+    "error": null,
+    "systemDf": "TYPE TOTAL ACTIVE SIZE RECLAIMABLE",
+    "buildxCache": null,
+    "containers": [
+      { "name": "/mesatta", "image": "mesatta:prod", "memLimitMb": 1024, "cpuLimit": 1, "pidsLimit": 256, "restarts": 0, "oomKilled": false, "exitCode": 0, "health": "healthy", "state": "running", "stats": { "cpuPercent": "1%", "memUsage": "400MiB / 1GiB", "memPercent": "40%" } },
+      { "name": "/evolution", "image": "evolution:latest", "memLimitMb": 512, "cpuLimit": 0.5, "pidsLimit": null, "restarts": 0, "oomKilled": false, "exitCode": 0, "health": "none", "state": "running", "stats": { "cpuPercent": "0.5%", "memUsage": "120MiB / 512MiB", "memPercent": "23%" } }
+    ],
+    "containersError": null
+  }
+}
