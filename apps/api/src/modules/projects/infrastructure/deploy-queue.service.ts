@@ -37,8 +37,22 @@ import { PROJECT_REPOSITORY, type ProjectRepository } from "../domain/project.re
  *   volta pra fila (com backoff) em vez de derrubar a VPS.
  */
 const POLL_INTERVAL_MS = 2_000;
-const MAX_RESOURCE_ATTEMPTS = 5;
-const RESOURCE_BACKOFF_BASE_MS = 60_000;
+
+/** Lê inteiro positivo de env, com fallback (tuning operacional, sem schema). */
+function envInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/**
+ * Quantas vezes o worker tenta de novo quando o host está sem folga.
+ * Configurável para o operador ajustar a janela de espera sem deploy de
+ * código; o default (5 × 60 s crescentes ≈ 10 min) é o mesmo de antes.
+ */
+const MAX_RESOURCE_ATTEMPTS = envInt("KORRELO_DEPLOY_RESOURCE_MAX_ATTEMPTS", 5);
+const RESOURCE_BACKOFF_BASE_MS = envInt("KORRELO_DEPLOY_RESOURCE_BACKOFF_MS", 60_000);
 /**
  * Validade do drain: se um update morrer no meio e ninguém liberar, os
  * deploys voltam sozinhos depois deste tempo (nada fica pausado para sempre).
@@ -81,6 +95,17 @@ export interface EnqueueResult {
   created: boolean;
   /** true quando o worker está em drain: o job fica na fila, mas não começa. */
   deferred?: boolean;
+}
+
+export interface DeployJobRuntimeState {
+  /** Job enfileirado antes do último boot do Core (precisa de resume explícito). */
+  paused: boolean;
+  /** true quando está na fila aguardando folga de recursos (backoff). */
+  waitingForResources: boolean;
+  /** Próxima verificação do preflight (ISO), quando conhecida. */
+  nextAttemptAt: string | null;
+  /** Limite de tentativas por falta de recursos (para o painel). */
+  maxResourceAttempts: number;
 }
 
 export interface DeployQueueStats {
@@ -264,7 +289,39 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
    * - manual: um job em aberto por projeto (commit é resolvido na hora de
    *   rodar, porque no agendamento ainda não sabemos qual commit é).
    */
+  private readonly enqueueChains = new Map<string, Promise<void>>();
+
+  /**
+   * Serializa o enfileiramento POR PROJETO.
+   *
+   * `findOpenByProject` + `create` não é atômico: dois cliques manuais
+   * simultâneos (ou dois retries da UI) poderiam passar juntos pelo "não tem
+   * job aberto" e criar dois jobs para o mesmo projeto. Com a cadeia por
+   * projeto, a segunda chamada só avalia depois que a primeira terminou de
+   * persistir. O Core roda um worker por processo; o `WorkerLock` continua
+   * sendo a barreira entre processos.
+   */
   async enqueue(params: EnqueueParams): Promise<EnqueueResult> {
+    const previous = this.enqueueChains.get(params.projectId) ?? Promise.resolve();
+    const current = previous.then(
+      () => this.enqueueSerial(params),
+      () => this.enqueueSerial(params),
+    );
+    const tail = current.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.enqueueChains.set(params.projectId, tail);
+    try {
+      return await current;
+    } finally {
+      if (this.enqueueChains.get(params.projectId) === tail) {
+        this.enqueueChains.delete(params.projectId);
+      }
+    }
+  }
+
+  private async enqueueSerial(params: EnqueueParams): Promise<EnqueueResult> {
     // ESTADO INDETERMINADO: nenhum deploy (auto, webhook ou manual) do MESMO
     // projeto pode começar até reconciliação segura. Outros projetos seguem.
     const project = await this.projectRepository.findById(params.projectId);
@@ -286,7 +343,23 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
         // iniciado). O push novo entra na fila e roda depois.
         return { job: open, created: false };
       }
-      if (params.trigger === "webhook") {
+      if (open.status === "queued" && this.pausedJobIds.has(open.id) && params.trigger !== "webhook") {
+        // Deploy MANUAL/staging é ação explícita do operador. Um job que ficou
+        // pausado no startup (enfileirado antes da última atualização do
+        // Korrelo) NÃO pode engolir esse clique: antes, o `enqueue` devolvia o
+        // job pausado como se fosse o novo, nada rodava e a UI mostrava
+        // sucesso. Aqui o job pausado é encerrado e o pedido explícito cria um
+        // job novo, que resolve o commit atual da branch ao rodar.
+        // A persistência vem ANTES de tirar da lista de pausados: se o save
+        // falhar, o job continua pausado (não vira um job solto que ninguém
+        // reivindica).
+        await this.jobRepository.save(
+          open.withError("Substituído por um deploy manual explícito", "canceled"),
+        );
+        this.pausedJobIds.delete(open.id);
+        this.resourceWaitUntil.delete(open.id);
+        this.logger.log(`[deploy] job pausado ${open.id} substituído por deploy ${params.trigger} explícito`);
+      } else if (params.trigger === "webhook") {
         // Coalescência: o job na fila era de um commit superseded.
         this.logger.log(
           `[deploy] job ${open.id} (commit ${open.commitSha ?? "?"}) cancelado: substituído por ${params.commitSha ?? "?"}`,
@@ -296,6 +369,9 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
         );
         this.resourceWaitUntil.delete(canceled.id);
       } else {
+        // Job já na fila para este projeto: não duplica. O worker o pega pelo
+        // timer; o kick só antecipa quando ele está livre.
+        if (!this.isDraining()) this.kick();
         return { job: open, created: false };
       }
     }
@@ -369,6 +445,39 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
 
   async findRecent(limit = 20): Promise<DeployJob[]> {
     return this.jobRepository.findRecent(limit);
+  }
+
+  /**
+   * Estado OPERACIONAL de um job para o painel: pausa de startup, espera por
+   * recursos e próximo instante de verificação. Tudo em memória do processo
+   * do worker (o mesmo que executa), sem gravar nada.
+   */
+  describeJob(job: DeployJob, now = Date.now()): DeployJobRuntimeState {
+    const until = this.resourceWaitUntil.get(job.id) ?? null;
+    return {
+      paused: this.pausedJobIds.has(job.id),
+      waitingForResources: job.status === "queued" && job.stage === "waiting-resources",
+      nextAttemptAt: until !== null && until > now ? new Date(until).toISOString() : null,
+      maxResourceAttempts: MAX_RESOURCE_ATTEMPTS,
+    };
+  }
+
+  /**
+   * Cancela uma SOLICITAÇÃO ainda na fila. Job em execução nunca é cancelado
+   * (o build já começou e derrubá-lo no meio é pior que esperar terminar).
+   */
+  async cancel(jobId: string): Promise<
+    { ok: true; job: DeployJob } | { ok: false; reason: "not_found" | "not_queued"; job: DeployJob | null }
+  > {
+    const job = await this.jobRepository.findById(jobId);
+    if (!job) return { ok: false, reason: "not_found", job: null };
+    if (job.status !== "queued") return { ok: false, reason: "not_queued", job };
+
+    const canceled = await this.jobRepository.save(job.withError("Cancelado pelo operador", "canceled"));
+    this.pausedJobIds.delete(jobId);
+    this.resourceWaitUntil.delete(jobId);
+    this.logger.log(`[deploy] job ${jobId} cancelado pelo operador (estava na fila)`);
+    return { ok: true, job: canceled };
   }
 
   /**
@@ -462,6 +571,15 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
     }, 0);
   }
 
+  /** Ids em espera de recursos (backoff ainda válido). */
+  private waitingJobIds(now = Date.now()): string[] {
+    const ids: string[] = [];
+    for (const [id, until] of this.resourceWaitUntil) {
+      if (until > now) ids.push(id);
+    }
+    return ids;
+  }
+
   /**
    * Processa o PRÓXIMO job da fila (se houver).
    *
@@ -484,7 +602,14 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
       if (!acquired) return;
 
       try {
-        const job = await this.jobRepository.findNextQueued([...this.pausedJobIds]);
+        // Fairness: um job aguardando recursos (backoff) NÃO bloqueia os
+        // outros projetos da fila. Antes, o job mais antigo em espera era
+        // devolvido pelo findNextQueued e o worker retornava sem olhar os
+        // demais (head-of-line blocking).
+        const job = await this.jobRepository.findNextQueued([
+          ...this.pausedJobIds,
+          ...this.waitingJobIds(),
+        ]);
         if (!job) return;
 
         const waitUntil = this.resourceWaitUntil.get(job.id);

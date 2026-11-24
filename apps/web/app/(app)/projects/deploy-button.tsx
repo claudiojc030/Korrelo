@@ -12,16 +12,30 @@ export function DeployButton({ projectId, onDeployed }: { projectId: string; onD
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function handleDeploy() {
     setLoading(true);
     setError(null);
+    setNotice(null);
     try {
       const res = await apiFetch(`/projects/${projectId}/deploy`, { method: "POST" });
       if (!res.ok) {
         const body: unknown = await res.json().catch(() => ({}));
         throw new Error(translateApiError(t, body, t.projects.deployError));
       }
+      // 202 nao significa "concluido": mostra se o pedido criou job novo, se
+      // ja havia um na fila ou se o worker esta em manutencao (deferred).
+      const body = (await res.json().catch(() => null)) as
+        | { created?: boolean; deferred?: boolean }
+        | null;
+      setNotice(
+        body?.deferred
+          ? t.projectDetail.deployDeferred
+          : body?.created === false
+            ? t.projectDetail.deployAlreadyQueued
+            : null,
+      );
       router.refresh();
       onDeployed?.();
     } catch (err) {
@@ -41,6 +55,7 @@ export function DeployButton({ projectId, onDeployed }: { projectId: string; onD
         {loading ? <Loader2 size={14} className="animate-spin" /> : <Rocket size={14} strokeWidth={1.75} />}
         {loading ? t.projects.deploying : t.projects.deployAction}
       </button>
+      {notice && <p className="text-[12px] text-muted-foreground">{notice}</p>}
       {error && <p className="text-[12px] text-destructive">{error}</p>}
     </div>
   );

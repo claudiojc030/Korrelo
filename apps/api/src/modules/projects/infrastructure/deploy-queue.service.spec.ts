@@ -404,6 +404,439 @@ describe("DeployQueueService (fila global)", () => {
     expect(deploy.executed).toEqual(["proj-a"]);
   });
 
+  it("deploy MANUAL explicito substitui o job pausado no startup (não fica preso)", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const deploy = new FakeDeployProject();
+
+    const oldJob = new DeployJob(
+      "job-pausado",
+      "proj-a",
+      "sha-antigo",
+      "main",
+      "webhook",
+      "queued",
+      0,
+      "queued",
+      "Pausado: o job foi enfileirado antes da última atualização do Korrelo.",
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(Date.now() - 60_000),
+      null,
+      null,
+    );
+    await repo.save(oldJob);
+
+    const queue = buildQueue(repo, new FakePreflight(), deploy);
+    await queue.pausePreExistingJobs();
+    expect(queue.listPausedJobIds()).toContain("job-pausado");
+
+    const result = await queue.enqueue({
+      projectId: "proj-a",
+      commitSha: null,
+      branch: "main",
+      trigger: "manual",
+    });
+
+    // O clique manual é uma ação explícita do operador: não pode ser engolido
+    // pelo job antigo pausado.
+    expect(result.created).toBe(true);
+    expect(result.job.id).not.toBe("job-pausado");
+    expect(queue.listPausedJobIds()).not.toContain("job-pausado");
+    const old = await repo.findById("job-pausado");
+    expect(old?.status).toBe("canceled");
+
+    // E o job novo realmente chega ao executor.
+    await queue.processNextJob();
+    expect(deploy.executed).toEqual(["proj-a"]);
+  });
+
+  it("job RUNNING nunca é cancelado nem substituído por deploy manual", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const deploy = new FakeDeployProject();
+    const running = new DeployJob(
+      "job-running",
+      "proj-a",
+      "sha-1",
+      "main",
+      "webhook",
+      "running",
+      1,
+      "promote",
+      null,
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(Date.now() - 5_000),
+      new Date(),
+      null,
+    );
+    await repo.save(running);
+    const queue = buildQueue(repo, new FakePreflight(), deploy);
+
+    const result = await queue.enqueue({
+      projectId: "proj-a",
+      commitSha: null,
+      branch: "main",
+      trigger: "manual",
+    });
+
+    expect(result.created).toBe(false);
+    expect(result.job.id).toBe("job-running");
+    expect((await repo.findById("job-running"))?.status).toBe("running");
+    expect((await repo.findAllByStatus("running")).length).toBe(1);
+  });
+
+  it("dois cliques manuais SIMULTÂNEOS não criam dois jobs", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const deploy = new FakeDeployProject();
+    const queue = buildQueue(repo, new FakePreflight(), deploy);
+
+    const [a, b] = await Promise.all([
+      queue.enqueue({ projectId: "proj-a", commitSha: null, branch: "main", trigger: "manual" }),
+      queue.enqueue({ projectId: "proj-a", commitSha: null, branch: "main", trigger: "manual" }),
+    ]);
+
+    const jobs = [...repo.jobs.values()].filter((job) => job.projectId === "proj-a");
+    expect(jobs).toHaveLength(1);
+    expect([a.created, b.created].filter(Boolean)).toHaveLength(1);
+    expect(a.job.id).toBe(b.job.id);
+  });
+
+  it("job manual novo resolve o commit na execução (commitSha nulo no agendamento)", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const deploy = new FakeDeployProject();
+    const queue = buildQueue(repo, new FakePreflight(), deploy);
+
+    const result = await queue.enqueue({
+      projectId: "proj-a",
+      commitSha: null,
+      branch: "main",
+      trigger: "manual",
+    });
+
+    expect(result.created).toBe(true);
+    expect(result.job.commitSha).toBeNull();
+    expect(result.job.branch).toBe("main");
+    expect(result.job.trigger).toBe("manual");
+  });
+
+  it("um SEGUNDO restart mantém o webhook antigo pausado (nada roda sozinho)", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const deploy = new FakeDeployProject();
+    const oldJob = new DeployJob(
+      "job-webhook-antigo",
+      "proj-a",
+      "sha-antigo",
+      "main",
+      "webhook",
+      "queued",
+      0,
+      "queued",
+      null,
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(Date.now() - 120_000),
+      null,
+      null,
+    );
+    await repo.save(oldJob);
+
+    const primeiroBoot = buildQueue(repo, new FakePreflight(), deploy);
+    await primeiroBoot.pausePreExistingJobs();
+    await primeiroBoot.processNextJob();
+
+    // Simula um segundo restart: outra instância, mesmo banco.
+    const segundoBoot = buildQueue(repo, new FakePreflight(), deploy);
+    await segundoBoot.pausePreExistingJobs();
+    await segundoBoot.processNextJob();
+
+    expect(deploy.executed).toEqual([]);
+    expect(segundoBoot.listPausedJobIds()).toContain("job-webhook-antigo");
+    expect((await repo.findById("job-webhook-antigo"))?.status).toBe("queued");
+  });
+
+  it("falha ao cancelar o job pausado NÃO cria job novo nem deixa o antigo solto", async () => {
+    class SaveFailingRepository extends InMemoryDeployJobRepository {
+      failCanceledSave = true;
+      override async save(job: DeployJob): Promise<DeployJob> {
+        if (this.failCanceledSave && job.status === "canceled") {
+          this.failCanceledSave = false;
+          throw new Error("sqlite indisponível");
+        }
+        return super.save(job);
+      }
+    }
+
+    const repo = new SaveFailingRepository();
+    const deploy = new FakeDeployProject();
+    const oldJob = new DeployJob(
+      "job-pausado",
+      "proj-a",
+      "sha-antigo",
+      "main",
+      "webhook",
+      "queued",
+      0,
+      "queued",
+      "Pausado no startup.",
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(Date.now() - 60_000),
+      null,
+      null,
+    );
+    await repo.save(oldJob);
+
+    const queue = buildQueue(repo, new FakePreflight(), deploy);
+    await queue.pausePreExistingJobs();
+
+    await expect(
+      queue.enqueue({ projectId: "proj-a", commitSha: null, branch: "main", trigger: "manual" }),
+    ).rejects.toThrow(/sqlite indisponível/);
+
+    // O job antigo continua QUEUED e PAUSADO; nenhum job novo foi criado.
+    expect([...repo.jobs.values()].filter((job) => job.projectId === "proj-a")).toHaveLength(1);
+    expect((await repo.findById("job-pausado"))?.status).toBe("queued");
+    expect(queue.listPausedJobIds()).toContain("job-pausado");
+
+    await queue.processNextJob();
+    expect(deploy.executed).toEqual([]);
+  });
+
+  it("job em espera de recursos NÃO bloqueia outro projeto (fairness)", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const preflight = new FakePreflight();
+    const deploy = new FakeDeployProject();
+
+    const mk = (id: string, projectId: string, offsetMs: number) =>
+      new DeployJob(
+        id,
+        projectId,
+        null,
+        "main",
+        "manual",
+        "queued",
+        0,
+        "queued",
+        null,
+        "",
+        null,
+        null,
+        false,
+        false,
+        null,
+        null,
+        null,
+        new Date(Date.now() - offsetMs),
+        null,
+        null,
+      );
+    await repo.save(mk("job-a", "proj-a", 5_000));
+    await repo.save(mk("job-b", "proj-b", 1_000));
+
+    const queue = buildQueue(repo, preflight, deploy);
+
+    preflight.ok = false;
+    preflight.reason = "sem memória";
+    await queue.processNextJob(); // job-a entra em backoff de recursos
+    expect((await repo.findById("job-a"))?.stage).toBe("waiting-resources");
+    expect(deploy.executed).toEqual([]);
+
+    preflight.ok = true;
+    preflight.reason = null;
+    await queue.processNextJob(); // job-b não pode ficar atrás do job-a
+
+    expect(deploy.executed).toEqual(["proj-b"]);
+  });
+
+  it("cancelar só vale para job na fila; running é recusado", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const deploy = new FakeDeployProject();
+    const queued = new DeployJob(
+      "job-queued",
+      "proj-a",
+      null,
+      "main",
+      "manual",
+      "queued",
+      0,
+      "waiting-resources",
+      "Recursos insuficientes",
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(Date.now() - 1_000),
+      null,
+      null,
+    );
+    const running = new DeployJob(
+      "job-running",
+      "proj-b",
+      "sha-1",
+      "main",
+      "manual",
+      "running",
+      1,
+      "building",
+      null,
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(Date.now() - 2_000),
+      new Date(),
+      null,
+    );
+    await repo.save(queued);
+    await repo.save(running);
+    const queue = buildQueue(repo, new FakePreflight(), deploy);
+
+    const canceled = await queue.cancel("job-queued");
+    expect(canceled.ok).toBe(true);
+    expect((await repo.findById("job-queued"))?.status).toBe("canceled");
+
+    await queue.processNextJob();
+    expect(deploy.executed).toEqual([]);
+
+    const refused = await queue.cancel("job-running");
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.reason).toBe("not_queued");
+    expect((await repo.findById("job-running"))?.status).toBe("running");
+
+    const missing = await queue.cancel("job-inexistente");
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.reason).toBe("not_found");
+  });
+
+  it("describeJob informa espera, próximo teste e tentativas; pausa aparece", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const preflight = new FakePreflight();
+    const deploy = new FakeDeployProject();
+    const job = new DeployJob(
+      "job-wait",
+      "proj-a",
+      null,
+      "main",
+      "webhook",
+      "queued",
+      0,
+      "queued",
+      null,
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(Date.now() - 1_000),
+      null,
+      null,
+    );
+    await repo.save(job);
+    const queue = buildQueue(repo, preflight, deploy);
+
+    preflight.ok = false;
+    preflight.reason = "sem memória";
+    await queue.processNextJob();
+
+    const waiting = queue.describeJob(await repo.findById("job-wait") as DeployJob);
+    expect(waiting.waitingForResources).toBe(true);
+    expect(waiting.paused).toBe(false);
+    expect(waiting.maxResourceAttempts).toBeGreaterThan(0);
+    expect(waiting.nextAttemptAt).not.toBeNull();
+
+    const pausedQueue = buildQueue(repo, preflight, new FakeDeployProject());
+    await pausedQueue.pausePreExistingJobs();
+    const paused = pausedQueue.describeJob(await repo.findById("job-wait") as DeployJob);
+    expect(paused.paused).toBe(true);
+  });
+
+  it("job aguardando recursos é retomado sozinho quando o host fica seguro", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const preflight = new FakePreflight();
+    const deploy = new FakeDeployProject();
+    const job = new DeployJob(
+      "job-espera",
+      "proj-a",
+      null,
+      "main",
+      "manual",
+      "queued",
+      0,
+      "queued",
+      null,
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(Date.now() - 1_000),
+      null,
+      null,
+    );
+    await repo.save(job);
+    const queue = buildQueue(repo, preflight, deploy);
+
+    const base = Date.now();
+    const spy = jest.spyOn(Date, "now").mockReturnValue(base);
+
+    preflight.ok = false;
+    preflight.reason = "sem memória";
+    await queue.processNextJob();
+    expect(deploy.executed).toEqual([]);
+    expect((await repo.findById("job-espera"))?.stage).toBe("waiting-resources");
+
+    // Host fica seguro, mas ainda dentro do backoff: NÃO inicia.
+    preflight.ok = true;
+    preflight.reason = null;
+    await queue.processNextJob();
+    expect(deploy.executed).toEqual([]);
+
+    // Passou o backoff: o próximo tick retoma sozinho.
+    spy.mockReturnValue(base + 61_000);
+    await queue.processNextJob();
+    spy.mockRestore();
+
+    expect(deploy.executed).toEqual(["proj-a"]);
+  });
+
   it("job criado DEPOIS do startup não é pausado (push novo roda normalmente)", async () => {
     const repo = new InMemoryDeployJobRepository();
     const deploy = new FakeDeployProject();

@@ -49,6 +49,30 @@ export interface ProjectDetailDict {
   triggeredByWebhook: string;
   triggeredByManual: string;
   noDeployLogYet: string;
+  // deploy-jobs-panel.tsx
+  deployJobsTitle: string;
+  deployJobPhaseReceived: string;
+  deployJobPhaseWaiting: string;
+  deployJobPhasePaused: string;
+  deployJobPhaseStarting: string;
+  deployJobPhaseFetching: string;
+  deployJobPhaseBuilding: string;
+  deployJobPhaseStaging: string;
+  deployJobPhasePromoting: string;
+  deployJobPhaseSucceeded: string;
+  deployJobPhaseFailed: string;
+  deployJobPhaseCanceled: string;
+  deployJobPhaseInterrupted: string;
+  deployJobAttempt: string;
+  deployJobNextCheck: string;
+  deployJobCancel: string;
+  deployJobResume: string;
+  deployJobTriggerManual: string;
+  deployJobTriggerWebhook: string;
+  deployJobTriggerStaging: string;
+  deployJobActionFailed: string;
+  deployAlreadyQueued: string;
+  deployDeferred: string;
 
   // domain-card.tsx
   customDomainTitle: string;
@@ -132,6 +156,29 @@ export const projectDetailEn: ProjectDetailDict = {
   deployStatusInProgress: "In progress",
   triggeredByWebhook: "automatic push",
   triggeredByManual: "manual",
+  deployJobsTitle: "Deploy queue",
+  deployJobPhaseReceived: "Request received",
+  deployJobPhaseWaiting: "Waiting for VPS resources",
+  deployJobPhasePaused: "Paused after restart — needs resume",
+  deployJobPhaseStarting: "Starting",
+  deployJobPhaseFetching: "Fetching repository",
+  deployJobPhaseBuilding: "Build started",
+  deployJobPhaseStaging: "Validating staging",
+  deployJobPhasePromoting: "Promoting to production",
+  deployJobPhaseSucceeded: "Deploy completed",
+  deployJobPhaseFailed: "Deploy failed",
+  deployJobPhaseCanceled: "Request canceled",
+  deployJobPhaseInterrupted: "Interrupted by restart",
+  deployJobAttempt: "attempt {attempt}/{max}",
+  deployJobNextCheck: "next check at {time}",
+  deployJobCancel: "Cancel request",
+  deployJobResume: "Resume",
+  deployJobTriggerManual: "manual",
+  deployJobTriggerWebhook: "automatic push",
+  deployJobTriggerStaging: "staging only",
+  deployJobActionFailed: "Couldn't perform the action. Try again.",
+  deployAlreadyQueued: "A deploy for this project is already queued or running — follow it above.",
+  deployDeferred: "Worker is in maintenance; the deploy was queued and will start automatically.",
   noDeployLogYet: "No log yet.",
 
   customDomainTitle: "Custom domain",
@@ -218,6 +265,29 @@ export const projectDetailPt: ProjectDetailDict = {
   deployStatusInProgress: "Em andamento",
   triggeredByWebhook: "push automático",
   triggeredByManual: "manual",
+  deployJobsTitle: "Fila de deploy",
+  deployJobPhaseReceived: "Solicitação recebida",
+  deployJobPhaseWaiting: "Aguardando recursos da VPS",
+  deployJobPhasePaused: "Pausado após reinício — precisa retomar",
+  deployJobPhaseStarting: "Iniciando",
+  deployJobPhaseFetching: "Buscando repositório",
+  deployJobPhaseBuilding: "Build iniciado",
+  deployJobPhaseStaging: "Validando staging",
+  deployJobPhasePromoting: "Promovendo para produção",
+  deployJobPhaseSucceeded: "Deploy concluído",
+  deployJobPhaseFailed: "Deploy falhou",
+  deployJobPhaseCanceled: "Solicitação cancelada",
+  deployJobPhaseInterrupted: "Interrompido por reinício",
+  deployJobAttempt: "tentativa {attempt}/{max}",
+  deployJobNextCheck: "próxima verificação às {time}",
+  deployJobCancel: "Cancelar solicitação",
+  deployJobResume: "Retomar",
+  deployJobTriggerManual: "manual",
+  deployJobTriggerWebhook: "push automático",
+  deployJobTriggerStaging: "somente staging",
+  deployJobActionFailed: "Não foi possível concluir a ação. Tente de novo.",
+  deployAlreadyQueued: "Já existe um deploy deste projeto na fila ou em execução — acompanhe acima.",
+  deployDeferred: "Worker em manutenção; o deploy foi enfileirado e começa sozinho.",
   noDeployLogYet: "Nenhum log ainda.",
 
   customDomainTitle: "Domínio personalizado",

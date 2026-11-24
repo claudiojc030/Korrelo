@@ -32,10 +32,17 @@ export class DeployJobsController {
   ) {}
 
   @Get()
-  recent(@Query("limit") limit?: string) {
+  async recent(@Query("limit") limit?: string, @Query("projectId") projectId?: string) {
     const parsed = Number.parseInt(limit ?? "20", 10);
     const safeLimit = Number.isFinite(parsed) ? Math.min(Math.max(parsed, 1), 100) : 20;
-    return this.deployQueue.findRecent(safeLimit);
+    // Filtro por projeto é feito em memória: a lista é pequena (limit ≤ 100) e
+    // evita mudar o repositório por causa de uma consulta de painel.
+    const jobs = await this.deployQueue.findRecent(projectId ? 100 : safeLimit);
+    const filtered = projectId ? jobs.filter((job) => job.projectId === projectId).slice(0, safeLimit) : jobs;
+    return filtered.map((job) => ({
+      ...job,
+      runtime: this.deployQueue.describeJob(job),
+    }));
   }
 
   @Get("stats")
@@ -92,6 +99,27 @@ export class DeployJobsController {
   async cleanupStaging() {
     const outcome = await this.stagingCleanup.cleanupOrphanedStaging();
     return { ok: true, ...outcome };
+  }
+
+  /**
+   * Cancela uma solicitação AINDA NA FILA (nunca um build em execução).
+   * O painel usa isso para desistir de um deploy que está esperando recursos.
+   */
+  @Post(":id/cancel")
+  async cancel(@Param("id") id: string) {
+    const result = await this.deployQueue.cancel(id);
+    if (!result.ok && result.reason === "not_found") {
+      throw new NotFoundException(apiError("DEPLOY_JOB_NOT_FOUND", `Job de deploy "${id}" não encontrado.`));
+    }
+    if (!result.ok) {
+      throw new ConflictException(
+        apiError(
+          "DEPLOY_JOB_NOT_CANCELABLE",
+          `O job "${id}" não está na fila (status ${result.job?.status ?? "?"}). Build em execução não é cancelado.`,
+        ),
+      );
+    }
+    return { ok: true, jobId: result.job.id, status: result.job.status };
   }
 
   @Post(":id/retry")

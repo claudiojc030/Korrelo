@@ -291,13 +291,15 @@ export class ProjectsController {
     // worker executa depois. O commit é resolvido na hora de rodar (é nesse
     // momento que o repositório é buscado e o commit exato é checado out).
     const project = await this.getProject.execute(id);
-    const { job } = await this.deployQueue.enqueue({
+    const { job, created, deferred } = await this.deployQueue.enqueue({
       projectId: project.id,
       commitSha: null,
       branch: project.deployBranch,
       trigger: "manual",
     });
-    return { ok: true, jobId: job.id, status: job.status };
+    // `created`/`deferred` são informativos: o painel não deve tratar um
+    // enfileiramento durante drain como "deploy iniciado".
+    return { ok: true, jobId: job.id, status: job.status, created, deferred: deferred === true };
   }
 
   @Get(":id/deploys")

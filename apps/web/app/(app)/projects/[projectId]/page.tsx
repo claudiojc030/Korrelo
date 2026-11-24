@@ -5,6 +5,7 @@ import { getRequestHostServer } from "../../../../lib/get-request-host-server";
 import { DomainCard } from "./domain-card";
 import { DeployButton } from "../deploy-button";
 import { DeployHistory } from "./deploy-history";
+import { DeployJobsPanel } from "./deploy-jobs-panel";
 import { ReconcileStateControl } from "./reconcile-state";
 import { getProjectPublicUrl } from "../../../../lib/project-public-url";
 import { getLocaleServer } from "../../../../lib/i18n/get-locale-server";
@@ -232,6 +233,8 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
           </p>
         </div>
       </div>
+
+      <DeployJobsPanel projectId={project.id} />
 
       <h2 className="mb-2.5 mt-6 flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
         <History size={14} strokeWidth={1.75} />
