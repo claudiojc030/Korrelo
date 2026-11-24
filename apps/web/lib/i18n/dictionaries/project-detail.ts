@@ -71,6 +71,9 @@ export interface ProjectDetailDict {
   deployJobTriggerWebhook: string;
   deployJobTriggerStaging: string;
   deployJobActionFailed: string;
+  deployJobResourceCapacity: string;
+  deployJobResourceShadow: string;
+  deployJobResourceShadowFallback: string;
   deployAlreadyQueued: string;
   deployDeferred: string;
 
@@ -177,6 +180,10 @@ export const projectDetailEn: ProjectDetailDict = {
   deployJobTriggerWebhook: "automatic push",
   deployJobTriggerStaging: "staging only",
   deployJobActionFailed: "Couldn't perform the action. Try again.",
+  deployJobResourceCapacity: "VPS: {available} MB free · deploy needs {required} MB",
+  deployJobResourceShadow:
+    "SIMULATION (does not decide the deploy): {samples} samples every {interval}s, confidence {confidence} — not a guarantee. Suggests {required} MB and would save {saved} MB.",
+  deployJobResourceShadowFallback: "SIMULATION unavailable: {reason}. Conservative policy kept.",
   deployAlreadyQueued: "A deploy for this project is already queued or running — follow it above.",
   deployDeferred: "Worker is in maintenance; the deploy was queued and will start automatically.",
   noDeployLogYet: "No log yet.",
@@ -286,6 +293,10 @@ export const projectDetailPt: ProjectDetailDict = {
   deployJobTriggerWebhook: "push automático",
   deployJobTriggerStaging: "somente staging",
   deployJobActionFailed: "Não foi possível concluir a ação. Tente de novo.",
+  deployJobResourceCapacity: "VPS: {available} MB livres · deploy precisa de {required} MB",
+  deployJobResourceShadow:
+    "SIMULAÇÃO (não decide o deploy): {samples} amostras a cada {interval}s, confiança {confidence} — não é garantia. Sugere {required} MB e economizaria {saved} MB.",
+  deployJobResourceShadowFallback: "SIMULAÇÃO indisponível: {reason}. Política conservadora mantida.",
   deployAlreadyQueued: "Já existe um deploy deste projeto na fila ou em execução — acompanhe acima.",
   deployDeferred: "Worker em manutenção; o deploy foi enfileirado e começa sozinho.",
   noDeployLogYet: "Nenhum log ainda.",

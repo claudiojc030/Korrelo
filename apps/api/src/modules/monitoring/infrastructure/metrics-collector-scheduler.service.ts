@@ -1,7 +1,8 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { Interval } from "@nestjs/schedule";
 import { RecordMetricSampleUseCase } from "../application/record-metric-sample.use-case";
 import { METRIC_SAMPLE_REPOSITORY, type MetricSampleRepository } from "../domain/metric-sample.repository";
+import { ResourceHistoryService } from "../../projects/infrastructure/resource-history.service";
 
 const COLLECT_INTERVAL_MS = 60_000;
 const PURGE_INTERVAL_MS = 60 * 60 * 1000;
@@ -27,6 +28,9 @@ export class MetricsCollectorSchedulerService {
   constructor(
     private readonly recordMetricSample: RecordMetricSampleUseCase,
     @Inject(METRIC_SAMPLE_REPOSITORY) private readonly repository: MetricSampleRepository,
+    // Opcional para não quebrar testes/instanciações antigas: quando presente,
+    // o MESMO tick alimenta o histórico de recursos (Fase A).
+    @Optional() private readonly resourceHistory?: ResourceHistoryService,
   ) {}
 
   @Interval(COLLECT_INTERVAL_MS)
@@ -45,7 +49,13 @@ export class MetricsCollectorSchedulerService {
     }
     this.collecting = true;
     try {
-      await this.recordMetricSample.execute();
+      const metrics = await this.recordMetricSample.execute();
+      // Só amostra válida (mesma regra do histórico do gráfico) entra no
+      // histórico de recursos. Falha do coletor => histórico não avança e a
+      // política adaptativa cai no modo conservador.
+      if (metrics && this.resourceHistory) {
+        await this.resourceHistory.capture(metrics);
+      }
       this.skippedTicks = 0;
     } catch (error) {
       this.logger.warn(`[metrics] falha ao coletar amostra de métricas: ${error}`);

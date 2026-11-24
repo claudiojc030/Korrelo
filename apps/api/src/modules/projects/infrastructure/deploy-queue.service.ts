@@ -7,6 +7,7 @@ import {
   type DeployJobRepository,
 } from "../domain/deploy-job.repository";
 import { DeployJob, type DeployJobTrigger } from "../domain/deploy-job.entity";
+import type { AdaptiveMemoryResult } from "../domain/adaptive-memory";
 import { WorkerLock } from "./worker-lock";
 import { ResourcePreflightService } from "./resource-preflight.service";
 import { DeployProjectUseCase } from "../application/deploy-project.use-case";
@@ -106,6 +107,21 @@ export interface DeployJobRuntimeState {
   nextAttemptAt: string | null;
   /** Limite de tentativas por falta de recursos (para o painel). */
   maxResourceAttempts: number;
+  /** Última leitura de capacidade/memória usada pelo preflight (read-only). */
+  resourceCheck?: DeployJobResourceCheck | null;
+}
+
+export interface DeployJobResourceCheck {
+  availableMemoryMb: number | null;
+  requiredMemoryMb: number | null;
+  productionLimitMb: number | null;
+  productionUsageMb: number | null;
+  /**
+   * FASE B (SIMULAÇÃO): comparação com a política adaptativa. Não altera a
+   * decisão do preflight; o painel mostra a diferença enquanto se acumula
+   * histórico em produção.
+   */
+  shadow: AdaptiveMemoryResult | null;
 }
 
 export interface DeployQueueStats {
@@ -117,7 +133,7 @@ export interface DeployQueueStats {
   canceled: number;
   lastBuildDurationMs: number | null;
   lastDeployDurationMs: number | null;
-  lastPreflight: Record<string, number | boolean | null> | null;
+  lastPreflight: Record<string, unknown> | null;
   draining: boolean;
 }
 
@@ -150,7 +166,7 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
 
   private lastBuildDurationMs: number | null = null;
   private lastDeployDurationMs: number | null = null;
-  private lastPreflight: Record<string, number | boolean | null> | null = null;
+  private lastPreflight: Record<string, unknown> | null = null;
 
   constructor(
     @Inject(DEPLOY_JOB_REPOSITORY) private readonly jobRepository: DeployJobRepository,
@@ -459,6 +475,24 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
       waitingForResources: job.status === "queued" && job.stage === "waiting-resources",
       nextAttemptAt: until !== null && until > now ? new Date(until).toISOString() : null,
       maxResourceAttempts: MAX_RESOURCE_ATTEMPTS,
+      resourceCheck: this.describeResourceCheck(),
+    };
+  }
+
+  /** Última leitura do preflight, em formato estável para o painel. */
+  private describeResourceCheck(): DeployJobResourceCheck | null {
+    const metrics = this.lastPreflight;
+    if (!metrics) return null;
+    const numberOrNull = (value: unknown): number | null =>
+      typeof value === "number" && Number.isFinite(value) ? value : null;
+    const shadow = metrics.memoryPolicyShadow;
+    return {
+      availableMemoryMb: numberOrNull(metrics.freeMemMb),
+      requiredMemoryMb: numberOrNull(metrics.requiredHostMemoryMb),
+      productionLimitMb: numberOrNull(metrics.productionLimitMb),
+      productionUsageMb: numberOrNull(metrics.productionUsageMb),
+      shadow:
+        shadow && typeof shadow === "object" ? (shadow as AdaptiveMemoryResult) : null,
     };
   }
 
@@ -670,7 +704,7 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
       productionLimitMb,
       productionContainerName,
     });
-    this.lastPreflight = { ...(preflight.metrics as unknown as Record<string, number | boolean | null>) };
+    this.lastPreflight = { ...(preflight.metrics as unknown as Record<string, unknown>) };
 
     if (!preflight.ok) {
       const attempt = job.attempt + 1;

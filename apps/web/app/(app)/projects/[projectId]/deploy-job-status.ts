@@ -13,11 +13,32 @@ export type DeployJobStatus =
   | "interrupted"
   | "canceled";
 
+export interface DeployJobShadowView {
+  basis: "conservative-fallback" | "observed-peak";
+  requiredMb: number;
+  savedMb: number;
+  confidence: string;
+  samples: number;
+  samplingIntervalSeconds?: number;
+  observedPeakMb: number | null;
+  reason: string | null;
+  simulation?: boolean;
+}
+
+export interface DeployJobResourceCheckView {
+  availableMemoryMb: number | null;
+  requiredMemoryMb: number | null;
+  productionLimitMb: number | null;
+  productionUsageMb: number | null;
+  shadow: DeployJobShadowView | null;
+}
+
 export interface DeployJobRuntimeView {
   paused: boolean;
   waitingForResources: boolean;
   nextAttemptAt: string | null;
   maxResourceAttempts: number;
+  resourceCheck?: DeployJobResourceCheckView | null;
 }
 
 export interface DeployJobView {

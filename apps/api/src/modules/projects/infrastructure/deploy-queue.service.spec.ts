@@ -78,8 +78,9 @@ class InMemoryDeployJobRepository implements DeployJobRepository {
 class FakePreflight {
   ok = true;
   reason: string | null = null;
+  metrics: Record<string, unknown> = {};
   async check(): Promise<{ ok: boolean; reason: string | null; metrics: Record<string, unknown> }> {
-    return { ok: this.ok, reason: this.reason, metrics: {} };
+    return { ok: this.ok, reason: this.reason, metrics: this.metrics };
   }
 }
 
@@ -771,6 +772,18 @@ describe("DeployQueueService (fila global)", () => {
 
     preflight.ok = false;
     preflight.reason = "sem memória";
+    preflight.metrics = {
+      freeMemMb: 2370,
+      requiredHostMemoryMb: 2395,
+      productionLimitMb: 1757,
+      productionUsageMb: 386,
+      memoryPolicyShadow: {
+        basis: "observed-peak",
+        requiredMb: 2048,
+        savedMb: 347,
+        confidence: "high",
+      },
+    };
     await queue.processNextJob();
 
     const waiting = queue.describeJob(await repo.findById("job-wait") as DeployJob);
@@ -778,6 +791,13 @@ describe("DeployQueueService (fila global)", () => {
     expect(waiting.paused).toBe(false);
     expect(waiting.maxResourceAttempts).toBeGreaterThan(0);
     expect(waiting.nextAttemptAt).not.toBeNull();
+    expect(waiting.resourceCheck).toMatchObject({
+      availableMemoryMb: 2370,
+      requiredMemoryMb: 2395,
+      productionLimitMb: 1757,
+      productionUsageMb: 386,
+      shadow: { basis: "observed-peak", requiredMb: 2048, savedMb: 347 },
+    });
 
     const pausedQueue = buildQueue(repo, preflight, new FakeDeployProject());
     await pausedQueue.pausePreExistingJobs();

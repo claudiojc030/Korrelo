@@ -187,6 +187,37 @@ export function DeployJobsPanel({ projectId }: { projectId: string }) {
                   {job.errorMessage}
                 </p>
               )}
+              {waiting && job.runtime?.resourceCheck && (
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11.5px] text-muted-foreground">
+                  {job.runtime.resourceCheck.availableMemoryMb !== null &&
+                    job.runtime.resourceCheck.requiredMemoryMb !== null && (
+                      <span>
+                        {t.projectDetail.deployJobResourceCapacity
+                          .replace("{available}", String(job.runtime.resourceCheck.availableMemoryMb))
+                          .replace("{required}", String(job.runtime.resourceCheck.requiredMemoryMb))}
+                      </span>
+                    )}
+                  {job.runtime.resourceCheck.shadow?.basis === "observed-peak" && (
+                    <span>
+                      {t.projectDetail.deployJobResourceShadow
+                        .replace("{required}", String(job.runtime.resourceCheck.shadow.requiredMb))
+                        .replace("{saved}", String(job.runtime.resourceCheck.shadow.savedMb))
+                        .replace("{samples}", String(job.runtime.resourceCheck.shadow.samples))
+                        .replace("{interval}", String(job.runtime.resourceCheck.shadow.samplingIntervalSeconds ?? 60))
+                        .replace("{confidence}", job.runtime.resourceCheck.shadow.confidence)}
+                    </span>
+                  )}
+                  {job.runtime.resourceCheck.shadow?.basis === "conservative-fallback" &&
+                    job.runtime.resourceCheck.shadow.reason && (
+                      <span>
+                        {t.projectDetail.deployJobResourceShadowFallback.replace(
+                          "{reason}",
+                          job.runtime.resourceCheck.shadow.reason,
+                        )}
+                      </span>
+                    )}
+                </div>
+              )}
             </li>
           );
         })}

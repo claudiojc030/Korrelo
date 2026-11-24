@@ -56,6 +56,45 @@ describe("MetricsCollectorSchedulerService", () => {
     expect((service as any).collecting).toBe(false);
   });
 
+  it("alimenta o histórico de recursos com a MESMA leitura válida", async () => {
+    const metrics = { cpuPercent: 5, containers: [] };
+    const captured: unknown[] = [];
+    const history = {
+      capture: async (value: unknown) => {
+        captured.push(value);
+        return true;
+      },
+    };
+    const service = new MetricsCollectorSchedulerService(
+      { execute: async () => metrics } as any,
+      new FakeRepository() as any,
+      history as any,
+    );
+
+    await service.collect();
+
+    expect(captured).toEqual([metrics]);
+  });
+
+  it("leitura descartada (null) não vira amostra de recurso", async () => {
+    const captured: unknown[] = [];
+    const history = {
+      capture: async (value: unknown) => {
+        captured.push(value);
+        return true;
+      },
+    };
+    const service = new MetricsCollectorSchedulerService(
+      { execute: async () => null } as any,
+      new FakeRepository() as any,
+      history as any,
+    );
+
+    await service.collect();
+
+    expect(captured).toHaveLength(0);
+  });
+
   it("libera o sinalizador após exceção e a próxima execução acontece", async () => {
     const { service, record, warn } = makeService();
     record.mode = "fail";

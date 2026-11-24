@@ -9,6 +9,7 @@ import { StorageAuditService } from "../infrastructure/storage-audit.service";
 import { STORAGE_ACTIONS, type StorageActionId } from "../domain/storage-audit";
 import { SELF_UPDATER, type SelfUpdater } from "../domain/self-updater";
 import { SELF_UPDATE_JOB_REPOSITORY, type SelfUpdateJobRepository } from "../domain/self-update-job.entity";
+import { ResourceHistoryService } from "../../projects/infrastructure/resource-history.service";
 
 const VALID_RANGES: MetricHistoryRange[] = ["1h", "24h", "7d"];
 
@@ -24,11 +25,24 @@ export class MonitoringController {
     private readonly cleanupStorage: CleanupStorageUseCase,
     @Inject(SELF_UPDATER) private readonly updater: SelfUpdater,
     @Inject(SELF_UPDATE_JOB_REPOSITORY) private readonly jobs: SelfUpdateJobRepository,
+    private readonly resourceHistory: ResourceHistoryService,
   ) {}
 
   @Get("system")
   system() {
     return this.getSystemMetrics.execute();
+  }
+
+  /**
+   * HISTÓRICO LEVE DE RECURSOS (Resource Manager V1 - Fase A).
+   *
+   * Read-only. `container` é o nome exato do container (`docker stats`, sem
+   * "/"); sem ele, devolve só o estado geral do histórico. Nenhuma decisão
+   * de deploy usa este endpoint - ele existe para acompanhar a coleta.
+   */
+  @Get("resources")
+  resources(@Query("container") container?: string) {
+    return this.resourceHistory.describe(container?.trim() || null);
   }
 
   @Get("history")

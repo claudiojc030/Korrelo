@@ -16,6 +16,11 @@ import {
   evaluateBuildDiskPolicy,
   type BuildDiskDecision,
 } from "./build-disk-policy";
+import {
+  computeAdaptiveBuildMemoryRequirement,
+  type AdaptiveMemoryResult,
+} from "../domain/adaptive-memory";
+import { ResourceHistoryService } from "./resource-history.service";
 
 /**
  * Verificação de recursos ANTES de começar um build.
@@ -56,6 +61,11 @@ export interface PreflightMetrics {
   availableForBuildMb: number;
   /** Decisão da política de disco (reserva + estimativa + margem). */
   buildDiskPolicy?: BuildDiskDecision;
+  /**
+   * FASE B (SIMULAÇÃO): o que a política adaptativa exigiria com o histórico
+   * observado. NUNCA altera `ok`/`reason` - é comparação para o painel.
+   */
+  memoryPolicyShadow?: AdaptiveMemoryResult | null;
 }
 
 export interface PreflightResult {
@@ -100,6 +110,8 @@ export class ResourcePreflightService {
     @Optional()
     @Inject(HOST_RESOURCE_PROVIDER)
     resourceProvider?: HostResourceProvider,
+    @Optional()
+    private readonly resourceHistory?: ResourceHistoryService,
   ) {
     this.resourceProvider = resourceProvider ?? realHostResourceProvider;
   }
@@ -346,6 +358,17 @@ export class ResourcePreflightService {
     metrics.requiredHostMemoryMb = memRequiredMb;
     metrics.productionUsageMb = productionUsageMb;
     metrics.productionLimitMb = params.productionLimitMb ?? 0;
+    // FASE B - SOMBRA: calcula o que a reserva adaptativa pediria com o
+    // histórico já coletado. O resultado é apenas informativo; a decisão
+    // abaixo continua usando `requirement` (política conservadora).
+    metrics.memoryPolicyShadow = this.shadowMemoryRequirement({
+      productionContainerName: params.productionContainerName,
+      productionUsageMb,
+      productionLimitMb: params.productionLimitMb ?? 0,
+      stagingReservationMb,
+      buildRequirementMb: requiredMemoryMb,
+      currentRequiredMb: memRequiredMb,
+    });
     const hostEvaluation = evaluateHostResources({
       resources: hostResources,
       thresholds: { ...hostThresholds, memAvailableMb: memRequiredMb },
@@ -383,6 +406,42 @@ export class ResourcePreflightService {
     }
 
     return { ok: true, reason: null, metrics };
+  }
+
+  /**
+   * FASE B - SIMULAÇÃO: compara a política conservadora com a adaptativa.
+   *
+   * Sem histórico injetado ou sem container de produção, devolve null. Com
+   * histórico insuficiente, a função pura devolve o MESMO valor conservador
+   * e explica o motivo. Em nenhum caso o preflight usa este número para
+   * decidir.
+   */
+  private shadowMemoryRequirement(params: {
+    productionContainerName?: string | null;
+    productionUsageMb: number | null;
+    productionLimitMb: number;
+    stagingReservationMb: number;
+    buildRequirementMb: number;
+    currentRequiredMb: number;
+  }): AdaptiveMemoryResult | null {
+    if (!this.resourceHistory || !params.productionContainerName) return null;
+    try {
+      return computeAdaptiveBuildMemoryRequirement({
+        params: {
+          hostFloorMb: readBuildThresholds().memAvailableMb,
+          buildRequirementMb: params.buildRequirementMb,
+          safetyMarginMb: DEFAULT_BUILD_SAFETY_MARGIN_MB,
+          stagingReservationMb: params.stagingReservationMb,
+          productionLimitMb: params.productionLimitMb,
+          productionUsageMb: params.productionUsageMb,
+        },
+        summary: this.resourceHistory.summary(params.productionContainerName),
+        currentRequiredMb: params.currentRequiredMb,
+      });
+    } catch {
+      // Sombra nunca pode derrubar o preflight real.
+      return null;
+    }
   }
 
   /**
