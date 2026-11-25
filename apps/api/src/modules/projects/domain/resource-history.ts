@@ -222,6 +222,11 @@ export class ResourceHistory {
       .map((sample) => sample.psiFull10)
       .filter((value): value is number => value !== null);
 
+    const peaksTrusted = identityKnown && !identityChanged;
+    const sampledPeakMb = peaksTrusted && usages.length > 0 ? Math.max(...usages) : null;
+    const cgroupPeakMb =
+      peaksTrusted && cgroupPeaks.length > 0 ? Math.max(...cgroupPeaks) : null;
+
     const container: ContainerResourceSummary | null =
       entries.length === 0
         ? null
@@ -229,9 +234,9 @@ export class ResourceHistory {
             name: containerName,
             samples: entries.length,
             currentMb: usages.at(-1) ?? null,
-            sampledPeakMb: usages.length > 0 ? Math.max(...usages) : null,
-            peakMb: usages.length > 0 ? Math.max(...usages) : null,
-            cgroupPeakMb: cgroupPeaks.length > 0 ? Math.max(...cgroupPeaks) : null,
+            sampledPeakMb,
+            peakMb: sampledPeakMb,
+            cgroupPeakMb,
             averageMb:
               usages.length > 0
                 ? Math.round(usages.reduce((sum, value) => sum + value, 0) / usages.length)

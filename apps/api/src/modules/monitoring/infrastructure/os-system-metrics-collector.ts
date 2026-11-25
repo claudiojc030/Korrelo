@@ -4,6 +4,7 @@ import { classifyResourceTier, type ContainerSummary, type SystemMetrics } from 
 import type { SystemMetricsCollector } from "../domain/system-metrics-collector";
 import { runCommand, type RunCommandResult } from "../../../infrastructure/command-runner";
 import { CpuUsageSampler } from "./cpu-usage-sampler";
+import { readContainerCgroupPeakMb } from "./container-cgroup-peak";
 
 
 /**
@@ -21,6 +22,9 @@ function envInt(name: string, fallback: number): number {
 const DOCKER_LIST_TIMEOUT_MS = envInt("SYSTEM_METRICS_DOCKER_TIMEOUT_MS", 4_000);
 const DOCKER_STATS_TIMEOUT_MS = envInt("SYSTEM_METRICS_DOCKER_STATS_TIMEOUT_MS", 6_000);
 const DISK_TIMEOUT_MS = envInt("SYSTEM_METRICS_DISK_TIMEOUT_MS", 5_000);
+const CGROUP_INSPECT_TIMEOUT_MS = envInt("SYSTEM_METRICS_CGROUP_INSPECT_TIMEOUT_MS", 3_000);
+const CGROUP_READ_TIMEOUT_MS = envInt("SYSTEM_METRICS_CGROUP_READ_TIMEOUT_MS", 250);
+const CGROUP_MAX_CONTAINERS = envInt("SYSTEM_METRICS_CGROUP_MAX_CONTAINERS", 64);
 
 
 /** Descrição curta do motivo de uma falha de comando (sem vazar dados sensíveis). */
@@ -98,6 +102,77 @@ interface ContainersResult {
   containers: ContainerSummary[];
   /** false quando o Docker não respondeu (timeout, erro ou binário ausente). */
   dockerReachable: boolean;
+}
+
+interface ContainerRow {
+  id?: string;
+  name: string;
+  status: string;
+}
+
+/**
+ * Lê os picos de cgroup em UMA inspeção do Docker para todos os containers.
+ *
+ * - não roda um `docker inspect` por container;
+ * - limita quantidade e tempo;
+ * - qualquer falha individual vira `null`, sem afetar os demais;
+ * - nenhum caminho/PID é logado.
+ */
+async function getContainerCgroupPeaks(rows: ContainerRow[]): Promise<Map<string, number | null>> {
+  const result = new Map<string, number | null>();
+  const candidates = rows
+    .filter((row): row is ContainerRow & { id: string } => typeof row.id === "string" && row.id.length > 0)
+    .slice(0, CGROUP_MAX_CONTAINERS);
+  if (candidates.length === 0) return result;
+
+  let inspection: RunCommandResult | null = null;
+  try {
+    inspection = await runCommand(
+      "docker",
+      [
+        "inspect",
+        "--format",
+        "{{.Id}}|{{.State.Pid}}|{{.State.Running}}",
+        ...candidates.map((row) => row.id),
+      ],
+      { timeoutMs: CGROUP_INSPECT_TIMEOUT_MS },
+    );
+  } catch {
+    inspection = null;
+  }
+  if (!inspection || inspection.timedOut || !inspection.stdout.trim()) return result;
+
+  const fullIds = inspection.stdout
+    .trim()
+    .split("\n")
+    .map((line) => line.split("|"))
+    .filter((parts) => parts.length >= 3)
+    .map((parts) => ({
+      fullId: parts[0]?.trim() ?? "",
+      pid: Number(parts[1]),
+      running: parts[2]?.trim() === "true",
+    }))
+    .filter((entry) => entry.fullId.length > 0 && entry.running && Number.isInteger(entry.pid) && entry.pid > 0);
+
+  await Promise.all(
+    candidates.map(async (row) => {
+      const inspected = fullIds.find((entry) => entry.fullId.startsWith(row.id));
+      if (!inspected) {
+        result.set(row.id, null);
+        return;
+      }
+      try {
+        const peak = await readContainerCgroupPeakMb(
+          { pid: inspected.pid, containerId: inspected.fullId },
+          { timeoutMs: CGROUP_READ_TIMEOUT_MS },
+        );
+        result.set(row.id, peak);
+      } catch {
+        result.set(row.id, null);
+      }
+    }),
+  );
+  return result;
 }
 
 async function getContainers(logger: Logger): Promise<ContainersResult> {
@@ -183,6 +258,10 @@ async function getContainers(logger: Logger): Promise<ContainersResult> {
     );
   }
 
+  const cgroupPeaks = await getContainerCgroupPeaks(rows).catch(
+    () => new Map<string, number | null>(),
+  );
+
   return {
     containers: rows.map((row) => ({
       id: row.id,
@@ -191,6 +270,7 @@ async function getContainers(logger: Logger): Promise<ContainersResult> {
       memUsageMb: memByName.get(row.name) ?? null,
       memLimitMb: memLimitByName.get(row.name) ?? null,
       cpuPercent: cpuByName.get(row.name) ?? null,
+      cgroupPeakMb: row.id ? cgroupPeaks.get(row.id) ?? null : null,
     })),
     dockerReachable,
   };

@@ -233,7 +233,7 @@ describe("ResourceHistory", () => {
               limitMb: 1757,
               cpuPercent: 2,
               containerId: i < 360 ? "container-old" : "container-new",
-              cgroupPeakMb: null,
+              cgroupPeakMb: 800,
             },
           ],
         }),
@@ -241,6 +241,9 @@ describe("ResourceHistory", () => {
     }
     const recreatedSummary = recreated.summary("mesatta", NOW);
     expect(recreatedSummary.container?.identityChanged).toBe(true);
+    expect(recreatedSummary.container?.sampledPeakMb).toBeNull();
+    expect(recreatedSummary.container?.peakMb).toBeNull();
+    expect(recreatedSummary.container?.cgroupPeakMb).toBeNull();
     expect(classifyHistoryConfidence(recreatedSummary, { now: NOW })).toBe("low");
 
     const limitChanged = new ResourceHistory({ maxAgeMs: 24 * HOUR, maxSamples: 2000 });

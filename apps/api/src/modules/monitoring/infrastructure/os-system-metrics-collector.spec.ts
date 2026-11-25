@@ -1,12 +1,20 @@
 import { Logger } from "@nestjs/common";
 import { runCommand } from "../../../infrastructure/command-runner";
 import { OsSystemMetricsCollector } from "./os-system-metrics-collector";
+import { readContainerCgroupPeakMb } from "./container-cgroup-peak";
 
 jest.mock("../../../infrastructure/command-runner", () => ({
   runCommand: jest.fn(),
 }));
 
+jest.mock("./container-cgroup-peak", () => ({
+  readContainerCgroupPeakMb: jest.fn(),
+}));
+
 const mockedRunCommand = runCommand as jest.MockedFunction<typeof runCommand>;
+const mockedCgroupPeak = readContainerCgroupPeakMb as jest.MockedFunction<
+  typeof readContainerCgroupPeakMb
+>;
 
 type CommandResult = Awaited<ReturnType<typeof runCommand>>;
 
@@ -51,6 +59,8 @@ function withHealthyDocker(): void {
 describe("OsSystemMetricsCollector", () => {
   beforeEach(() => {
     mockedRunCommand.mockReset();
+    mockedCgroupPeak.mockReset();
+    mockedCgroupPeak.mockResolvedValue(null);
     jest.spyOn(Logger.prototype, "warn").mockImplementation(() => undefined);
   });
 
@@ -73,6 +83,35 @@ describe("OsSystemMetricsCollector", () => {
     expect(metrics.containers[0].cpuPercent).toBe(3.5);
     expect(metrics.diskTotalGb).not.toBeNull();
     expect(metrics.collectedAt).toBeDefined();
+  });
+
+  it("associa pico de cgroup por ID e falha parcial sem bloquear os demais", async () => {
+    const fullA = "a".repeat(64);
+    const fullB = "b".repeat(64);
+    mockedRunCommand.mockImplementation(async (command: string, args: string[]) => {
+      if (command === "docker" && args[0] === "ps") {
+        return result({
+          stdout: `${fullA.slice(0, 12)}|app-a|Up 1 hour\n${fullB.slice(0, 12)}|app-b|Up 1 hour\n`,
+        });
+      }
+      if (command === "docker" && args[0] === "stats") {
+        return result({ stdout: "app-a|100MiB / 512MiB|2%\napp-b|50MiB / 256MiB|1%\n" });
+      }
+      if (command === "docker" && args[0] === "inspect") {
+        return result({ stdout: `${fullA}|101|true\n${fullB}|102|true\n` });
+      }
+      if (command === DISK_COMMAND) return diskOk();
+      return result();
+    });
+    mockedCgroupPeak.mockImplementation(async (target) => (target.containerId === fullA ? 200 : null));
+
+    const collector = new OsSystemMetricsCollector();
+    const metrics = await collector.collect();
+
+    expect(metrics.containers).toHaveLength(2);
+    expect(metrics.containers[0].cgroupPeakMb).toBe(200);
+    expect(metrics.containers[1].cgroupPeakMb).toBeNull();
+    expect(mockedCgroupPeak).toHaveBeenCalledTimes(2);
   });
 
   it("não trava e sinaliza o Docker indisponível quando o comando estoura o timeout", async () => {
