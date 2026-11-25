@@ -25,6 +25,7 @@ function metrics(overrides: Partial<SystemMetrics> = {}): SystemMetrics {
     tier: "small",
     containers: [
       {
+        id: "container-a",
         name: "/mesatta",
         status: "running",
         memUsageMb: 386,
@@ -70,6 +71,8 @@ describe("ResourceHistoryService", () => {
       currentMb: 386,
       peakMb: 386,
       limitMb: 1757,
+      containerId: "container-a",
+      cgroupPeakMb: null,
     });
     expect(summary?.host.minMemAvailableMb).toBe(2370);
   });

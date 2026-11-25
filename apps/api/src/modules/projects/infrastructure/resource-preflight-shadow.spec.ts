@@ -25,21 +25,45 @@ function result(overrides: Partial<CommandResult> = {}): CommandResult {
 }
 
 const MINUTE = 60_000;
+const WINDOW_MS = 11 * 60 * MINUTE;
 
-function summary(overrides: Partial<ResourceHistorySummary> = {}): ResourceHistorySummary {
+function summary(
+  overrides: Partial<ResourceHistorySummary> = {},
+  containerOverrides: Partial<NonNullable<ResourceHistorySummary["container"]>> = {},
+): ResourceHistorySummary {
   return {
-    samples: 40,
-    windowMs: 39 * MINUTE,
+    samples: 720,
+    windowMs: WINDOW_MS,
     lastSampleAgeMs: MINUTE,
     container: {
       name: "mesatta",
-      samples: 40,
+      samples: 720,
       currentMb: 386,
+      sampledPeakMb: 568,
       peakMb: 568,
+      cgroupPeakMb: null,
       averageMb: 400,
       limitMb: 1757,
+      firstSampleAt: Date.now() - WINDOW_MS,
+      lastSampleAt: Date.now() - MINUTE,
+      lastSampleAgeMs: MINUTE,
+      windowMs: WINDOW_MS,
+      maxGapMs: MINUTE,
+      gapCount: 0,
+      continuity: "continuous",
+      containerId: "container-a",
+      identityKnown: true,
+      identityChanged: false,
+      limitChanged: false,
+      ...containerOverrides,
     },
-    host: { minMemAvailableMb: 2300, maxSwapActivityPages: 0, maxPsiFull10: 0 },
+    host: {
+      minMemAvailableMb: 2300,
+      maxSwapActivityPages: 0,
+      maxSwapUsedMb: 0,
+      maxPsiSome10: 0,
+      maxPsiFull10: 0,
+    },
     ...overrides,
   };
 }
@@ -101,11 +125,10 @@ describe("ResourcePreflightService - política adaptativa em sombra", () => {
 
   it("sem histórico suficiente, a sombra repete o conservador e explica o motivo", async () => {
     const service = makeService(
-      summary({
-        samples: 2,
-        lastSampleAgeMs: 2 * MINUTE,
-        container: { ...summary().container!, samples: 2 },
-      }),
+      summary(
+        { samples: 2, windowMs: 2 * MINUTE, lastSampleAgeMs: MINUTE },
+        { samples: 2, windowMs: 2 * MINUTE, continuity: "continuous", lastSampleAgeMs: MINUTE },
+      ),
     );
 
     const check = await service.check({

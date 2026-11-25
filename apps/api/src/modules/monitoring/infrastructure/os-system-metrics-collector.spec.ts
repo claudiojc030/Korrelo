@@ -36,7 +36,7 @@ function diskOk(): CommandResult {
 function withHealthyDocker(): void {
   mockedRunCommand.mockImplementation(async (command: string, args: string[]) => {
     if (command === "docker" && args[0] === "ps") {
-      return result({ stdout: "korrelo-app-1|Up 2 hours\nkorrelo-db-1|Up 2 hours\n" });
+      return result({ stdout: "abc123def456|korrelo-app-1|Up 2 hours\nbbbbbbbbbbbb|korrelo-db-1|Up 2 hours\n" });
     }
     if (command === "docker" && args[0] === "stats") {
       return result({ stdout: "korrelo-app-1|120.5MiB / 512MiB|3.5%\nkorrelo-db-1|50MiB / 256MiB|1.0%\n" });
@@ -66,6 +66,7 @@ describe("OsSystemMetricsCollector", () => {
 
     expect(metrics.dockerReachable).toBe(true);
     expect(metrics.containers).toHaveLength(2);
+    expect(metrics.containers[0].id).toBe("abc123def456");
     expect(metrics.containers[0].name).toBe("korrelo-app-1");
     expect(metrics.containers[0].memUsageMb).toBe(121);
     expect(metrics.containers[0].memLimitMb).toBe(512);

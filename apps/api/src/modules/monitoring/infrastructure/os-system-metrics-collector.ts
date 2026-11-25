@@ -104,7 +104,7 @@ async function getContainers(logger: Logger): Promise<ContainersResult> {
   // "docker ps" e "docker stats" rodam EM PARALELO: são independentes e o
   // tempo total da coleta fica preso ao maior timeout, não à soma. Isso
   // importa porque a página do dashboard tem timeout de poucos segundos.
-  const listPromise = runCommand("docker", ["ps", "--format", "{{.Names}}|{{.Status}}"], {
+  const listPromise = runCommand("docker", ["ps", "--format", "{{.ID}}|{{.Names}}|{{.Status}}"], {
     timeoutMs: DOCKER_LIST_TIMEOUT_MS,
   }).catch((error) => {
     logger.warn(`[metrics] "docker ps" indisponível: ${(error as Error).message}`);
@@ -134,8 +134,11 @@ async function getContainers(logger: Logger): Promise<ContainersResult> {
     .split("\n")
     .filter(Boolean)
     .map((line) => {
-      const [name, status] = line.split("|");
-      return { name, status };
+      const parts = line.split("|");
+      // Formato novo: ID|nome|status. Formato antigo (sem ID): nome|status.
+      const [id, name, status] =
+        parts.length >= 3 ? [parts[0], parts[1], parts[2]] : [undefined, parts[0], parts[1]];
+      return { id, name, status };
     });
 
   let memByName = new Map<string, number>();
@@ -182,6 +185,7 @@ async function getContainers(logger: Logger): Promise<ContainersResult> {
 
   return {
     containers: rows.map((row) => ({
+      id: row.id,
       name: row.name,
       status: row.status,
       memUsageMb: memByName.get(row.name) ?? null,

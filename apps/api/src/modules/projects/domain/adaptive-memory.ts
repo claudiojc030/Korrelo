@@ -52,6 +52,8 @@ export interface AdaptiveMemoryResult {
   samplingIntervalSeconds: number;
   currentUsageMb: number | null;
   observedPeakMb: number | null;
+  /** De onde veio o pico: cgroup real ou maior amostra de 60 s. */
+  peakSource: "cgroup" | "sampled" | null;
   /** Motivo curto quando caiu no fallback. */
   reason: string | null;
   /**
@@ -81,11 +83,28 @@ export function computeAdaptiveBuildMemoryRequirement(input: AdaptiveMemoryInput
   const { params, summary, currentRequiredMb } = input;
   const now = input.now ?? Date.now();
   const confidence = classifyHistoryConfidence(summary, { now });
+  const container = summary?.container ?? null;
   const usage = params.productionUsageMb;
   const conservativeHeadroom = Math.max(
     0,
     params.productionLimitMb - (typeof usage === "number" && Number.isFinite(usage) ? usage : 0),
   );
+  const cgroupPeak =
+    typeof container?.cgroupPeakMb === "number" && Number.isFinite(container.cgroupPeakMb)
+      ? container.cgroupPeakMb
+      : null;
+  const sampledPeak =
+    typeof container?.sampledPeakMb === "number" && Number.isFinite(container.sampledPeakMb)
+      ? container.sampledPeakMb
+      : typeof container?.peakMb === "number" && Number.isFinite(container.peakMb)
+        ? container.peakMb
+        : null;
+  const observedPeakCandidates = [cgroupPeak, sampledPeak].filter(
+    (value): value is number => value !== null,
+  );
+  const observedPeak = observedPeakCandidates.length > 0 ? Math.max(...observedPeakCandidates) : null;
+  const peakSource: AdaptiveMemoryResult["peakSource"] =
+    observedPeak === null ? null : cgroupPeak !== null && observedPeak === cgroupPeak ? "cgroup" : "sampled";
 
   const fallback = (reason: string): AdaptiveMemoryResult => ({
     basis: "conservative-fallback",
@@ -93,34 +112,40 @@ export function computeAdaptiveBuildMemoryRequirement(input: AdaptiveMemoryInput
     conservativeRequiredMb: currentRequiredMb,
     savedMb: 0,
     confidence,
-    samples: summary?.samples ?? 0,
-    windowMs: summary?.windowMs ?? 0,
+    samples: container?.samples ?? 0,
+    windowMs: container?.windowMs ?? 0,
     samplingIntervalSeconds: SAMPLING_INTERVAL_SECONDS,
     currentUsageMb: typeof usage === "number" && Number.isFinite(usage) ? usage : null,
-    observedPeakMb: summary?.container?.peakMb ?? null,
+    observedPeakMb: observedPeak,
+    peakSource,
     reason,
     simulation: true,
     shadowOnly: true,
   });
 
-  if (!summary || !summary.container || summary.container.samples === 0) {
+  if (!container || container.samples === 0) {
     return fallback("sem histórico do container de produção");
   }
-  if (confidence === "none" || confidence === "low") {
-    return fallback(`histórico insuficiente ou desatualizado (${confidence})`);
+  if (!container.identityKnown) {
+    return fallback("identidade do container desconhecida no histórico");
   }
-  if (summary.lastSampleAgeMs !== null && summary.lastSampleAgeMs > 10 * 60 * 1000) {
-    return fallback("última amostra antiga");
+  if (container.identityChanged) {
+    return fallback("container recriado durante o histórico");
+  }
+  if (container.limitChanged) {
+    return fallback("limite do container mudou durante o histórico");
+  }
+  if (confidence === "none" || confidence === "low") {
+    return fallback(`histórico insuficiente, antigo, descontínuo ou de versão diferente (${confidence})`);
   }
 
-  const peak = summary.container.peakMb;
-  if (peak === null || !Number.isFinite(peak)) {
+  if (observedPeak === null) {
     return fallback("pico observado indisponível");
   }
 
   const usageKnown = typeof usage === "number" && Number.isFinite(usage) && usage >= 0;
   const usageCurrent = usageKnown ? Math.max(0, usage as number) : null;
-  const baseline = Math.max(peak, usageCurrent ?? 0);
+  const baseline = Math.max(observedPeak, usageCurrent ?? 0);
   // Sem uso atual conhecido, o histórico ainda permite uma projeção, mas o
   // cálculo conservador (que usa o limite inteiro) é mais seguro: mantemos o
   // fallback até a medição atual voltar.
@@ -146,11 +171,12 @@ export function computeAdaptiveBuildMemoryRequirement(input: AdaptiveMemoryInput
     conservativeRequiredMb: currentRequiredMb,
     savedMb: Math.max(0, currentRequiredMb - Math.min(currentRequiredMb, adaptiveRequired)),
     confidence,
-    samples: summary.samples,
-    windowMs: summary.windowMs,
+    samples: container.samples,
+    windowMs: container.windowMs,
     samplingIntervalSeconds: SAMPLING_INTERVAL_SECONDS,
     currentUsageMb: usageCurrent,
-    observedPeakMb: peak,
+    observedPeakMb: observedPeak,
+    peakSource,
     reason: null,
     simulation: true,
     shadowOnly: true,

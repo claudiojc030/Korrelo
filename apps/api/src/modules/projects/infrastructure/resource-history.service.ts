@@ -167,6 +167,8 @@ export class ResourceHistoryService implements OnModuleInit, OnApplicationShutdo
           usageMb: container.memUsageMb,
           limitMb: container.memLimitMb,
           cpuPercent: container.cpuPercent,
+          containerId: container.id ?? null,
+          cgroupPeakMb: container.cgroupPeakMb ?? null,
         })),
       };
       this.history.add(sample);
@@ -195,6 +197,7 @@ export class ResourceHistoryService implements OnModuleInit, OnApplicationShutdo
     container: ResourceHistorySummary["container"];
     host: ResourceHistorySummary["host"] | null;
     confidence: HistoryConfidence;
+    confidenceNote: string;
   } {
     const snapshot = this.snapshot();
     const summary = containerName ? this.summary(containerName) : null;
@@ -203,6 +206,8 @@ export class ResourceHistoryService implements OnModuleInit, OnApplicationShutdo
       container: summary?.container ?? null,
       host: summary?.host ?? null,
       confidence: classifyHistoryConfidence(summary),
+      confidenceNote:
+        "Confiança descreve quantidade, idade e continuidade das amostras do container; não é garantia de capacidade nem autorização para deploy automático.",
     };
   }
 

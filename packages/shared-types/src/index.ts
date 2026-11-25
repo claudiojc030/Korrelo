@@ -108,11 +108,15 @@ export const CONTAINER_MEMORY_LIMIT_MB: Record<ResourceTier, number> = {
 };
 
 export interface ContainerSummary {
+  /** ID curto do Docker, quando disponível (detecta recriação do container). */
+  id?: string;
   name: string;
   status: string;
   memUsageMb: number | null;
   memLimitMb: number | null;
   cpuPercent: number | null;
+  /** Pico real do cgroup, quando o coletor conseguir ler `memory.peak`. */
+  cgroupPeakMb?: number | null;
 }
 
 export interface SystemMetrics {
