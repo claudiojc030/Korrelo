@@ -116,6 +116,7 @@ import { DeployQueueService } from "./infrastructure/deploy-queue.service";
 import { WorkerLock } from "./infrastructure/worker-lock";
 import { ResourcePreflightService } from "./infrastructure/resource-preflight.service";
 import { ResourceHistoryService } from "./infrastructure/resource-history.service";
+import { ResourceProfileService } from "./infrastructure/resource-profile.service";
 import { inspectContainerTruth } from "./infrastructure/docker-container-inspector";
 import { DeployLogger } from "./infrastructure/deploy-logger";
 import { StagingCleanupService } from "./infrastructure/staging-cleanup.service";
@@ -221,6 +222,7 @@ import {
     DeployLogger,
     WorkerLock,
     ResourceHistoryService,
+    ResourceProfileService,
     ResourcePreflightService,
     {
       provide: CONTAINER_INSPECTOR,
@@ -308,6 +310,6 @@ import {
     { provide: DATABASE_RESTORER, useClass: ScriptDatabaseRestorer },
     { provide: DEPLOY_JOB_REPOSITORY, useClass: PrismaDeployJobRepository },
   ],
-  exports: [PROJECT_REPOSITORY, DEPLOY_JOB_REPOSITORY, DeployQueueService, ResourceHistoryService],
+  exports: [PROJECT_REPOSITORY, DEPLOY_JOB_REPOSITORY, DeployQueueService, ResourceHistoryService, ResourceProfileService],
 })
 export class ProjectsModule {}

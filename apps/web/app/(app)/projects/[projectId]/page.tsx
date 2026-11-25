@@ -6,6 +6,7 @@ import { DomainCard } from "./domain-card";
 import { DeployButton } from "../deploy-button";
 import { DeployHistory } from "./deploy-history";
 import { DeployJobsPanel } from "./deploy-jobs-panel";
+import { ResourceProfilesCard } from "./resource-profiles-card";
 import { ReconcileStateControl } from "./reconcile-state";
 import { getProjectPublicUrl } from "../../../../lib/project-public-url";
 import { getLocaleServer } from "../../../../lib/i18n/get-locale-server";
@@ -233,6 +234,8 @@ export default async function ProjectSummaryPage(props: { params: Promise<{ proj
           </p>
         </div>
       </div>
+
+      <ResourceProfilesCard projectId={project.id} />
 
       <DeployJobsPanel projectId={project.id} />
 

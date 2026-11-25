@@ -31,6 +31,21 @@ export interface ProjectDetailDict {
   container: string;
   createdAt: string;
   resourceUsage: string;
+  resourceProfilesTitle: string;
+  resourceProfileNotMeasured: string;
+  resourceProfileNoValid: string;
+  resourceProfileLatestValid: string;
+  resourceProfileLatest: string;
+  resourceProfileBuildPeak: string;
+  resourceProfileStagingPeak: string;
+  resourceProfileConfidence: string;
+  resourceProfileStatus: string;
+  resourceProfileEnvironment: string;
+  resourceProfileMeasuredAt: string;
+  resourceProfileReason: string;
+  resourceProfileLab: string;
+  resourceProfileProduction: string;
+  resourceProfileLoadError: string;
   cpu: string;
   processActive: string;
   projectNotRunning: string;
@@ -142,6 +157,21 @@ export const projectDetailEn: ProjectDetailDict = {
   container: "Container",
   createdAt: "Created at",
   resourceUsage: "Resource usage",
+  resourceProfilesTitle: "Build and staging profile",
+  resourceProfileNotMeasured: "Build profile not measured yet.",
+  resourceProfileNoValid: "No valid measurement available for this project.",
+  resourceProfileLatestValid: "Latest valid measurement",
+  resourceProfileLatest: "Latest measurement",
+  resourceProfileBuildPeak: "Build peak",
+  resourceProfileStagingPeak: "Staging peak",
+  resourceProfileConfidence: "Confidence",
+  resourceProfileStatus: "Validity",
+  resourceProfileEnvironment: "Source",
+  resourceProfileMeasuredAt: "Measured at",
+  resourceProfileReason: "Reason",
+  resourceProfileLab: "laboratory",
+  resourceProfileProduction: "production",
+  resourceProfileLoadError: "Couldn't load resource profiles.",
   cpu: "CPU",
   processActive: "process active",
   projectNotRunning: "project isn't running",
@@ -255,6 +285,21 @@ export const projectDetailPt: ProjectDetailDict = {
   container: "Container",
   createdAt: "Criado em",
   resourceUsage: "Consumo de recursos",
+  resourceProfilesTitle: "Perfil de build e staging",
+  resourceProfileNotMeasured: "Perfil de build ainda não medido.",
+  resourceProfileNoValid: "Nenhuma medição válida disponível para este projeto.",
+  resourceProfileLatestValid: "Última medição válida",
+  resourceProfileLatest: "Última medição",
+  resourceProfileBuildPeak: "Pico do build",
+  resourceProfileStagingPeak: "Pico do staging",
+  resourceProfileConfidence: "Confiança",
+  resourceProfileStatus: "Validade",
+  resourceProfileEnvironment: "Origem",
+  resourceProfileMeasuredAt: "Medido em",
+  resourceProfileReason: "Motivo",
+  resourceProfileLab: "laboratório",
+  resourceProfileProduction: "produção",
+  resourceProfileLoadError: "Não foi possível carregar os perfis de recursos.",
   cpu: "CPU",
   processActive: "processo ativo",
   projectNotRunning: "projeto não está rodando",

@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Param, Post, Query, Body, Req } from "@nestjs/common";
+import { Controller, Get, Inject, Param, Post, Query, Body, Req, BadRequestException, NotFoundException } from "@nestjs/common";
 import { GetSystemMetricsUseCase } from "../application/get-system-metrics.use-case";
 import { GetMetricHistoryUseCase, type MetricHistoryRange } from "../application/get-metric-history.use-case";
 import { GetUpdateStatusUseCase } from "../application/get-update-status.use-case";
@@ -10,6 +10,8 @@ import { STORAGE_ACTIONS, type StorageActionId } from "../domain/storage-audit";
 import { SELF_UPDATER, type SelfUpdater } from "../domain/self-updater";
 import { SELF_UPDATE_JOB_REPOSITORY, type SelfUpdateJobRepository } from "../domain/self-update-job.entity";
 import { ResourceHistoryService } from "../../projects/infrastructure/resource-history.service";
+import { ResourceProfileService } from "../../projects/infrastructure/resource-profile.service";
+import { PROJECT_REPOSITORY, type ProjectRepository } from "../../projects/domain/project.repository";
 
 const VALID_RANGES: MetricHistoryRange[] = ["1h", "24h", "7d"];
 
@@ -26,6 +28,8 @@ export class MonitoringController {
     @Inject(SELF_UPDATER) private readonly updater: SelfUpdater,
     @Inject(SELF_UPDATE_JOB_REPOSITORY) private readonly jobs: SelfUpdateJobRepository,
     private readonly resourceHistory: ResourceHistoryService,
+    private readonly resourceProfileStore: ResourceProfileService,
+    @Inject(PROJECT_REPOSITORY) private readonly projects: ProjectRepository,
   ) {}
 
   @Get("system")
@@ -43,6 +47,28 @@ export class MonitoringController {
   @Get("resources")
   resources(@Query("container") container?: string) {
     return this.resourceHistory.describe(container?.trim() || null);
+  }
+
+  /**
+   * PERFIS REAIS DE BUILD/STAGING (Fase C.3c) — SOMENTE LEITURA.
+   *
+   * Devolve apenas o que foi medido e persistido. Sem perfil, a mensagem é
+   * explícita; nenhum valor é estimado. O endpoint não altera preflight, fila
+   * nem limites.
+   */
+  @Get("resource-profiles")
+  async resourceProfiles(@Query("projectId") projectId?: string) {
+    const id = projectId?.trim() ?? "";
+    if (!id) {
+      throw new BadRequestException("projectId é obrigatório.");
+    }
+    // Autorização por projeto: além do JwtAuthGuard, o projeto precisa
+    // existir. Perfis de outro projeto nunca são retornados (filtro exato).
+    const project = await this.projects.findById(id);
+    if (!project) {
+      throw new NotFoundException("Projeto não encontrado.");
+    }
+    return this.resourceProfileStore.describe(project.id);
   }
 
   @Get("history")

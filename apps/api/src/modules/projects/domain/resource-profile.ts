@@ -327,6 +327,38 @@ export function evaluateResourceProfile(
     return { status: "stale", usable: false, confidence: "low", reasons: mismatch };
   }
 
+  return assessProfileEvidence(profile, { now, maxAgeMs });
+}
+
+/**
+ * Avalia o CONTEÚDO de um perfil (validade, OOM, completude, consistência)
+ * sem comparar com uma chave esperada.
+ *
+ * Usado pelo painel/persistência para explicar por que uma medição guardada
+ * não é evidência utilizável. NUNCA promove um perfil por si só.
+ */
+export function assessProfileEvidence(
+  profile: ResourceProfile | null | undefined,
+  options: { now?: number; maxAgeMs?: number } = {},
+): ProfileEvaluation {
+  const now = options.now ?? Date.now();
+  const maxAgeMs = positiveInteger(options.maxAgeMs) ? options.maxAgeMs : DEFAULT_PROFILE_TTL_MS;
+
+  if (!profile) {
+    return { status: "absent", usable: false, confidence: "low", reasons: ["perfil ausente"] };
+  }
+  if (!isProfileShape(profile)) {
+    return { status: "invalid", usable: false, confidence: "low", reasons: ["perfil com formato inválido"] };
+  }
+  if (profile.schemaVersion !== RESOURCE_PROFILE_SCHEMA_VERSION) {
+    return {
+      status: "invalid",
+      usable: false,
+      confidence: "low",
+      reasons: [`schemaVersion ${profile.schemaVersion} não suportada`],
+    };
+  }
+
   const measuredAt = Date.parse(profile.measuredAt);
   if (!isIsoDate(profile.measuredAt) || measuredAt > now + 5 * 60_000) {
     return {
@@ -347,12 +379,7 @@ export function evaluateResourceProfile(
     };
   }
   if (now > validUntilMs || ageMs > maxAgeMs) {
-    return {
-      status: "stale",
-      usable: false,
-      confidence: "low",
-      reasons: ["perfil expirado"],
-    };
+    return { status: "stale", usable: false, confidence: "low", reasons: ["perfil expirado"] };
   }
 
   if (profile.run.concurrentMeasurements > 0 || profile.run.exclusive !== true) {
@@ -416,6 +443,34 @@ export function evaluateResourceProfile(
     confidence,
     reasons: confidence === "low" ? ["evidência insuficiente"] : [],
   };
+}
+
+/**
+ * Validação estrutural usada antes de persistir. Não decide se o perfil é
+ * utilizável — apenas impede gravar JSON quebrado.
+ */
+export function validateResourceProfile(value: unknown): { valid: boolean; errors: string[] } {
+  if (!isProfileShape(value)) return { valid: false, errors: ["formato inválido"] };
+  const errors: string[] = [];
+  if (value.schemaVersion !== RESOURCE_PROFILE_SCHEMA_VERSION) {
+    errors.push(`schemaVersion não suportada: ${value.schemaVersion}`);
+  }
+  if (!isIsoDate(value.measuredAt)) errors.push("measuredAt inválido");
+  if (value.validUntil !== null && !isIsoDate(value.validUntil)) errors.push("validUntil inválido");
+  const positiveOrNull = (entry: unknown) => entry === null || positiveInteger(entry);
+  if (!positiveInteger(value.build.memoryLimitMb)) errors.push("build.memoryLimitMb inválido");
+  if (!positiveInteger(value.staging.memoryLimitMb)) errors.push("staging.memoryLimitMb inválido");
+  if (!positiveOrNull(value.build.peakMb)) errors.push("build.peakMb inválido");
+  if (!positiveOrNull(value.staging.peakMb)) errors.push("staging.peakMb inválido");
+  if (!positiveOrNull(value.staging.bootPeakMb)) errors.push("staging.bootPeakMb inválido");
+  if (!positiveOrNull(value.staging.steadyPeakMb)) errors.push("staging.steadyPeakMb inválido");
+  if (!Number.isFinite(value.build.oomEvents) || value.build.oomEvents < 0) {
+    errors.push("build.oomEvents inválido");
+  }
+  if (!Number.isFinite(value.staging.oomEvents) || value.staging.oomEvents < 0) {
+    errors.push("staging.oomEvents inválido");
+  }
+  return { valid: errors.length === 0, errors };
 }
 
 /**
