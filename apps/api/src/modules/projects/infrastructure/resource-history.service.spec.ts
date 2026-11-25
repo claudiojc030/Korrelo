@@ -148,6 +148,73 @@ describe("ResourceHistoryService", () => {
     expect(service.summary("mesatta")?.container?.peakMb).toBe(386);
   });
 
+  it("captura que excede o watchdog é abandonada e recupera na próxima", async () => {
+    const provider = safeHostResourceProvider();
+    let release: (() => void) | null = null;
+    provider.getSwapActivity = () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({ available: true, swapInDelta: 0, swapOutDelta: 0 });
+      });
+    const service = new ResourceHistoryService({
+      provider,
+      filePath: tempFile(),
+      captureTimeoutMs: 20,
+    });
+
+    await expect(service.capture(metrics())).resolves.toBe(false);
+    expect(service.summary("mesatta")?.container).toBeNull();
+
+    provider.getSwapActivity = safeHostResourceProvider().getSwapActivity;
+    await expect(service.capture(metrics())).resolves.toBe(true);
+    expect(service.summary("mesatta")?.container?.peakMb).toBe(386);
+
+    (release as (() => void) | null)?.();
+  });
+
+  it("capturas sobrepostas não disparam duas leituras do host", async () => {
+    const provider = safeHostResourceProvider();
+    let release: (() => void) | null = null;
+    let reads = 0;
+    const originalMemInfo = provider.getMemInfo.bind(provider);
+    provider.getMemInfo = async () => {
+      reads += 1;
+      return originalMemInfo();
+    };
+    provider.getSwapActivity = () =>
+      new Promise((resolve) => {
+        release = () =>
+          resolve({ available: true, swapInDelta: 0, swapOutDelta: 0 });
+      });
+
+    const service = new ResourceHistoryService({
+      provider,
+      filePath: tempFile(),
+      captureTimeoutMs: 1_000,
+    });
+
+    const first = service.capture(metrics());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(service.capture(metrics())).resolves.toBe(false);
+    expect(release).not.toBeNull();
+    (release as (() => void) | null)?.();
+    await expect(first).resolves.toBe(true);
+    expect(reads).toBe(1);
+  });
+
+  it("erro de escrita do histórico não derruba a captura nem o Core", async () => {
+    const blocker = tempFile();
+    writeFileSync(blocker, "não é diretório", "utf8");
+    const service = new ResourceHistoryService({
+      provider: safeHostResourceProvider(),
+      filePath: join(blocker, "history.json"),
+      persistIntervalMs: 0,
+    });
+
+    await expect(service.capture(metrics())).resolves.toBe(true);
+    expect(service.summary("mesatta")?.container?.peakMb).toBe(386);
+  });
+
   it("pode ser desligado por ambiente sem afetar o Core", async () => {
     process.env.KORRELO_RESOURCE_HISTORY_ENABLED = "0";
     const service = new ResourceHistoryService({

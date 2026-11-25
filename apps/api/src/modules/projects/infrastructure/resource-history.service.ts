@@ -38,6 +38,10 @@ const DEFAULT_RETENTION_MS = 12 * 60 * 60 * 1000;
 const DEFAULT_MAX_SAMPLES = 720;
 /** Persistência a cada 30 min: sobrevive a restart sem amplificar escrita. */
 const DEFAULT_PERSIST_INTERVAL_MS = 30 * 60 * 1000;
+/** Watchdog da leitura do host + amostra (não inclui a escrita síncrona). */
+const DEFAULT_CAPTURE_TIMEOUT_MS = 15_000;
+/** Log de "captura anterior ainda em andamento" no máximo a cada 10 min. */
+const CAPTURE_SKIP_LOG_INTERVAL_MS = 10 * 60 * 1000;
 
 /** Token opcional: em produção nada é fornecido; testes injetam opções. */
 export const RESOURCE_HISTORY_OPTIONS = Symbol("RESOURCE_HISTORY_OPTIONS");
@@ -48,6 +52,7 @@ export interface ResourceHistoryOptions {
   persistIntervalMs?: number;
   retentionMs?: number;
   maxSamples?: number;
+  captureTimeoutMs?: number;
 }
 
 /**
@@ -73,7 +78,10 @@ export class ResourceHistoryService implements OnModuleInit, OnApplicationShutdo
   private readonly persistIntervalMs: number;
   private readonly retentionMs: number;
   private readonly maxSamples: number;
+  private readonly captureTimeoutMs: number;
   private lastPersistAt = 0;
+  private capturing = false;
+  private lastCaptureSkipLogAt = 0;
 
   constructor(
     @Optional()
@@ -87,6 +95,12 @@ export class ResourceHistoryService implements OnModuleInit, OnApplicationShutdo
     this.persistIntervalMs = options.persistIntervalMs ?? DEFAULT_PERSIST_INTERVAL_MS;
     this.retentionMs = options.retentionMs ?? DEFAULT_RETENTION_MS;
     this.maxSamples = options.maxSamples ?? DEFAULT_MAX_SAMPLES;
+    this.captureTimeoutMs =
+      typeof options.captureTimeoutMs === "number" &&
+      Number.isFinite(options.captureTimeoutMs) &&
+      options.captureTimeoutMs > 0
+        ? options.captureTimeoutMs
+        : DEFAULT_CAPTURE_TIMEOUT_MS;
     this.history = new ResourceHistory({
       maxAgeMs: this.retentionMs,
       maxSamples: this.maxSamples,
@@ -107,15 +121,36 @@ export class ResourceHistoryService implements OnModuleInit, OnApplicationShutdo
   /**
    * Registra uma amostra a partir das métricas já coletadas pelo scheduler.
    * `metrics` nulo (coleta falhou/stale) => não grava nada.
+   *
+   * A leitura do host tem watchdog próprio. Uma captura que não assenta não
+   * pode segurar o scheduler do coletor: o scheduler também tem um limite,
+   * mas o serviço não deve depender dele. Capturas sobrepostas são ignoradas
+   * (a anterior ainda está em andamento).
    */
   async capture(metrics: SystemMetrics | null): Promise<boolean> {
     if (!metrics || metrics.available === false || metrics.stale === true) return false;
     if (isDisabledByEnv("KORRELO_RESOURCE_HISTORY_ENABLED")) return false;
+    if (this.capturing) {
+      const now = Date.now();
+      if (now - this.lastCaptureSkipLogAt >= CAPTURE_SKIP_LOG_INTERVAL_MS) {
+        this.logger.warn(
+          "[resources] captura anterior ainda em andamento - amostra ignorada (o coletor de métricas segue)",
+        );
+        this.lastCaptureSkipLogAt = now;
+      }
+      return false;
+    }
+
+    this.capturing = true;
     try {
-      const host = await readHostResources({
-        provider: this.provider,
-        measureSwapActivity: true,
-      });
+      const host = await withTimeout(
+        readHostResources({
+          provider: this.provider,
+          measureSwapActivity: true,
+        }),
+        this.captureTimeoutMs,
+        "leitura de recursos do host",
+      );
       const sample: ResourceSample = {
         at: Date.now(),
         memAvailableMb: host.memAvailableMb,
@@ -142,6 +177,8 @@ export class ResourceHistoryService implements OnModuleInit, OnApplicationShutdo
         `[resources] amostra ignorada (falha de coleta): ${error instanceof Error ? error.message : String(error)}`,
       );
       return false;
+    } finally {
+      this.capturing = false;
     }
   }
 
@@ -245,4 +282,23 @@ function restrictMode(filePath: string): void {
   } catch {
     /* plataforma sem POSIX ou FS sem suporte a mode */
   }
+}
+
+class ResourceHistoryTimeoutError extends Error {
+  constructor(label: string, timeoutMs: number) {
+    super(`${label} excedeu ${timeoutMs}ms`);
+    this.name = "ResourceHistoryTimeoutError";
+  }
+}
+
+/** Timer unref'd: não atrasa o shutdown normal; o servidor mantém o loop vivo. */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new ResourceHistoryTimeoutError(label, timeoutMs)), timeoutMs);
+    timer.unref?.();
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
