@@ -17,6 +17,7 @@ import {
   assessStagingIsolation,
   isStagingIsolationRequired,
 } from "../domain/staging-isolation";
+import { resolveProjectRuntimeIsolation } from "../domain/project-isolation";
 import {
   describeSequentialBuildMode,
   isSequentialBuildEnabledForProject,
@@ -50,6 +51,7 @@ export interface SmartDeployPreview {
   };
   waitReasons: string[];
   isolation: ReturnType<typeof assessStagingIsolation>;
+  runtimeIsolation: ReturnType<typeof resolveProjectRuntimeIsolation>;
 }
 
 /**
@@ -68,6 +70,7 @@ export function buildSmartDeployPreview(params: {
   preflightOk: boolean;
   preflightReason: string | null;
   isolation: ReturnType<typeof assessStagingIsolation>;
+  runtimeIsolation: ReturnType<typeof resolveProjectRuntimeIsolation>;
 }): SmartDeployPreview {
   const commitPinned = Boolean(params.commit && /^[a-f0-9]{40}$/i.test(params.commit));
   const sequentialMode = describeSequentialBuildMode(params.projectId);
@@ -94,6 +97,7 @@ export function buildSmartDeployPreview(params: {
     },
     waitReasons: params.preflightOk ? [] : [params.preflightReason ?? "recursos insuficientes"],
     isolation: params.isolation,
+    runtimeIsolation: params.runtimeIsolation,
   };
 }
 
@@ -205,6 +209,7 @@ export class PreviewProjectDeployUseCase {
       { isolationRequired: isStagingIsolationRequired() },
     );
     const commitPinned = Boolean(options.commit && /^[a-f0-9]{40}$/i.test(options.commit));
+    const runtimeIsolation = resolveProjectRuntimeIsolation(project.id);
 
     if (managedDatabases.length > 0) {
       warnings.push(
@@ -275,6 +280,7 @@ export class PreviewProjectDeployUseCase {
         preflightOk: preflight.ok,
         preflightReason: preflight.reason,
         isolation,
+        runtimeIsolation,
       }),
       resources: {
         memAvailableMb: hostResources.memAvailableMb,

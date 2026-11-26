@@ -133,6 +133,12 @@ export class DockerComposeFileBuilder {
     const healthcheckBlock = this.buildHealthcheckBlock(config, stackLanguage);
     const stagingHealthcheckBlock = this.buildHealthcheckBlock(config, stackLanguage);    const memswapBlock = this.buildMemswapBlock(config.memoryLimitMb, config.memswapLimitMb);
     const stagingMemswapBlock = this.buildMemswapBlock(stagingMemoryLimit, config.memswapLimitMb);
+    const isolated = config.isolation?.enabled === true;
+    const appResourceLimits = this.buildResourceLimitBlock(config.isolation, false);
+    const stagingResourceLimits = this.buildResourceLimitBlock(config.isolation, true);
+    const appNetworks = isolated
+      ? ["    networks:", "      - default"]
+      : ["    networks:", "      - default", `      - ${SHARED_NETWORK}`];
 
     const lines = [
       "services:",
@@ -156,11 +162,10 @@ export class DockerComposeFileBuilder {
       `      - ${UPLOADS_VOLUME}:${UPLOADS_MOUNT_PATH}`,
       `    mem_limit: ${config.memoryLimitMb}m`,
       ...memswapBlock,
+      ...appResourceLimits,
       "    labels:",
       ...labels,
-      "    networks:",
-      "      - default",
-      `      - ${SHARED_NETWORK}`,
+      ...appNetworks,
       ...dependsOnDb,
       ...LOGGING_BLOCK,
       ...healthcheckBlock,
@@ -192,11 +197,10 @@ export class DockerComposeFileBuilder {
       `      - ${UPLOADS_VOLUME}:${UPLOADS_MOUNT_PATH}`,
       `    mem_limit: ${stagingMemoryLimit}m`,
       ...stagingMemswapBlock,
+      ...stagingResourceLimits,
       "    labels:",
       ...stagingLabels,
-      "    networks:",
-      "      - default",
-      `      - ${SHARED_NETWORK}`,
+      ...appNetworks,
       ...dependsOnDb,
       ...LOGGING_BLOCK,
       ...stagingHealthcheckBlock,
@@ -216,12 +220,29 @@ export class DockerComposeFileBuilder {
     lines.push(
       "networks:",
       "  default:",
-      `  ${SHARED_NETWORK}:`,
-      "    external: true",
+      ...(isolated ? [] : [`  ${SHARED_NETWORK}:`, "    external: true"]),
     );
 
     lines.push("");
     return lines.join("\n");
+  }
+
+  /** CPU/PIDs explícitos SÓ no modo isolado; default não emite nada. */
+  private buildResourceLimitBlock(
+    isolation: DeployConfig["isolation"],
+    staging: boolean,
+  ): string[] {
+    if (!isolation?.enabled) return [];
+    const cpus = staging ? (isolation.stagingCpus ?? isolation.cpus) : isolation.cpus;
+    const pids = staging ? (isolation.stagingPidsLimit ?? isolation.pidsLimit) : isolation.pidsLimit;
+    const lines: string[] = [];
+    if (typeof cpus === "number" && Number.isFinite(cpus) && cpus > 0) {
+      lines.push(`    cpus: ${cpus}`);
+    }
+    if (typeof pids === "number" && Number.isInteger(pids) && pids > 0) {
+      lines.push(`    pids_limit: ${pids}`);
+    }
+    return lines;
   }
 
   /**

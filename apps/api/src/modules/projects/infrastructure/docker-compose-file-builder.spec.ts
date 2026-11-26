@@ -120,6 +120,52 @@ describe("DockerComposeFileBuilder (Wave 2)", () => {
     }
   });
 
+  it("projeto normal mantém korrelo-shared e não recebe limites de CPU/PIDs", () => {
+    const compose = builder.build(baseConfig(), "Node.js");
+
+    expect(compose).toContain("      - korrelo-shared");
+    expect(compose).toContain("  korrelo-shared:\n    external: true");
+    expect(compose).not.toContain("cpus:");
+    expect(compose).not.toContain("pids_limit:");
+  });
+
+  it("projeto isolado usa somente a rede default e recebe CPU/PIDs explícitos", () => {
+    const compose = builder.build(
+      baseConfig({
+        isolation: { enabled: true, cpus: 0.25, pidsLimit: 64 },
+        healthcheck: {
+          enabled: true,
+          path: "/healthz",
+          intervalSeconds: 10,
+          timeoutSeconds: 2,
+          retries: 3,
+          startPeriodSeconds: 5,
+        },
+      }),
+      "Node.js",
+    );
+
+    expect(compose).not.toContain("korrelo-shared");
+    expect(compose).toContain("    networks:\n      - default");
+    expect(compose).toContain("cpus: 0.25");
+    expect(compose).toContain("pids_limit: 64");
+    expect(compose.match(/cpus: 0\.25/g)).toHaveLength(2);
+    expect(compose.match(/pids_limit: 64/g)).toHaveLength(2);
+    expect(compose).toContain("127.0.0.1:3100:3000");
+    expect(compose).toContain("127.0.0.1:3101:3000");
+    expect(compose).toContain("healthcheck:");
+  });
+
+  it("projeto isolado não declara nem referencia a rede compartilhada", () => {
+    const compose = builder.build(
+      baseConfig({ isolation: { enabled: true, cpus: 0.25, pidsLimit: 64 } }),
+      "Node.js",
+    );
+
+    expect(compose).not.toContain("external: true");
+    expect(compose).not.toContain("korrelo-shared");
+  });
+
   it("só o app_staging recebe a identificação de ambiente de teste", () => {
     const compose = builder.build(baseConfig(), "Node.js");
     const appBlock = compose.slice(compose.indexOf("  app:"), compose.indexOf("  app_staging:"));

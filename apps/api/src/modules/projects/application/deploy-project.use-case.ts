@@ -76,6 +76,7 @@ import {
   assessStagingIsolation,
   isStagingIsolationRequired,
 } from "../domain/staging-isolation";
+import { resolveProjectRuntimeIsolation } from "../domain/project-isolation";
 import { verifyProductionImage } from "./post-promotion-image-verifier";
 
 const HEALTH_CHECK_TIMEOUT_MS = 30_000;
@@ -397,12 +398,20 @@ export class DeployProjectUseCase {
         );
       }
 
+      const runtimeIsolation = resolveProjectRuntimeIsolation(project.id);
       deployConfig = {
         projectPath,
         containerName,
         hostPort,
         containerPort: stack.recommendedPort ?? 3000,
         memoryLimitMb: plan.productionLimitMb,
+        isolation: runtimeIsolation.enabled
+          ? {
+              enabled: true,
+              cpus: runtimeIsolation.cpus ?? 0.25,
+              pidsLimit: runtimeIsolation.pidsLimit ?? 64,
+            }
+          : null,
         staging: {
           containerName: stagingContainerName,
           hostPort: stagingHostPort,

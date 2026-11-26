@@ -127,6 +127,18 @@ export interface DeployConfig {
   // Teto de swap do container. null = não emitir (comportamento padrão do
   // Docker: o container pode usar swap até 2x o mem_limit).
   memswapLimitMb?: number | null;
+  /**
+   * Isolamento opt-in de projeto de laboratório. Ausente/false = compose
+   * idêntico ao atual (inclui `korrelo-shared`). Quando true, somente a rede
+   * privada do projeto é usada e CPU/PIDs recebem limites explícitos.
+   */
+  isolation?: {
+    enabled: boolean;
+    cpus: number;
+    pidsLimit: number;
+    stagingCpus?: number;
+    stagingPidsLimit?: number;
+  } | null;
 }
 
 export interface TeardownConfig {

@@ -1,5 +1,6 @@
 import { buildSmartDeployPreview } from "./preview-project-deploy.use-case";
 import { assessStagingIsolation } from "../domain/staging-isolation";
+import { resolveProjectRuntimeIsolation } from "../domain/project-isolation";
 
 const PROJECT = "proj-mesatta";
 const SHA = "a".repeat(40);
@@ -23,6 +24,7 @@ function preview(overrides: Partial<Parameters<typeof buildSmartDeployPreview>[0
     preflightOk: false,
     preflightReason: "memória livre insuficiente",
     isolation: sharedIsolation,
+    runtimeIsolation: resolveProjectRuntimeIsolation(PROJECT, {}),
     ...overrides,
   });
 }
@@ -32,6 +34,7 @@ describe("prévia Smart Deploy", () => {
     delete process.env.KORRELO_SEQUENTIAL_PROJECTS;
     delete process.env.KORRELO_SEQUENTIAL_BUILD;
     delete process.env.KORRELO_STAGING_REQUIRE_ISOLATION;
+    delete process.env.KORRELO_ISOLATED_PROJECTS;
   });
 
   it("projeto autorizado com commit fixado mostra estratégia sequencial", () => {
