@@ -163,8 +163,110 @@ export class DockerComposeOrchestrator implements ContainerOrchestrator {
     }
   }
 
-  async deployStaging(config: DeployConfig): Promise<string> {
-    // A tag NUNCA vem de default do compose nem de .env: é exigida aqui e
+  /**
+   * PIPELINE SEQUENCIAL — FASE 1.
+   *
+   * Apenas constrói a imagem do job. NÃO cria/recria staging nem produção.
+   * É o mesmo comando `docker compose build` que o `up --build` executaria,
+   * mas separado para permitir reavaliação de recursos antes de subir o
+   * container de teste.
+   */
+  async buildCandidate(config: DeployConfig): Promise<string> {
+    const imageTag = this.requireImageTag(config, "build");
+    const build = await this.withLowPriority("docker", [
+      "compose",
+      ...this.composeFileArgs(config),
+      "build",
+      "app_staging",
+    ]);
+    try {
+      const { stdout, stderr } = await execFile(build.command, build.args, {
+        cwd: config.projectPath,
+        timeout: STAGING_TIMEOUT_MS,
+        env: this.composeEnvironment(imageTag),
+      });
+      return combineOutput(stdout, stderr);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new InternalServerErrorException(
+        apiError("CONTAINER_BUILD_FAILED", `Falha ao construir a imagem do deploy: ${message}\n${execOutputOf(error)}`),
+      );
+    }
+  }
+
+  /**
+   * PIPELINE SEQUENCIAL — FASE 2.
+   *
+   * Sobe o staging usando a imagem JÁ construída. `--no-build` impede build
+   * duplicado e `--no-deps` impede tocar no banco de produção.
+   */
+  async startStaging(config: DeployConfig): Promise<string> {
+    const imageTag = this.requireImageTag(config, "staging");
+    await this.ensureSharedNetwork();
+    try {
+      const { stdout, stderr } = await execFile(
+        "docker",
+        [
+          "compose",
+          ...this.composeFileArgs(config),
+          "up",
+          "-d",
+          "--no-build",
+          "--no-deps",
+          "app_staging",
+        ],
+        {
+          cwd: config.projectPath,
+          timeout: STAGING_TIMEOUT_MS,
+          env: this.composeEnvironment(imageTag),
+        },
+      );
+      return combineOutput(stdout, stderr);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new InternalServerErrorException(
+        apiError(
+          "CONTAINER_START_FAILED",
+          `Falha ao subir o container de teste sem novo build: ${message}\n${execOutputOf(error)}`,
+        ),
+      );
+    }
+  }
+
+  /** ID real da imagem; null quando não é possível comprovar. */
+  async imageId(reference: string): Promise<string | null> {
+    if (!reference || reference.startsWith("sha256")) return null;
+    try {
+      const { stdout } = await execFile("docker", ["image", "inspect", "--format", "{{.Id}}", reference], {
+        timeout: 10_000,
+      });
+      const value = stdout.trim();
+      return /^sha256:[a-f0-9]{64}$/i.test(value) ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * ID da imagem que o CONTAINER está realmente executando.
+   *
+   * Diferente de `imageId` (que resolve uma tag), isto lê `.Image` do
+   * container. É a prova de que staging/produção não rodaram outra imagem.
+   */
+  async containerImageId(containerName: string): Promise<string | null> {
+    if (!containerName) return null;
+    try {
+      const { stdout } = await execFile("docker", ["inspect", "--format", "{{.Image}}", containerName], {
+        timeout: 10_000,
+      });
+      const value = stdout.trim();
+      return /^sha256:[a-f0-9]{64}$/i.test(value) ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async deployStaging(config: DeployConfig): Promise<string> {    // A tag NUNCA vem de default do compose nem de .env: é exigida aqui e
     // passada explicitamente (env vence .env do projeto e env do Core).
     const imageTag = this.requireImageTag(config, "staging");
     await this.ensureSharedNetwork();

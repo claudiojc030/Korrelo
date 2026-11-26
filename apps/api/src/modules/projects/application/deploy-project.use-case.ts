@@ -70,6 +70,7 @@ import {
 } from "../domain/staging-config";
 import type { HealthcheckConfig } from "../domain/container-orchestrator";
 import { StagingDeployIntegrationService } from "./staging-deploy-integration.service";
+import { SequentialDeployRunner, isSequentialBuildEnabled } from "./sequential-deploy.runner";
 
 const HEALTH_CHECK_TIMEOUT_MS = 30_000;
 
@@ -182,6 +183,13 @@ export class DeployProjectUseCase {
      */
     @Optional()
     private readonly isolatedStaging: StagingDeployIntegrationService | null = null,
+    /**
+     * Pipeline sequencial (Smart Deploy V2), SEMPRE atrás de
+     * KORRELO_SEQUENTIAL_BUILD (default desligada). Sem ele, o fluxo antigo
+     * roda exatamente como antes.
+     */
+    @Optional()
+    private readonly sequentialRunner: SequentialDeployRunner | null = null,
   ) {}
 
   async executeJob(job: DeployJob): Promise<void> {
@@ -228,6 +236,8 @@ export class DeployProjectUseCase {
     let stagingCreated = false;
     let isolatedStagingHandled = false;
     let isolatedImageId: string | null = null;
+    /** ID da imagem construída na fase sequencial; promoção exige o mesmo. */
+    let sequentialImageId: string | null = null;
     let candidateImage: string | null = null;
     let previousImage: string | null = null;
     /**
@@ -486,35 +496,90 @@ export class DeployProjectUseCase {
       // ------------------------------------------------------------------
       if (!isolatedStagingHandled && (stagingOnly || !project.skipStagingTest)) {
         await this.setStage(job, "staging-start", context);
-        const hostWait = await this.resourcePreflight.waitForSafeHost({
-          // A política é a MESMA do preflight da fila: requisito base do
-          // build (1024) + o HEADROOM da produção (limite - uso atual) +
-          // margem + staging. MemAvailable já desconta o consumo atual, por
-          // isso o limite inteiro da produção não é somado de novo.
-          productionLimitMb: plan.productionLimitMb,
-          productionContainerName: project.containerName,
-          requiredDiskMb: undefined,
-          stagingReservationMb: plan.stagingLimitMb,
-          log: (message) => this.deployLogger.log("staging-start", context, message),
-        });
-        if (!hostWait.safe) {
-          throw new DeployFailure(
-            `O host não ficou com recursos para o build em ${hostWait.waitedSec}s (${hostWait.reason}). ` +
-              "A versão em produção não foi tocada - o deploy pode ser tentado de novo mais tarde.",
-            false,
+        const sequentialEligible =
+          isSequentialBuildEnabled() &&
+          this.sequentialRunner !== null &&
+          Boolean(job.commitSha) &&
+          Boolean(deployConfig.commitSha) &&
+          Boolean(candidateImage) &&
+          typeof this.orchestrator.buildCandidate === "function" &&
+          typeof this.orchestrator.startStaging === "function" &&
+          typeof this.orchestrator.imageId === "function" &&
+          typeof this.orchestrator.containerImageId === "function";
+
+        if (sequentialEligible) {
+          // O SHA do job é imutável; o workspace e a imagem precisam ser
+          // exatamente dele. Divergência bloqueia antes de qualquer container.
+          if (job.commitSha !== deployConfig.commitSha) {
+            throw new DeployFailure(
+              `O workspace está no commit ${String(deployConfig.commitSha).slice(0, 7)}, mas o job autorizou ` +
+                `${String(job.commitSha).slice(0, 7)}. Nada foi construído nem promovido.`,
+              false,
+            );
+          }
+          this.deployLogger.log("staging-start", context, "pipeline sequencial habilitado", {
+            commit: job.commitSha,
+          });
+          const prepared = await this.sequentialRunner!.prepare({
+            config: deployConfig,
+            productionLimitMb: plan.productionLimitMb,
+            productionContainerName: project.containerName,
+            buildRequirementMb: 1024,
+            stagingRequirementMb: plan.stagingLimitMb,
+            log: (message) => this.deployLogger.log("staging-start", context, message),
+          });
+          sequentialImageId = prepared.imageId;
+          // A partir daqui o container de TESTE existe (runner só retorna
+          // depois de subir e reverificar a imagem).
+          stagingCreated = true;
+          await this.deployJobRepository.save(job.withDurations(prepared.buildDurationMs, null));
+          this.deployLogger.log("staging-start", context, "build sequencial concluído", {
+            buildDurationMs: prepared.buildDurationMs,
+            stagingWaitSec: prepared.stagingWaitSec,
+          });
+          deployRecord = await this.deployRecordRepository.save(
+            deployRecord.appendLog(
+              `--- build (sequencial) ---\n${prepared.buildLog}\n--- staging (sem build) ---\n${prepared.stagingLog}`,
+            ),
+          );
+        } else {
+          if (isSequentialBuildEnabled()) {
+            this.deployLogger.warn(
+              "staging-start",
+              context,
+              "pipeline sequencial recusado: commit não fixado ou orquestrador incompatível; mantendo fluxo conservador",
+            );
+          }
+          const hostWait = await this.resourcePreflight.waitForSafeHost({
+            // A política é a MESMA do preflight da fila: requisito base do
+            // build (1024) + o HEADROOM da produção (limite - uso atual) +
+            // margem + staging. MemAvailable já desconta o consumo atual, por
+            // isso o limite inteiro da produção não é somado de novo.
+            productionLimitMb: plan.productionLimitMb,
+            productionContainerName: project.containerName,
+            requiredDiskMb: undefined,
+            stagingReservationMb: plan.stagingLimitMb,
+            log: (message) => this.deployLogger.log("staging-start", context, message),
+          });
+          if (!hostWait.safe) {
+            throw new DeployFailure(
+              `O host não ficou com recursos para o build em ${hostWait.waitedSec}s (${hostWait.reason}). ` +
+                "A versão em produção não foi tocada - o deploy pode ser tentado de novo mais tarde.",
+              false,
+            );
+          }
+          const buildStartedAt = Date.now();
+          const stagingLog = await this.orchestrator.deployStaging(deployConfig);
+          const buildDurationMs = Date.now() - buildStartedAt;
+          // A partir daqui o container de TESTE existe: se algo falhar antes
+          // do cleanup, o estado dele é capturado antes de ser removido.
+          stagingCreated = true;
+          await this.deployJobRepository.save(job.withDurations(buildDurationMs, null));
+          this.deployLogger.log("staging-start", context, "build concluído", { buildDurationMs });
+          deployRecord = await this.deployRecordRepository.save(
+            deployRecord.appendLog(`--- build/staging ---\n${stagingLog}`),
           );
         }
-        const buildStartedAt = Date.now();
-        const stagingLog = await this.orchestrator.deployStaging(deployConfig);
-        const buildDurationMs = Date.now() - buildStartedAt;
-        // A partir daqui o container de TESTE existe: se algo falhar antes
-        // do cleanup, o estado dele é capturado antes de ser removido.
-        stagingCreated = true;
-        await this.deployJobRepository.save(job.withDurations(buildDurationMs, null));
-        this.deployLogger.log("staging-start", context, "build concluído", { buildDurationMs });
-        deployRecord = await this.deployRecordRepository.save(
-          deployRecord.appendLog(`--- build/staging ---\n${stagingLog}`),
-        );
 
         await this.setStage(job, "staging-health", context);
         // O timeout do staging é configurável POR PROJETO (o default é o de
@@ -567,6 +632,47 @@ export class DeployProjectUseCase {
         deployRecord = await this.deployRecordRepository.save(
           deployRecord.appendLog("--- deploy direto (sem container de teste, configurado nas Configurações) ---"),
         );
+      }
+
+      // O pipeline sequencial libera o staging ANTES da promoção e reavalia
+      // a memória: nesse momento só produção + novo container importam. Sem a
+      // reavaliação, a estratégia não é usada.
+      if (!stagingOnly && sequentialImageId && candidateImage) {
+        const verifiedImageId = await this.orchestrator.imageId?.(candidateImage);
+        if (!verifiedImageId || verifiedImageId !== sequentialImageId) {
+          throw new DeployFailure(
+            "A imagem construída mudou antes da promoção; a produção não foi tocada.",
+            false,
+          );
+        }
+        try {
+          await this.orchestrator.removeStaging({
+            projectPath: deployConfig.projectPath,
+            containerName: deployConfig.containerName,
+            composeFilePath: deployConfig.composeFilePath,
+          });
+        } catch (error) {
+          throw new DeployFailure(
+            `Não foi possível remover o staging (${(error as Error).message}); a promoção foi bloqueada ` +
+              "e a produção não foi tocada.",
+            false,
+          );
+        }
+        stagingRemoved = true;
+        const promotionWait = await this.resourcePreflight.waitForSafeHost({
+          productionLimitMb: plan.productionLimitMb,
+          productionContainerName: project.containerName,
+          requiredMemoryMb: plan.productionLimitMb,
+          stagingReservationMb: 0,
+          log: (message) => this.deployLogger.log("promote", context, message),
+        });
+        if (!promotionWait.safe) {
+          throw new DeployFailure(
+            `Build e staging concluídos, mas o host não ficou seguro para a promoção em ${promotionWait.waitedSec}s ` +
+              `(${promotionWait.reason}). A produção não foi tocada; a imagem construída permanece no servidor.`,
+            false,
+          );
+        }
       }
 
       // ------------------------------------------------------------------
@@ -653,6 +759,30 @@ export class DeployProjectUseCase {
         }
 
         await this.setStage(job, "production-health", context);
+        // PIPELINE SEQUENCIAL: prova que a produção está executando a MESMA
+        // imagem construída e validada. Tag sozinha não é prova. Divergência
+        // dispara rollback imediato para a imagem anterior.
+        if (sequentialImageId && this.orchestrator.containerImageId) {
+          const productionImageId = await this.orchestrator.containerImageId(deployConfig.containerName);
+          if (!productionImageId || productionImageId !== sequentialImageId) {
+            await this.setStage(job, "rollback", context);
+            const outcome = await this.rollbackIfPossible(
+              await this.rollbackDeployConfig(deployConfig, context),
+              previousImage,
+              context,
+            );
+            rollbackAttempted = rollbackAttempted || outcome.attempted;
+            rollbackSucceeded = outcome.restored && outcome.healthy;
+            await this.deployJobRepository.save(job.withRollback(true, rollbackSucceeded));
+            throw new DeployFailure(
+              rollbackSucceeded
+                ? "A produção subiu com uma imagem diferente da validada. Rollback executado: a versão anterior está no ar."
+                : "A produção subiu com uma imagem diferente da validada e o rollback não pôde ser confirmado. " +
+                  "ESTADO INDETERMINADO: valide o serviço antes de outro deploy.",
+              !rollbackSucceeded,
+            );
+          }
+        }
         const productionHealthy = await this.healthChecker.waitUntilHealthy(
           deployConfig.hostPort,
           this.productionHealthTimeoutMs(deployConfig),

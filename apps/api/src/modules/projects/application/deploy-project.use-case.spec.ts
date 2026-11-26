@@ -51,9 +51,16 @@ class FakeProjectRepository {
   }
 }
 
+import { SequentialDeployRunner } from "./sequential-deploy.runner";
+
+const SEQUENTIAL_IMAGE_ID = `sha256:${"9".repeat(64)}`;
+
 class FakeOrchestrator {
   stagingCalls = 0;
   promoteCalls = 0;
+  buildCalls = 0;
+  startStagingCalls = 0;
+  failRemoveStaging = false;
   rollbackCalls: { previousImage: string; config?: any }[] = [];
   removeStagingCalls = 0;
   removeStagingConfigs: any[] = [];
@@ -98,6 +105,21 @@ class FakeOrchestrator {
     if (this.failStaging) throw new Error("falha no staging");
     return "staging ok";
   }
+  async buildCandidate(): Promise<string> {
+    this.buildCalls += 1;
+    return "build ok";
+  }
+  async startStaging(): Promise<string> {
+    this.startStagingCalls += 1;
+    return "staging sem build";
+  }
+  async imageId(): Promise<string | null> {
+    return SEQUENTIAL_IMAGE_ID;
+  }
+  async containerImageId(containerName: string): Promise<string | null> {
+    // Staging e produção rodam a mesma imagem no caminho feliz.
+    return containerName.includes("staging") ? SEQUENTIAL_IMAGE_ID : SEQUENTIAL_IMAGE_ID;
+  }
   async pruneUnusedBuildArtifacts(): Promise<any> {
     this.buildPruneCalls += 1;
     if (this.failBuildPrune) throw new Error("docker indisponível");
@@ -117,6 +139,7 @@ class FakeOrchestrator {
   async removeStaging(config?: any): Promise<void> {
     this.removeStagingCalls += 1;
     this.removeStagingConfigs.push(config ?? null);
+    if (this.failRemoveStaging) throw new Error("falha ao remover staging");
   }
   async imageReferenceExists(reference: string): Promise<boolean> {
     this.checkedImages.push(reference);
@@ -346,6 +369,7 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { safeHostResourceProvider } = require("../../../infrastructure/host-resources");
 
+    const preflight = new ResourcePreflightService(safeHostResourceProvider());
     useCase = new DeployProjectUseCase(
       projectRepository,
       { supports: () => true, generate: () => ({ dockerfile: "FROM node:20-alpine\n", dockerignore: ".env.korrelo\n" }) },
@@ -373,6 +397,10 @@ describe("DeployProjectUseCase (Wave 2)", () => {
       deployLock as any,
       selfUpdateState,
       imageGcAudit as any,
+      null,
+      // Pipeline sequencial: mesmo preflight e fake orchestrator; a flag
+      // controla se ele é usado em cada teste.
+      new SequentialDeployRunner(orchestrator as any, preflight as any),
     );
   });
 
@@ -383,6 +411,9 @@ describe("DeployProjectUseCase (Wave 2)", () => {
   beforeEach(() => {
     orchestrator.stagingCalls = 0;
     orchestrator.promoteCalls = 0;
+    orchestrator.buildCalls = 0;
+    orchestrator.startStagingCalls = 0;
+    orchestrator.failRemoveStaging = false;
     orchestrator.rollbackCalls = [];
     orchestrator.removeStagingCalls = 0;
     orchestrator.removeStagingConfigs = [];
@@ -1396,5 +1427,32 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     expect(orchestrator.promoteCalls).toBe(0);
     expect(fs.readFileSync(stableComposePath(), "utf-8")).toBe(sentinel);
     expect(jobComposeFiles()).toEqual([]);
+  });
+
+  it("flag sequencial: builda uma vez e sobe staging sem novo build", async () => {
+    process.env.KORRELO_SEQUENTIAL_BUILD = "1";
+    try {
+      await useCase.executeJob(makeJob());
+
+      expect(orchestrator.buildCalls).toBe(1);
+      expect(orchestrator.stagingCalls).toBe(0);
+      expect(orchestrator.startStagingCalls).toBe(1);
+      expect(orchestrator.promoteCalls).toBe(1);
+    } finally {
+      delete process.env.KORRELO_SEQUENTIAL_BUILD;
+    }
+  });
+
+  it("flag sequencial: falha ao remover staging bloqueia a promoção", async () => {
+    process.env.KORRELO_SEQUENTIAL_BUILD = "1";
+    orchestrator.failRemoveStaging = true;
+    try {
+      await expect(useCase.executeJob(makeJob())).rejects.toThrow(/remover o staging/i);
+
+      expect(orchestrator.promoteCalls).toBe(0);
+      expect(orchestrator.rollbackCalls).toHaveLength(0);
+    } finally {
+      delete process.env.KORRELO_SEQUENTIAL_BUILD;
+    }
   });
 });

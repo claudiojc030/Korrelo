@@ -98,7 +98,7 @@ import { PROJECT_DOMAIN_ALIAS_REPOSITORY } from "./domain/project-domain-alias.r
 import { STACK_DETECTOR } from "./domain/stack-detector";
 import { REPOSITORY_CLONER } from "./domain/repository-cloner";
 import { DOCKERFILE_GENERATOR } from "./domain/dockerfile-generator";
-import { CONTAINER_ORCHESTRATOR } from "./domain/container-orchestrator";
+import { CONTAINER_ORCHESTRATOR, type ContainerOrchestrator } from "./domain/container-orchestrator";
 import { HEALTH_CHECKER } from "./domain/health-checker";
 import { LOG_READER } from "./domain/log-reader";
 import { DOMAIN_PROVISIONER } from "./domain/domain-provisioner";
@@ -117,6 +117,7 @@ import { WorkerLock } from "./infrastructure/worker-lock";
 import { ResourcePreflightService } from "./infrastructure/resource-preflight.service";
 import { ResourceHistoryService } from "./infrastructure/resource-history.service";
 import { ResourceProfileService } from "./infrastructure/resource-profile.service";
+import { SequentialDeployRunner } from "./application/sequential-deploy.runner";
 import { inspectContainerTruth } from "./infrastructure/docker-container-inspector";
 import { DeployLogger } from "./infrastructure/deploy-logger";
 import { StagingCleanupService } from "./infrastructure/staging-cleanup.service";
@@ -223,6 +224,34 @@ import {
     WorkerLock,
     ResourceHistoryService,
     ResourceProfileService,
+    {
+      // Runner puro do pipeline sequencial. Só é usado quando
+      // KORRELO_SEQUENTIAL_BUILD=1 e há commit fixado; sem a flag, nunca roda.
+      provide: SequentialDeployRunner,
+      useFactory: (orchestrator: ContainerOrchestrator, preflight: ResourcePreflightService) =>
+        new SequentialDeployRunner(
+          {
+            buildCandidate: (config) => {
+              if (!orchestrator.buildCandidate) throw new Error("orquestrador sem buildCandidate");
+              return orchestrator.buildCandidate(config);
+            },
+            startStaging: (config) => {
+              if (!orchestrator.startStaging) throw new Error("orquestrador sem startStaging");
+              return orchestrator.startStaging(config);
+            },
+            imageId: (reference) => {
+              if (!orchestrator.imageId) return Promise.resolve(null);
+              return orchestrator.imageId(reference);
+            },
+            containerImageId: (containerName) => {
+              if (!orchestrator.containerImageId) return Promise.resolve(null);
+              return orchestrator.containerImageId(containerName);
+            },
+          },
+          preflight,
+        ),
+      inject: [CONTAINER_ORCHESTRATOR, ResourcePreflightService],
+    },
     ResourcePreflightService,
     {
       provide: CONTAINER_INSPECTOR,

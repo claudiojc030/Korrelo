@@ -182,6 +182,21 @@ export interface ContainerOrchestrator {
   // no container em produção (app) de jeito nenhum. Retorna stdout+stderr
   // combinados do docker compose, pro histórico de deploy mostrar o log real.
   deployStaging(config: DeployConfig): Promise<string>;
+  /**
+   * FASE 1 do pipeline sequencial (flag desligada = não usado):
+   * constrói a imagem do job com `docker compose build app_staging`, SEM
+   * criar/recriar container. Não toca na produção.
+   */
+  buildCandidate?(config: DeployConfig): Promise<string>;
+  /**
+   * FASE 2 do pipeline sequencial: sobe SOMENTE o staging a partir da imagem
+   * já construída (`up --no-build --no-deps app_staging`). Nunca builda.
+   */
+  startStaging?(config: DeployConfig): Promise<string>;
+  /** ID real (sha256:...) da imagem referenciada; null se ausente. */
+  imageId?(reference: string): Promise<string | null>;
+  /** ID da imagem que o CONTAINER está executando; null se indisponível. */
+  containerImageId?(containerName: string): Promise<string | null>;
   // Só chamado depois que a instância de teste passou no health check. Recria
   // o serviço "app" de verdade reaproveitando a imagem já buildada (rápido,
   // não é um build novo) - esse é o único momento em que a versão em produção

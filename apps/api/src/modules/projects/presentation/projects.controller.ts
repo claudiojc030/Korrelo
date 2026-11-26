@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Res } from "@nestjs/common";
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Put, Query, Res, BadRequestException } from "@nestjs/common";
 import type { Response } from "express";
 import { ListProjectsUseCase } from "../application/list-projects.use-case";
 import { GetProjectUseCase } from "../application/get-project.use-case";
@@ -49,6 +49,20 @@ import { UpdateProjectSettingsDto } from "./update-project-settings.dto";
 import { AttachDomainDto } from "./attach-domain.dto";
 import { DeployQueueService } from "../infrastructure/deploy-queue.service";
 import { ReconcileProjectStateUseCase } from "../application/reconcile-project-state.use-case";
+
+/**
+ * Commit opcional na solicitação: se informado, precisa ser SHA completo e
+ * fica imutável no job (nunca muda durante a fila). Ausente preserva o
+ * comportamento antigo (resolvido no início da execução).
+ */
+function parseRequestedCommit(raw: string | undefined | null): string | null {
+  const value = (raw ?? "").trim().toLowerCase();
+  if (!value) return null;
+  if (!/^[a-f0-9]{40}$/.test(value)) {
+    throw new BadRequestException("commit precisa ser um SHA completo de 40 caracteres.");
+  }
+  return value;
+}
 
 @Controller("projects")
 export class ProjectsController {
@@ -281,19 +295,20 @@ export class ProjectsController {
 
   @Post(":id/deploy")
   @HttpCode(202)
-  async deploy(@Param("id") id: string) {
+  async deploy(@Param("id") id: string, @Body() body?: { commit?: string }) {
     // Não espera o deploy inteiro terminar (pode levar minutos: build + health
     // check + promote) - sem isso, a requisição do botão "Deploy" ficava
     // pendurada o tempo todo, e a UI só sabia atualizar QUALQUER COISA (logs,
     // status) depois que a resposta chegasse no fim.
     //
     // Wave 2: o deploy entra na FILA GLOBAL (um por vez na VPS inteira) e o
-    // worker executa depois. O commit é resolvido na hora de rodar (é nesse
-    // momento que o repositório é buscado e o commit exato é checado out).
+    // worker executa depois. O commit pode ser FIXADO na solicitação; quando
+    // não é informado, o comportamento antigo é preservado (resolvido no run).
+    const commitSha = parseRequestedCommit(body?.commit);
     const project = await this.getProject.execute(id);
     const { job, created, deferred } = await this.deployQueue.enqueue({
       projectId: project.id,
-      commitSha: null,
+      commitSha,
       branch: project.deployBranch,
       trigger: "manual",
     });
@@ -328,11 +343,12 @@ export class ProjectsController {
    */
   @Post(":id/deploy-staging")
   @HttpCode(202)
-  async deployStagingOnly(@Param("id") id: string) {
+  async deployStagingOnly(@Param("id") id: string, @Body() body?: { commit?: string }) {
+    const commitSha = parseRequestedCommit(body?.commit);
     const project = await this.getProject.execute(id);
     const { job, created } = await this.deployQueue.enqueue({
       projectId: project.id,
-      commitSha: null,
+      commitSha,
       branch: project.deployBranch,
       trigger: "staging",
     });
