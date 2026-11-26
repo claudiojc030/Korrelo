@@ -58,11 +58,33 @@ export class SimpleGitRepositoryCloner implements RepositoryCloner {
     }
   }
 
-  async getLastCommit(destPath: string): Promise<{ hash: string; message: string } | null> {
-    try {
+  async getLastCommit(destPath: string): Promise<{ hash: string; message: string } | null> {    try {
       const log = await simpleGit(destPath).log({ maxCount: 1 });
       const latest = log.latest;
       return latest ? { hash: latest.hash.slice(0, 7), message: latest.message } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * HEAD remoto da branch, sem clone/checkout/Docker.
+   * Retorna null em qualquer falha ou SHA inválido.
+   */
+  async resolveBranchHead(
+    repoUrl: string,
+    branch: string,
+    accessToken?: string,
+  ): Promise<string | null> {
+    const name = (branch ?? "").trim();
+    if (!name || name.includes("..") || !/^[A-Za-z0-9._/-]+$/.test(name)) return null;
+    try {
+      const remote = withAccessToken(repoUrl, accessToken);
+      const output = await simpleGit().listRemote(["--heads", remote, `refs/heads/${name}`]);
+      const line = output.trim().split("\n").find((entry) => entry.includes(`refs/heads/${name}`));
+      if (!line) return null;
+      const sha = line.split(/\s+/)[0]?.trim().toLowerCase() ?? "";
+      return /^[a-f0-9]{40}$/.test(sha) ? sha : null;
     } catch {
       return null;
     }

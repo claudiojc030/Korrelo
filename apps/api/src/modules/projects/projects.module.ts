@@ -118,6 +118,7 @@ import { ResourcePreflightService } from "./infrastructure/resource-preflight.se
 import { ResourceHistoryService } from "./infrastructure/resource-history.service";
 import { ResourceProfileService } from "./infrastructure/resource-profile.service";
 import { SequentialDeployRunner } from "./application/sequential-deploy.runner";
+import { ResolveDeployCommitUseCase } from "./application/resolve-deploy-commit.use-case";
 import { inspectContainerTruth } from "./infrastructure/docker-container-inspector";
 import { DeployLogger } from "./infrastructure/deploy-logger";
 import { StagingCleanupService } from "./infrastructure/staging-cleanup.service";
@@ -224,6 +225,7 @@ import {
     WorkerLock,
     ResourceHistoryService,
     ResourceProfileService,
+    ResolveDeployCommitUseCase,
     {
       // Runner puro do pipeline sequencial. Só é usado quando
       // KORRELO_SEQUENTIAL_BUILD=1 e há commit fixado; sem a flag, nunca roda.

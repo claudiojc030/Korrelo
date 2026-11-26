@@ -13,6 +13,14 @@ import {
 } from "../infrastructure/docker-container-inspector";
 import { decideStagingHealthTimeout } from "../domain/staging-config";
 import { STAGING_DEPLOY_ENV_VALUE } from "../domain/staging-config";
+import {
+  assessStagingIsolation,
+  isStagingIsolationRequired,
+} from "../domain/staging-isolation";
+import {
+  describeSequentialBuildMode,
+  isSequentialBuildEnabledForProject,
+} from "./sequential-deploy.enablement";
 
 /** Token do inspetor de container (injetável nos testes). */
 export const CONTAINER_INSPECTOR = Symbol("CONTAINER_INSPECTOR");
@@ -22,6 +30,72 @@ export const CONTAINER_INSPECTOR = Symbol("CONTAINER_INSPECTOR");
  * default que o deploy usa. Configurável por projeto.
  */
 const DEFAULT_STAGING_HEALTH_TIMEOUT_SECONDS = 30;
+
+export interface SmartDeployPreview {
+  mode: "sequential" | "legacy";
+  strategy: "sequential" | "legacy";
+  projectAuthorized: boolean;
+  flagEnabled: boolean;
+  flagReason: string;
+  commitPinned: boolean;
+  readyToStart: false;
+  readyReason: string;
+  estimates: {
+    buildMemoryMb: number;
+    productionLimitMb: number;
+    stagingLimitMb: number;
+    requiredHostMemoryMb: number;
+    availableForBuildMb: number;
+    memAvailableMb: number | null;
+  };
+  waitReasons: string[];
+  isolation: ReturnType<typeof assessStagingIsolation>;
+}
+
+/**
+ * Prévia PURA da estratégia. Não executa nada e nunca promete prontidão:
+ * `readyToStart` é sempre false porque a decisão final é do preflight do
+ * worker. Serve para o painel explicar o que aconteceria.
+ */
+export function buildSmartDeployPreview(params: {
+  projectId: string;
+  commit: string | null;
+  productionLimitMb: number;
+  stagingLimitMb: number;
+  requiredHostMemoryMb: number;
+  availableForBuildMb: number;
+  memAvailableMb: number | null;
+  preflightOk: boolean;
+  preflightReason: string | null;
+  isolation: ReturnType<typeof assessStagingIsolation>;
+}): SmartDeployPreview {
+  const commitPinned = Boolean(params.commit && /^[a-f0-9]{40}$/i.test(params.commit));
+  const sequentialMode = describeSequentialBuildMode(params.projectId);
+  const authorized = isSequentialBuildEnabledForProject(params.projectId);
+  const strategy =
+    authorized && params.isolation.sequentialAllowed && commitPinned ? "sequential" : "legacy";
+  return {
+    mode: sequentialMode.enabled ? "sequential" : "legacy",
+    strategy,
+    projectAuthorized: authorized,
+    flagEnabled: sequentialMode.enabled,
+    flagReason: sequentialMode.reason,
+    commitPinned,
+    readyToStart: false,
+    readyReason:
+      "prévia somente leitura: a decisão final continua no preflight do worker e exige confirmação explícita",
+    estimates: {
+      buildMemoryMb: 1024,
+      productionLimitMb: params.productionLimitMb,
+      stagingLimitMb: params.stagingLimitMb,
+      requiredHostMemoryMb: params.requiredHostMemoryMb,
+      availableForBuildMb: params.availableForBuildMb,
+      memAvailableMb: params.memAvailableMb,
+    },
+    waitReasons: params.preflightOk ? [] : [params.preflightReason ?? "recursos insuficientes"],
+    isolation: params.isolation,
+  };
+}
 
 /**
  * DRY-RUN DO DEPLOY DE PROJETO (read-only).
@@ -120,6 +194,18 @@ export class PreviewProjectDeployUseCase {
     }
 
     const warnings: string[] = [];
+    const isolation = assessStagingIsolation(
+      {
+        sharesDatabase: managedDatabases.some((db) => db.type !== "custom"),
+        // O compose atual sempre monta `uploads-data` nos dois serviços.
+        sharesUploads: true,
+        sharesNetwork: true,
+        sharesEnv: true,
+      },
+      { isolationRequired: isStagingIsolationRequired() },
+    );
+    const commitPinned = Boolean(options.commit && /^[a-f0-9]{40}$/i.test(options.commit));
+
     if (managedDatabases.length > 0) {
       warnings.push(
         "O container de TESTE (staging) usa o MESMO env_file e a MESMA rede do app de produção: " +
@@ -134,6 +220,13 @@ export class PreviewProjectDeployUseCase {
       "O container de TESTE compartilha o volume 'uploads-data' com a produção: " +
         "o staging pode escrever no volume de uploads em produção.",
     );
+    if (isolation.blocker) warnings.push(isolation.blocker);
+    if (!commitPinned) {
+      warnings.push(
+        "Commit não fixado: a prévia não pode garantir qual SHA será implantado. " +
+          "Informe o SHA completo de 40 caracteres antes de confirmar.",
+      );
+    }
 
     // A configuração de staging deste projeto (o que seria aplicado no
     // container de TESTE) - o mesmo cálculo que o deploy faz.
@@ -167,9 +260,22 @@ export class PreviewProjectDeployUseCase {
       },
       candidate: {
         commit: options.commit ?? null,
+        commitPinned,
         branch: options.branch ?? null,
         image: candidateImage,
       },
+      smartDeploy: buildSmartDeployPreview({
+        projectId: project.id,
+        commit: options.commit ?? null,
+        productionLimitMb: plan.productionLimitMb,
+        stagingLimitMb: plan.stagingLimitMb,
+        requiredHostMemoryMb: preflight.metrics.requiredHostMemoryMb,
+        availableForBuildMb: preflight.metrics.availableForBuildMb,
+        memAvailableMb: hostResources.memAvailableMb,
+        preflightOk: preflight.ok,
+        preflightReason: preflight.reason,
+        isolation,
+      }),
       resources: {
         memAvailableMb: hostResources.memAvailableMb,
         memTotalMb: hostResources.memTotalMb,
@@ -208,13 +314,17 @@ export class PreviewProjectDeployUseCase {
         healthTimeoutSeconds: stagingHealthTimeout.seconds,
         healthTimeoutSource: stagingHealthTimeout.source,
         healthTimeoutApplied: stagingHealthTimeout.applied,
-        isolated: true,
+        isolated: isolation.isolated,
+        isolationLevel: isolation.level,
+        sharedResources: isolation.sharedResources,
         // O staging sobe com --no-deps: o Korrelo NUNCA inicia nem recria o
         // banco/volume de produção.
         noDeps: true,
         sharesProductionDatabase: managedDatabases.length > 0,
         sharesProductionVolume: true,
-        note: "o container de teste roda em paralelo à produção; volumes e bancos de produção não são tocados",
+        note:
+          "o container de teste roda em paralelo à produção e NÃO é isolado: " +
+          "compartilha banco, uploads, rede e env quando existirem",
       },
       warnings,
       health: {

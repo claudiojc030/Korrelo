@@ -29,4 +29,13 @@ export interface RepositoryCloner {
     accessToken: string | undefined,
     params: { branch?: string | null; commitSha?: string | null },
   ): Promise<{ sha: string; message: string }>;
+  /**
+   * Resolve APENAS o SHA do HEAD da branch, sem clonar, sem Docker e sem
+   * build. Usado pela prévia para o usuário confirmar a versão.
+   */
+  resolveBranchHead(
+    repoUrl: string,
+    branch: string,
+    accessToken?: string,
+  ): Promise<string | null>;
 }

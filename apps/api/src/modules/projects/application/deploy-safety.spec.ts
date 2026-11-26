@@ -650,7 +650,9 @@ describe("deploy de projeto - proteção da produção", () => {
       expect(preview.limits.productionLimitMb).toBeGreaterThan(0);
       expect(preview.limits.stagingLimitMb).toBeGreaterThan(0);
       expect(preview.staging.containerName).toContain("-staging");
-      expect(preview.staging.isolated).toBe(true);
+      expect(preview.staging.isolated).toBe(false);
+      expect(preview.staging.isolationLevel).toBe("shared");
+      expect(preview.staging.sharedResources.length).toBeGreaterThan(0);
       expect(preview.promotion.previousImageAvailable).toBe(true);
       expect(preview.rollback.available).toBe(true);
       expect(preview.rollback.image).toBe("korrelo-mesatta-8452004c:commit-anterior");

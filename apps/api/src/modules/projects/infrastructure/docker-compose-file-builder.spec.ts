@@ -107,6 +107,19 @@ describe("DockerComposeFileBuilder (Wave 2)", () => {
     expect(compose).toContain('NODE_OPTIONS: "--max-old-space-size=490"');
   });
 
+  it("app e app_staging usam o mesmo contexto de build e a mesma referência de imagem", () => {
+    const compose = builder.build(baseConfig(), "Node.js");
+    const appBlock = compose.slice(compose.indexOf("  app:"), compose.indexOf("  app_staging:"));
+    const stagingBlock = compose.slice(compose.indexOf("  app_staging:"));
+
+    for (const block of [appBlock, stagingBlock]) {
+      expect(block).toContain("    build: .");
+      expect(block).toContain(
+        "image: korrelo-app-1234abcd:${KORRELO_IMAGE_TAG:?KORRELO_IMAGE_TAG obrigatoria (definida pelo Korrelo)}",
+      );
+    }
+  });
+
   it("só o app_staging recebe a identificação de ambiente de teste", () => {
     const compose = builder.build(baseConfig(), "Node.js");
     const appBlock = compose.slice(compose.indexOf("  app:"), compose.indexOf("  app_staging:"));

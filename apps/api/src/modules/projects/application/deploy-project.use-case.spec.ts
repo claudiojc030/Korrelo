@@ -1492,4 +1492,17 @@ describe("DeployProjectUseCase (Wave 2)", () => {
       delete process.env.KORRELO_SEQUENTIAL_BUILD;
     }
   });
+
+  it("isolamento de staging exigido bloqueia o deploy antes do build", async () => {
+    process.env.KORRELO_STAGING_REQUIRE_ISOLATION = "1";
+    try {
+      await expect(useCase.executeJob(makeJob())).rejects.toThrow(/Staging isolado é exigido/i);
+
+      expect(orchestrator.stagingCalls).toBe(0);
+      expect(orchestrator.buildCalls).toBe(0);
+      expect(orchestrator.promoteCalls).toBe(0);
+    } finally {
+      delete process.env.KORRELO_STAGING_REQUIRE_ISOLATION;
+    }
+  });
 });

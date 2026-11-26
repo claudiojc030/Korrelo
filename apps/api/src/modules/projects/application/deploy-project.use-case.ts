@@ -70,7 +70,12 @@ import {
 } from "../domain/staging-config";
 import type { HealthcheckConfig } from "../domain/container-orchestrator";
 import { StagingDeployIntegrationService } from "./staging-deploy-integration.service";
-import { SequentialDeployRunner, isSequentialBuildEnabled } from "./sequential-deploy.runner";
+import { SequentialDeployRunner } from "./sequential-deploy.runner";
+import { isSequentialBuildEnabledForProject } from "./sequential-deploy.enablement";
+import {
+  assessStagingIsolation,
+  isStagingIsolationRequired,
+} from "../domain/staging-isolation";
 import { verifyProductionImage } from "./post-promotion-image-verifier";
 
 const HEALTH_CHECK_TIMEOUT_MS = 30_000;
@@ -374,6 +379,23 @@ export class DeployProjectUseCase {
       // O budget de banco é TOTAL por projeto e dividido entre os bancos
       // (Postgres + Redis NÃO recebem o budget inteiro cada um).
       const dbLimitByType = new Map(plan.databaseLimits.map((limit) => [limit.type, limit.limitMb]));
+      const stagingIsolation = assessStagingIsolation(
+        {
+          sharesDatabase: managedContainerDatabases.length > 0,
+          sharesUploads: true,
+          sharesNetwork: true,
+          sharesEnv: true,
+        },
+        { isolationRequired: isStagingIsolationRequired() },
+      );
+      if (stagingIsolation.isolationRequired && !stagingIsolation.isolated) {
+        throw new DeployFailure(
+          `Staging isolado é exigido, mas ${stagingIsolation.sharedResources.join(", ")} ` +
+            "são compartilhados com a produção. O deploy foi bloqueado antes de qualquer build; " +
+            "a produção não foi tocada.",
+          false,
+        );
+      }
 
       deployConfig = {
         projectPath,
@@ -504,7 +526,8 @@ export class DeployProjectUseCase {
       if (!isolatedStagingHandled && (stagingOnly || !project.skipStagingTest)) {
         await this.setStage(job, "staging-start", context);
         const sequentialEligible =
-          isSequentialBuildEnabled() &&
+          isSequentialBuildEnabledForProject(project.id) &&
+          stagingIsolation.sequentialAllowed &&
           this.sequentialRunner !== null &&
           Boolean(job.commitSha) &&
           Boolean(deployConfig.commitSha) &&
@@ -550,11 +573,15 @@ export class DeployProjectUseCase {
             ),
           );
         } else {
-          if (isSequentialBuildEnabled()) {
+          if (isSequentialBuildEnabledForProject(project.id)) {
             this.deployLogger.warn(
               "staging-start",
               context,
-              "pipeline sequencial recusado: commit não fixado ou orquestrador incompatível; mantendo fluxo conservador",
+              `pipeline sequencial recusado: ${
+                stagingIsolation.sequentialAllowed
+                  ? "commit não fixado ou orquestrador incompatível"
+                  : stagingIsolation.blocker ?? "isolamento insuficiente"
+              }; mantendo fluxo conservador`,
             );
           }
           const hostWait = await this.resourcePreflight.waitForSafeHost({

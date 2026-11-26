@@ -91,6 +91,22 @@ export interface ProjectDetailDict {
   deployJobResourceShadowFallback: string;
   deployAlreadyQueued: string;
   deployDeferred: string;
+  deployCommitLabel: string;
+  deployCommitPlaceholder: string;
+  deployPreview: string;
+  deployPreviewLoading: string;
+  deployStrategy: string;
+  deployStrategySequential: string;
+  deployStrategyLegacy: string;
+  deployPreviewMemory: string;
+  deployPreviewWait: string;
+  deployPreviewShared: string;
+  deployPreviewCommitRequired: string;
+  deployInvalidCommit: string;
+  deployDiscoverCommit: string;
+  deployDiscovering: string;
+  deployBranchLabel: string;
+  deployCommitShort: string;
 
   // domain-card.tsx
   customDomainTitle: string;
@@ -216,6 +232,22 @@ export const projectDetailEn: ProjectDetailDict = {
   deployJobResourceShadowFallback: "SIMULATION unavailable: {reason}. Conservative policy kept.",
   deployAlreadyQueued: "A deploy for this project is already queued or running — follow it above.",
   deployDeferred: "Worker is in maintenance; the deploy was queued and will start automatically.",
+  deployCommitLabel: "Exact commit (SHA)",
+  deployCommitPlaceholder: "40-character commit SHA",
+  deployPreview: "Preview",
+  deployPreviewLoading: "Loading preview...",
+  deployStrategy: "Strategy",
+  deployStrategySequential: "sequential build + staging",
+  deployStrategyLegacy: "current conservative flow",
+  deployPreviewMemory: "{required} MB required · {available} MB available",
+  deployPreviewWait: "Waiting: {reason}",
+  deployPreviewShared: "Shared with production: {resources}",
+  deployPreviewCommitRequired: "Enter the full SHA to pin the deployed version.",
+  deployInvalidCommit: "Commit must be a full 40-character SHA.",
+  deployDiscoverCommit: "Use latest commit from branch",
+  deployDiscovering: "Discovering commit...",
+  deployBranchLabel: "Branch",
+  deployCommitShort: "Short SHA",
   noDeployLogYet: "No log yet.",
 
   customDomainTitle: "Custom domain",
@@ -344,6 +376,22 @@ export const projectDetailPt: ProjectDetailDict = {
   deployJobResourceShadowFallback: "SIMULAÇÃO indisponível: {reason}. Política conservadora mantida.",
   deployAlreadyQueued: "Já existe um deploy deste projeto na fila ou em execução — acompanhe acima.",
   deployDeferred: "Worker em manutenção; o deploy foi enfileirado e começa sozinho.",
+  deployCommitLabel: "Commit exato (SHA)",
+  deployCommitPlaceholder: "SHA completo de 40 caracteres",
+  deployPreview: "Prévia",
+  deployPreviewLoading: "Carregando prévia...",
+  deployStrategy: "Estratégia",
+  deployStrategySequential: "build + staging sequenciais",
+  deployStrategyLegacy: "fluxo conservador atual",
+  deployPreviewMemory: "{required} MB exigidos · {available} MB disponíveis",
+  deployPreviewWait: "Aguardando: {reason}",
+  deployPreviewShared: "Compartilhado com produção: {resources}",
+  deployPreviewCommitRequired: "Informe o SHA completo para fixar a versão implantada.",
+  deployInvalidCommit: "O commit precisa ser um SHA completo de 40 caracteres.",
+  deployDiscoverCommit: "Usar último commit da branch",
+  deployDiscovering: "Descobrindo commit...",
+  deployBranchLabel: "Branch",
+  deployCommitShort: "SHA curto",
   noDeployLogYet: "Nenhum log ainda.",
 
   customDomainTitle: "Domínio personalizado",

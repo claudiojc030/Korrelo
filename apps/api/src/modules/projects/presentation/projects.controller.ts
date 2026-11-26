@@ -10,6 +10,7 @@ import { ListEnvVarsUseCase } from "../application/list-env-vars.use-case";
 import { SetEnvVarsUseCase } from "../application/set-env-vars.use-case";
 import { GetProjectDiskUsageUseCase } from "../application/get-project-disk-usage.use-case";
 import { PreviewProjectDeployUseCase } from "../application/preview-project-deploy.use-case";
+import { ResolveDeployCommitUseCase } from "../application/resolve-deploy-commit.use-case";
 import { ProvisionDatabaseUseCase } from "../application/provision-database.use-case";
 import { DeprovisionDatabaseUseCase } from "../application/deprovision-database.use-case";
 import { GetManagedDatabaseUseCase } from "../application/get-managed-database.use-case";
@@ -78,6 +79,7 @@ export class ProjectsController {
     private readonly setEnvVars: SetEnvVarsUseCase,
     private readonly getProjectDiskUsage: GetProjectDiskUsageUseCase,
     private readonly previewProjectDeploy: PreviewProjectDeployUseCase,
+    private readonly resolveDeployCommit: ResolveDeployCommitUseCase,
     private readonly provisionDatabase: ProvisionDatabaseUseCase,
     private readonly deprovisionDatabase: DeprovisionDatabaseUseCase,
     private readonly getManagedDatabase: GetManagedDatabaseUseCase,
@@ -134,6 +136,12 @@ export class ProjectsController {
   @Get(":id/deploy-dry-run")
   deployDryRun(@Param("id") id: string, @Query("commit") commit?: string, @Query("branch") branch?: string) {
     return this.previewProjectDeploy.execute(id, { commit: commit ?? null, branch: branch ?? null });
+  }
+
+  /** HEAD da branch de deploy (somente leitura, sem Docker/build). */
+  @Get(":id/deploy-commit")
+  deployCommit(@Param("id") id: string) {
+    return this.resolveDeployCommit.execute(id);
   }
 
   @Get(":id/env")
