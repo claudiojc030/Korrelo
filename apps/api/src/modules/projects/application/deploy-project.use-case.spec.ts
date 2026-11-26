@@ -116,9 +116,12 @@ class FakeOrchestrator {
   async imageId(): Promise<string | null> {
     return SEQUENTIAL_IMAGE_ID;
   }
+  stagingImageId: string | null = SEQUENTIAL_IMAGE_ID;
+  productionImageId: string | null = SEQUENTIAL_IMAGE_ID;
+  containerImageCalls = 0;
   async containerImageId(containerName: string): Promise<string | null> {
-    // Staging e produção rodam a mesma imagem no caminho feliz.
-    return containerName.includes("staging") ? SEQUENTIAL_IMAGE_ID : SEQUENTIAL_IMAGE_ID;
+    this.containerImageCalls += 1;
+    return containerName.includes("staging") ? this.stagingImageId : this.productionImageId;
   }
   async pruneUnusedBuildArtifacts(): Promise<any> {
     this.buildPruneCalls += 1;
@@ -414,6 +417,9 @@ describe("DeployProjectUseCase (Wave 2)", () => {
     orchestrator.buildCalls = 0;
     orchestrator.startStagingCalls = 0;
     orchestrator.failRemoveStaging = false;
+    orchestrator.stagingImageId = SEQUENTIAL_IMAGE_ID;
+    orchestrator.productionImageId = SEQUENTIAL_IMAGE_ID;
+    orchestrator.containerImageCalls = 0;
     orchestrator.rollbackCalls = [];
     orchestrator.removeStagingCalls = 0;
     orchestrator.removeStagingConfigs = [];
@@ -1438,8 +1444,39 @@ describe("DeployProjectUseCase (Wave 2)", () => {
       expect(orchestrator.stagingCalls).toBe(0);
       expect(orchestrator.startStagingCalls).toBe(1);
       expect(orchestrator.promoteCalls).toBe(1);
+      expect(orchestrator.containerImageCalls).toBeGreaterThanOrEqual(2);
+      // staging health + production health: ID correto NÃO substitui health.
+      expect(healthChecker.ports).toHaveLength(2);
     } finally {
       delete process.env.KORRELO_SEQUENTIAL_BUILD;
+    }
+  });
+
+  it("flag sequencial: imagem errada na produção dispara rollback", async () => {
+    process.env.KORRELO_SEQUENTIAL_BUILD = "1";
+    orchestrator.productionImageId = `sha256:${"8".repeat(64)}`;
+    try {
+      await expect(useCase.executeJob(makeJob())).rejects.toThrow(/Promoção inconsistente/);
+
+      expect(orchestrator.promoteCalls).toBe(1);
+      expect(orchestrator.rollbackCalls).toHaveLength(1);
+      expect(projectRepository.project?.lastDeployStatus).toBe("rolled-back");
+    } finally {
+      delete process.env.KORRELO_SEQUENTIAL_BUILD;
+    }
+  });
+
+  it("flag sequencial: container sem imagem legível no prazo dispara rollback", async () => {
+    process.env.KORRELO_SEQUENTIAL_BUILD = "1";
+    process.env.KORRELO_PROMOTION_IMAGE_TIMEOUT_MS = "20";
+    orchestrator.productionImageId = null;
+    try {
+      await expect(useCase.executeJob(makeJob())).rejects.toThrow(/não foi possível confirmar/);
+
+      expect(orchestrator.rollbackCalls).toHaveLength(1);
+    } finally {
+      delete process.env.KORRELO_SEQUENTIAL_BUILD;
+      delete process.env.KORRELO_PROMOTION_IMAGE_TIMEOUT_MS;
     }
   });
 

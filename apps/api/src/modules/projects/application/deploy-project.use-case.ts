@@ -71,6 +71,7 @@ import {
 import type { HealthcheckConfig } from "../domain/container-orchestrator";
 import { StagingDeployIntegrationService } from "./staging-deploy-integration.service";
 import { SequentialDeployRunner, isSequentialBuildEnabled } from "./sequential-deploy.runner";
+import { verifyProductionImage } from "./post-promotion-image-verifier";
 
 const HEALTH_CHECK_TIMEOUT_MS = 30_000;
 
@@ -85,6 +86,12 @@ const HEALTH_CHECK_TIMEOUT_MS = 30_000;
  * continua com `HEALTH_CHECK_TIMEOUT_MS`.
  */
 const DEFAULT_STAGING_HEALTH_TIMEOUT_SECONDS = HEALTH_CHECK_TIMEOUT_MS / 1000;
+
+/** Limite (ms) para o container de produção estabilizar antes da conferência. */
+function promotionImageTimeoutMs(): number | undefined {
+  const parsed = Number.parseInt(process.env.KORRELO_PROMOTION_IMAGE_TIMEOUT_MS ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
 
 /** Erro de deploy com a informação de se a produção foi afetada. */
 /**
@@ -762,9 +769,15 @@ export class DeployProjectUseCase {
         // PIPELINE SEQUENCIAL: prova que a produção está executando a MESMA
         // imagem construída e validada. Tag sozinha não é prova. Divergência
         // dispara rollback imediato para a imagem anterior.
-        if (sequentialImageId && this.orchestrator.containerImageId) {
-          const productionImageId = await this.orchestrator.containerImageId(deployConfig.containerName);
-          if (!productionImageId || productionImageId !== sequentialImageId) {
+        if (sequentialImageId && deployConfig && this.orchestrator.containerImageId) {
+          const productionContainerName = deployConfig.containerName;
+          const verification = await verifyProductionImage({
+            expectedImageId: sequentialImageId,
+            inspect: () => this.orchestrator.containerImageId!(productionContainerName),
+            timeoutMs: promotionImageTimeoutMs(),
+            log: (message) => this.deployLogger.warn("promote", context, message),
+          });
+          if (verification.kind !== "correct") {
             await this.setStage(job, "rollback", context);
             const outcome = await this.rollbackIfPossible(
               await this.rollbackDeployConfig(deployConfig, context),
@@ -774,10 +787,14 @@ export class DeployProjectUseCase {
             rollbackAttempted = rollbackAttempted || outcome.attempted;
             rollbackSucceeded = outcome.restored && outcome.healthy;
             await this.deployJobRepository.save(job.withRollback(true, rollbackSucceeded));
+            const detail =
+              verification.kind === "incorrect"
+                ? `a produção executava ${verification.imageId.slice(0, 19)}…, diferente da imagem validada`
+                : `não foi possível confirmar a imagem da produção: ${verification.reason}`;
             throw new DeployFailure(
               rollbackSucceeded
-                ? "A produção subiu com uma imagem diferente da validada. Rollback executado: a versão anterior está no ar."
-                : "A produção subiu com uma imagem diferente da validada e o rollback não pôde ser confirmado. " +
+                ? `Promoção inconsistente: ${detail}. Rollback executado: a versão anterior está no ar.`
+                : `Promoção inconsistente: ${detail}. O rollback não pôde ser confirmado. ` +
                   "ESTADO INDETERMINADO: valide o serviço antes de outro deploy.",
               !rollbackSucceeded,
             );
