@@ -361,6 +361,148 @@ describe("DeployQueueService (fila global)", () => {
     expect(reloaded?.stage).toBe("waiting-resources");
   });
 
+  it("retry manual abre NOVA janela de recursos sem perder o histórico", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const preflight = new FakePreflight();
+    const deploy = new FakeDeployProject();
+    const queue = buildQueue(repo, preflight, deploy);
+    (queue as unknown as { kick: () => void }).kick = () => undefined;
+
+    const failed = new DeployJob(
+      "job-retry-window",
+      "proj-a",
+      "sha-fixo",
+      "main",
+      "manual",
+      "failed",
+      5,
+      "complete",
+      "Recursos insuficientes",
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(Date.now() - 60_000),
+      new Date(Date.now() - 50_000),
+      new Date(Date.now() - 40_000),
+    );
+    await repo.save(failed);
+
+    let clock = Date.now();
+    const spy = jest.spyOn(Date, "now").mockImplementation(() => clock);
+    preflight.ok = false;
+    preflight.reason = "sem memória";
+
+    const retried = await queue.retry(failed.id);
+    expect(retried?.created).toBe(true);
+    expect(retried?.job.status).toBe("queued");
+    expect(retried?.job.attempt).toBe(6);
+    expect(retried?.job.commitSha).toBe("sha-fixo");
+
+    // Primeira avaliação da nova janela NÃO pode falhar de imediato.
+    await queue.processNextJob();
+    let current = await repo.findById(failed.id);
+    expect(current?.status).toBe("queued");
+    expect(current?.stage).toBe("waiting-resources");
+
+    // Consome o restante da janela (5 tentativas no total).
+    for (let index = 1; index < 5; index += 1) {
+      clock += 20 * 60_000;
+      await queue.processNextJob();
+      current = await repo.findById(failed.id);
+      if (index < 4) expect(current?.status).toBe("queued");
+    }
+    expect(current?.status).toBe("failed");
+    expect(current?.errorMessage).toContain("Recursos insuficientes");
+    expect(current?.commitSha).toBe("sha-fixo");
+    expect(current?.attempt).toBeGreaterThanOrEqual(6);
+
+    spy.mockRestore();
+  });
+
+  it("retry concorrente não duplica requeue nem perde o commit", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const queue = buildQueue(repo, new FakePreflight(), new FakeDeployProject());
+    (queue as unknown as { kick: () => void }).kick = () => undefined;
+    const failed = new DeployJob(
+      "job-retry-race",
+      "proj-a",
+      "sha-race",
+      "main",
+      "manual",
+      "failed",
+      5,
+      "complete",
+      "Recursos insuficientes",
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(),
+      new Date(),
+      new Date(),
+    );
+    await repo.save(failed);
+
+    const results = await Promise.all([queue.retry(failed.id), queue.retry(failed.id)]);
+
+    expect(results.filter((result) => result?.created === true)).toHaveLength(1);
+    const current = await repo.findById(failed.id);
+    expect(current?.status).toBe("queued");
+    expect(current?.attempt).toBe(6);
+    expect(current?.commitSha).toBe("sha-race");
+  });
+
+  it("restart do worker inicia nova janela de recursos para job antigo", async () => {
+    const repo = new InMemoryDeployJobRepository();
+    const failed = new DeployJob(
+      "job-restart-window",
+      "proj-a",
+      "sha-restart",
+      "main",
+      "manual",
+      "failed",
+      5,
+      "complete",
+      "Recursos insuficientes",
+      "",
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      new Date(),
+      new Date(),
+      new Date(),
+    );
+    await repo.save(failed);
+
+    const preflight = new FakePreflight();
+    preflight.ok = false;
+    preflight.reason = "sem memória";
+    const queue = buildQueue(repo, preflight, new FakeDeployProject());
+    (queue as unknown as { kick: () => void }).kick = () => undefined;
+
+    const retried = await queue.retry(failed.id);
+    expect(retried?.created).toBe(true);
+    await queue.processNextJob();
+
+    const current = await repo.findById(failed.id);
+    expect(current?.status).toBe("queued");
+    expect(current?.stage).toBe("waiting-resources");
+    expect(current?.commitSha).toBe("sha-restart");
+  });
+
   it("startup NÃO dispara deploy: jobs enfileirados antes do processo ficam pausados", async () => {
     const repo = new InMemoryDeployJobRepository();
     const deploy = new FakeDeployProject();

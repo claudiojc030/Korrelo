@@ -156,6 +156,14 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
   private readonly pausedJobIds = new Set<string>();
   /** Job esperando por recursos: quando pode tentar de novo. */
   private readonly resourceWaitUntil = new Map<string, number>();
+  /**
+   * Tentativas de RECURSOS da janela atual, separadas do `attempt` total do
+   * job. Um retry manual limpa esta entrada e abre uma nova janela limitada;
+   * o histórico total (`attempt`) permanece no job.
+   */
+  private readonly resourceAttempts = new Map<string, number>();
+  /** Serializa retries concorrentes do mesmo job. */
+  private readonly retryingJobIds = new Set<string>();
 
   /** Arquivo de drain (o estado de pausa sobrevive a um restart da API). */
   private readonly drainFilePath =
@@ -401,6 +409,8 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
         }
         // Retry controlado: o mesmo commit volta pra fila.
         const requeued = existing.requeued();
+        this.resourceAttempts.delete(existing.id);
+        this.resourceWaitUntil.delete(existing.id);
         this.logger.log(`[deploy] job ${existing.id} reativado (tentativa ${existing.attempt + 1})`);
         const saved = await this.jobRepository.save(requeued);
         this.kick();
@@ -425,13 +435,25 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
 
   /** Reexecuta um job interrompido/falho (retry controlado pela UI). */
   async retry(jobId: string): Promise<EnqueueResult | null> {
-    const job = await this.jobRepository.findById(jobId);
-    if (!job) return null;
-    if (job.isOpen) return { job, created: false };
+    if (this.retryingJobIds.has(jobId)) {
+      const current = await this.jobRepository.findById(jobId);
+      return current ? { job: current, created: false } : null;
+    }
+    this.retryingJobIds.add(jobId);
+    try {
+      const job = await this.jobRepository.findById(jobId);
+      if (!job) return null;
+      if (job.isOpen) return { job, created: false };
 
-    const requeued = await this.jobRepository.save(job.requeued());
-    this.kick();
-    return { job: requeued, created: true };
+      const requeued = await this.jobRepository.save(job.requeued());
+      // NOVA janela de recursos; o `attempt` total continua no histórico.
+      this.resourceAttempts.delete(jobId);
+      this.resourceWaitUntil.delete(jobId);
+      this.kick();
+      return { job: requeued, created: true };
+    } finally {
+      this.retryingJobIds.delete(jobId);
+    }
   }
 
   async getStats(): Promise<DeployQueueStats> {
@@ -549,6 +571,8 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
     const job = await this.jobRepository.findById(jobId);
     if (!job) return null;
     this.pausedJobIds.delete(jobId);
+    this.resourceAttempts.delete(jobId);
+    this.resourceWaitUntil.delete(jobId);
     if (job.status === "queued") {
       this.kick();
     }
@@ -707,22 +731,32 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
     this.lastPreflight = { ...(preflight.metrics as unknown as Record<string, unknown>) };
 
     if (!preflight.ok) {
-      const attempt = job.attempt + 1;
-      if (attempt >= MAX_RESOURCE_ATTEMPTS) {
+      const windowAttempt = (this.resourceAttempts.get(job.id) ?? 0) + 1;
+      if (windowAttempt >= MAX_RESOURCE_ATTEMPTS) {
         this.logger.error(
-          `[deploy] job ${job.id} (projeto ${job.projectId}) falhou por falta de recursos após ${attempt} tentativas: ${preflight.reason}`,
+          `[deploy] job ${job.id} (projeto ${job.projectId}) falhou por falta de recursos após ${windowAttempt} tentativas da janela atual: ${preflight.reason}`,
         );
-        await this.jobRepository.save(job.withAttempt(attempt).withError(`Recursos insuficientes: ${preflight.reason}`));
+        await this.jobRepository.save(
+          job
+            .withAttempt(job.attempt + 1)
+            .withError(`Recursos insuficientes: ${preflight.reason}`),
+        );
+        this.resourceAttempts.delete(job.id);
         this.resourceWaitUntil.delete(job.id);
         return;
       }
-      const backoffMs = RESOURCE_BACKOFF_BASE_MS * attempt;
+      const backoffMs = RESOURCE_BACKOFF_BASE_MS * windowAttempt;
+      this.resourceAttempts.set(job.id, windowAttempt);
       this.resourceWaitUntil.set(job.id, Date.now() + backoffMs);
       this.logger.warn(
-        `[deploy] job ${job.id} (projeto ${job.projectId}) aguardando recursos: ${preflight.reason} (nova tentativa em ${Math.round(backoffMs / 1000)}s)`,
+        `[deploy] job ${job.id} (projeto ${job.projectId}) aguardando recursos: ${preflight.reason} ` +
+          `(tentativa ${windowAttempt}/${MAX_RESOURCE_ATTEMPTS}, nova tentativa em ${Math.round(backoffMs / 1000)}s)`,
       );
       await this.jobRepository.save(
-        job.withAttempt(attempt).withStage("waiting-resources").withError(preflight.reason ?? "sem recursos", "queued"),
+        job
+          .withAttempt(job.attempt + 1)
+          .withStage("waiting-resources")
+          .withError(preflight.reason ?? "sem recursos", "queued"),
       );
       return;
     }
@@ -742,6 +776,7 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
       .withStartedAt(startedAt);
     await this.jobRepository.save(running);
     this.resourceWaitUntil.delete(job.id);
+    this.resourceAttempts.delete(job.id);
 
     this.logger.log(
       `[deploy] job ${running.id} iniciado (projeto ${running.projectId}, commit ${running.commitSha ?? "?"})`,
@@ -759,6 +794,7 @@ export class DeployQueueService implements OnModuleInit, OnApplicationShutdown {
       this.logger.error(`[deploy] job ${running.id} falhou: ${message}`);
       const current = (await this.jobRepository.findById(running.id)) ?? running;
       this.lastDeployDurationMs = Date.now() - startedAt.getTime();
+      this.resourceAttempts.delete(running.id);
       await this.jobRepository.save(
         current.withError(message).withDurations(current.buildDurationMs, this.lastDeployDurationMs),
       );
